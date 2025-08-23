@@ -6,7 +6,7 @@ use crate::{
     cli::{self, Commands, PrintStack},
     parse_args,
     pretty_printer::pretty_print_json_object_to_stdout,
-    Command, CommandIo, TpmDevice, TpmError,
+    Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use std::io;
 
@@ -15,6 +15,10 @@ const USAGE: &str = "tpm2sh print-stack";
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PrintStack {
+    fn command_type(&self) -> CommandType {
+        CommandType::Sink
+    }
+
     fn help() {
         println!(
             "{}",
@@ -46,7 +50,7 @@ impl Command for PrintStack {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let mut io = CommandIo::new(io::stdout(), log_format)?;
-        let objects = io.consume_all_objects();
+        let objects = io.consume_all_objects()?;
 
         if objects.is_empty() {
             return Err(TpmError::Usage(
@@ -55,9 +59,7 @@ impl Command for PrintStack {
         }
 
         for obj in objects.iter().rev() {
-            let cli::Object::TpmObject(json_str) = obj;
-            let envelope = json::parse(json_str)?;
-
+            let envelope = obj.to_json();
             pretty_print_json_object_to_stdout(&envelope, 0);
         }
 

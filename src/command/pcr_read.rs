@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Object, PcrRead},
     get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, Command, CommandIo,
-    Envelope, TpmDevice, TpmError,
+    CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::message::TpmPcrReadCommand;
@@ -17,6 +17,10 @@ const ARGS: &[CommandLineArgument] = &[("SELECTION", "e.g. 'sha256:0,1,2+sha1:0'
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PcrRead {
+    fn command_type(&self) -> CommandType {
+        CommandType::Source
+    }
+
     fn help() {
         println!(
             "{}",
@@ -65,13 +69,8 @@ impl Command for PcrRead {
             .PcrRead()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
         let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
-        let envelope = Envelope {
-            object_type: "pcr-values".to_string(),
-            data: pcr_output.to_json(),
-        };
-        let new_object = Object::TpmObject(envelope.to_json().dump());
 
-        io.push_object(new_object);
+        io.push_object(Object::PcrValues(pcr_output));
         io.finalize()
     }
 }

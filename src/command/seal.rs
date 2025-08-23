@@ -7,7 +7,7 @@ use crate::{
     cli::{self, Commands, Object, Seal},
     get_auth_sessions, input_to_bytes, parse_args,
     util::{build_to_vec, consume_and_get_parent_handle},
-    Command, CommandIo, Envelope, ObjectData, TpmDevice, TpmError, ID_SEALED_DATA,
+    Command, CommandIo, CommandType, ObjectData, TpmDevice, TpmError, ID_SEALED_DATA,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -41,6 +41,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Seal {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -80,8 +84,10 @@ impl Command for Seal {
         let (parent_handle, needs_flush) =
             consume_and_get_parent_handle(&mut io, chip, log_format)?;
         let result = (|| {
-            let data_to_seal_obj = io.consume_object(|_| true)?;
-            let Object::TpmObject(data_str) = data_to_seal_obj;
+            let data_to_seal_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
+            let Object::KeyData(data_str) = data_to_seal_obj else {
+                unreachable!()
+            };
             let data_to_seal = input_to_bytes(&data_str)?;
 
             let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
@@ -143,14 +149,7 @@ impl Command for Seal {
                 public: base64_engine.encode(pub_bytes),
                 private: base64_engine.encode(priv_bytes),
             };
-            let new_object = Object::TpmObject(
-                Envelope {
-                    object_type: "object".to_string(),
-                    data: data.to_json(),
-                }
-                .to_json()
-                .dump(),
-            );
+            let new_object = Object::Key(data);
             io.push_object(new_object);
             io.finalize()
         })();

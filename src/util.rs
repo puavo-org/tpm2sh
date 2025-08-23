@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, CommandIo, TpmDevice, TpmError};
+use crate::{cli, CommandIo, ObjectData, TpmDevice, TpmError};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use json::JsonValue;
 use log::warn;
@@ -59,158 +59,6 @@ pub(crate) fn parse_persistent_handle(s: &str) -> Result<TpmPersistent, TpmError
 pub(crate) fn parse_tpm_rc(s: &str) -> Result<TpmRc, TpmError> {
     let raw_rc: u32 = parse_hex_u32(s)?;
     Ok(TpmRc::try_from(raw_rc)?)
-}
-
-#[derive(Debug)]
-pub struct Envelope {
-    pub object_type: String,
-    pub data: json::JsonValue,
-}
-
-impl Envelope {
-    #[must_use]
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            "type": self.object_type.clone(),
-            data: self.data.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SessionData {
-    pub handle: u32,
-    pub nonce_tpm: String,
-    pub attributes: u8,
-    pub hmac_key: String,
-    pub auth_hash: u16,
-    pub policy_digest: String,
-}
-
-impl SessionData {
-    #[must_use]
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            handle: self.handle,
-            nonce_tpm: self.nonce_tpm.clone(),
-            attributes: self.attributes,
-            hmac_key: self.hmac_key.clone(),
-            auth_hash: self.auth_hash,
-            policy_digest: self.policy_digest.clone(),
-        }
-    }
-
-    /// Deserializes `SessionData` from a `json::JsonValue`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError::Parse` if the JSON object is missing required fields
-    /// or contains values of the wrong type.
-    pub fn from_json(value: &json::JsonValue) -> Result<Self, TpmError> {
-        Ok(Self {
-            handle: value["handle"]
-                .as_u32()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'handle'".to_string()))?,
-            nonce_tpm: value["nonce_tpm"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'nonce_tpm'".to_string()))?
-                .to_string(),
-            attributes: value["attributes"]
-                .as_u8()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'attributes'".to_string()))?,
-            hmac_key: value["hmac_key"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'hmac_key'".to_string()))?
-                .to_string(),
-            auth_hash: value["auth_hash"]
-                .as_u16()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'auth_hash'".to_string()))?,
-            policy_digest: value["policy_digest"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'policy_digest'".to_string()))?
-                .to_string(),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct ObjectData {
-    pub oid: String,
-    pub empty_auth: bool,
-    pub parent: String,
-    pub public: String,
-    pub private: String,
-}
-
-impl ObjectData {
-    #[must_use]
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            oid: self.oid.clone(),
-            empty_auth: self.empty_auth,
-            parent: self.parent.clone(),
-            public: self.public.clone(),
-            private: self.private.clone(),
-        }
-    }
-
-    /// Deserializes `ObjectData` from a `json::JsonValue`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError::Parse` if the JSON object is missing required fields
-    /// or contains values of the wrong type.
-    pub fn from_json(value: &json::JsonValue) -> Result<Self, TpmError> {
-        Ok(Self {
-            oid: value["oid"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'oid'".to_string()))?
-                .to_string(),
-            empty_auth: value["empty_auth"]
-                .as_bool()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'empty_auth'".to_string()))?,
-            parent: value["parent"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'parent'".to_string()))?
-                .to_string(),
-            public: value["public"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'public'".to_string()))?
-                .to_string(),
-            private: value["private"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'private'".to_string()))?
-                .to_string(),
-        })
-    }
-}
-
-#[derive(Debug)]
-pub struct ContextData {
-    pub context_blob: String,
-}
-
-impl ContextData {
-    #[must_use]
-    pub fn to_json(&self) -> json::JsonValue {
-        json::object! {
-            context_blob: self.context_blob.clone()
-        }
-    }
-
-    /// Deserializes `ContextData` from a `json::JsonValue`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError::Parse` if the JSON object is missing required fields.
-    pub fn from_json(value: &json::JsonValue) -> Result<Self, TpmError> {
-        Ok(Self {
-            context_blob: value["context_blob"]
-                .as_str()
-                .ok_or_else(|| TpmError::Parse("missing or invalid 'context_blob'".to_string()))?
-                .to_string(),
-        })
-    }
 }
 
 /// Deserializes an `Envelope`-wrapped JSON object from a string.
@@ -274,16 +122,12 @@ where
 /// Returns a `TpmError` if the stack is empty, the object is not a context,
 /// or the data cannot be parsed.
 pub fn pop_object_data<W: Write>(io: &mut CommandIo<W>) -> Result<ObjectData, TpmError> {
-    let obj = io.consume_object(|obj| {
-        let cli::Object::TpmObject(s) = obj;
-        if let Ok(val) = json::parse(s) {
-            return val["type"] == "object";
-        }
-        false
-    })?;
-    let cli::Object::TpmObject(s) = obj;
-    let data = &from_json_str(&s, "object")?;
-    ObjectData::from_json(data)
+    let obj = io.consume_object(|obj| matches!(obj, cli::Object::Key(_)))?;
+    if let cli::Object::Key(data) = obj {
+        Ok(data)
+    } else {
+        unreachable!();
+    }
 }
 
 /// Parses a parent handle from a hex string in the loaded object data.
@@ -349,33 +193,27 @@ pub fn object_to_handle(
     obj: &cli::Object,
     log_format: cli::LogFormat,
 ) -> Result<(TpmTransient, bool), TpmError> {
-    let cli::Object::TpmObject(obj_str) = obj;
-
-    if let Ok(handle) = parse_hex_u32(obj_str) {
-        if handle >= data::TpmRh::PersistentFirst as u32
-            || handle >= data::TpmRh::TransientFirst as u32
-        {
-            return Ok((TpmTransient(handle), false));
-        }
-    }
-
-    if let Ok(json_val) = from_json_str(obj_str, "context") {
-        let context_data = ContextData::from_json(&json_val)?;
-        let context_blob = base64_engine.decode(context_data.context_blob)?;
-        let (context, remainder) = data::TpmsContext::parse(&context_blob)?;
-        if remainder.is_empty() {
+    match obj {
+        cli::Object::Handle(handle) => Ok((TpmTransient(*handle), false)),
+        cli::Object::Context(context_data) => {
+            let context_blob = base64_engine.decode(context_data.context_blob.clone())?;
+            let (context, remainder) = data::TpmsContext::parse(&context_blob)?;
+            if !remainder.is_empty() {
+                return Err(TpmError::Parse(
+                    "Context object contains trailing data".to_string(),
+                ));
+            }
             let load_cmd = TpmContextLoadCommand { context };
             let (resp, _) = chip.execute(&load_cmd, &[], log_format)?;
             let load_resp = resp
                 .ContextLoad()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-            return Ok((load_resp.loaded_handle, true));
+            Ok((load_resp.loaded_handle, true))
         }
+        _ => Err(TpmError::Parse(
+            "pipeline object is not a valid handle or context".to_string(),
+        )),
     }
-
-    Err(TpmError::Parse(
-        "pipeline object is not a valid handle or context".to_string(),
-    ))
 }
 
 /// A helper to build a `TpmBuild` type into a `Vec<u8>`.
@@ -391,7 +229,7 @@ pub(crate) fn build_to_vec<T: TpmBuild>(obj: &T) -> Result<Vec<u8>, TpmError> {
 
 /// Helper to consume the parent object from the pipeline and return its handle.
 ///
-/// It looks for a `Handle` or `Persistent` object in the input stream,
+/// It looks for a `Handle` or `Context` object in the input stream,
 /// loads it if necessary, and returns the transient handle and a flag indicating
 /// whether it needs to be flushed.
 ///
@@ -403,12 +241,7 @@ pub fn consume_and_get_parent_handle<W: Write>(
     chip: &mut TpmDevice,
     log_format: cli::LogFormat,
 ) -> Result<(TpmTransient, bool), TpmError> {
-    let parent_obj = io.consume_object(|obj| {
-        let cli::Object::TpmObject(s) = obj;
-        if let Ok(val) = json::parse(s) {
-            return val["type"] != "session";
-        }
-        true
-    })?;
+    let parent_obj =
+        io.consume_object(|obj| matches!(obj, cli::Object::Handle(_) | cli::Object::Context(_)))?;
     object_to_handle(chip, &parent_obj, log_format)
 }

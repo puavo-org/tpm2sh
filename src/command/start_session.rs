@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{self, Commands, Object, StartSession},
-    parse_args, Command, Envelope, SessionData, TpmDevice, TpmError,
+    parse_args, Command, CommandType, SessionData, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -34,6 +34,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for StartSession {
+    fn command_type(&self) -> CommandType {
+        CommandType::Source
+    }
+
     fn help() {
         println!(
             "{}",
@@ -96,11 +100,7 @@ impl Command for StartSession {
             auth_hash: cmd.auth_hash as u16,
             policy_digest: hex::encode(vec![0; digest_len]),
         };
-        let envelope = Envelope {
-            object_type: "session".to_string(),
-            data: data.to_json(),
-        };
-        let pipe_obj = Object::TpmObject(envelope.to_json().dump());
+        let pipe_obj = Object::Session(data);
 
         let output_doc = json::object! {
             version: 1,

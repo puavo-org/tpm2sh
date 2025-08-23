@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{self, Commands, ResetLock},
-    get_auth_sessions, parse_args, Command, CommandIo, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
@@ -18,6 +18,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for ResetLock {
+    fn command_type(&self) -> CommandType {
+        CommandType::Sink
+    }
+
     fn help() {
         println!(
             "{}",

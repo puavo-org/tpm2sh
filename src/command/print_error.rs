@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, PrintError},
-    parse_args, parse_tpm_rc, Command, TpmDevice, TpmError,
+    parse_args, parse_tpm_rc, Command, CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 
@@ -15,6 +15,10 @@ const ARGS: &[CommandLineArgument] = &[("<RC>", "TPM error code")];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PrintError {
+    fn command_type(&self) -> CommandType {
+        CommandType::Standalone
+    }
+
     fn help() {
         println!(
             "{}",

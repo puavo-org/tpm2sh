@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{self, Commands, Unseal},
     get_auth_sessions, parse_args, parse_parent_handle_from_json, pop_object_data,
-    with_loaded_object, Command, CommandIo, TpmDevice, TpmError,
+    with_loaded_object, Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -25,6 +25,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Unseal {
+    fn command_type(&self) -> CommandType {
+        CommandType::Sink
+    }
+
     fn help() {
         println!(
             "{}",
@@ -101,6 +105,6 @@ impl Command for Unseal {
         )?;
         io::stdout().write_all(&output)?;
 
-        io.finalize()
+        Ok(())
     }
 }

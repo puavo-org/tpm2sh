@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Object, Save},
     get_auth_sessions, parse_args, parse_hex_u32, parse_persistent_handle, Command, CommandIo,
-    TpmDevice, TpmError,
+    CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand};
@@ -23,6 +23,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Save {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -74,9 +78,12 @@ impl Command for Save {
         let mut io = CommandIo::new(std::io::stdout(), log_format)?;
         let session = io.take_session()?;
         let object_handle = if self.from == "-" {
-            let obj = io.consume_object(|_| true)?;
-            let Object::TpmObject(hex_string) = obj;
-            parse_hex_u32(&hex_string)?
+            let obj = io.consume_object(|obj| matches!(obj, Object::Handle(_)))?;
+            if let Object::Handle(h) = obj {
+                h
+            } else {
+                unreachable!()
+            }
         } else {
             parse_hex_u32(&self.from)?
         };
@@ -98,7 +105,7 @@ impl Command for Save {
         let (resp, _) = chip.execute(&evict_cmd, &sessions, log_format)?;
         resp.EvictControl()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-        let obj = Object::TpmObject(format!("{persistent_handle:#010x}"));
+        let obj = Object::Handle(persistent_handle.into());
         io.push_object(obj);
         io.finalize()
     }

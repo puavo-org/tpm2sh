@@ -7,7 +7,8 @@ use crate::{
     cli::{self, Commands, Import, Object},
     create_import_blob, get_auth_sessions, parse_args, read_public,
     util::{build_to_vec, consume_and_get_parent_handle},
-    Command, CommandIo, Envelope, ObjectData, PrivateKey, TpmDevice, TpmError, ID_IMPORTABLE_KEY,
+    Command, CommandIo, CommandType, ObjectData, PrivateKey, TpmDevice, TpmError,
+    ID_IMPORTABLE_KEY,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -29,6 +30,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Import {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -70,23 +75,22 @@ impl Command for Import {
             let (parent_public, parent_name) = read_public(chip, parent_handle, log_format)?;
             let parent_name_alg = parent_public.name_alg;
 
-            let private_key_obj = io.consume_object(|obj| {
-                let cli::Object::TpmObject(s) = obj;
-                !s.starts_with("0x")
-            })?;
-            let cli::Object::TpmObject(private_key_path) = private_key_obj;
+            let private_key_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
+            let Object::KeyData(private_key_path) = private_key_obj else {
+                unreachable!()
+            };
 
-            let private_key = PrivateKey::from_pem_file(private_key_path.as_ref())?;
+            let private_key = PrivateKey::from_pem_file(private_key_path.trim().as_ref())?;
             let public = private_key.to_tpmt_public(parent_name_alg)?;
             let public_bytes = Tpm2bPublic {
                 inner: public.clone(),
             };
-            let private_bytes = private_key.get_private_blob()?;
+            let private_bytes = private_key.get_sensitive_blob()?;
 
             let (duplicate, in_sym_seed, encryption_key) = create_import_blob(
                 &parent_public,
                 public.object_type,
-                private_bytes,
+                &private_bytes,
                 &parent_name,
             )?;
 
@@ -123,14 +127,7 @@ impl Command for Import {
                 private: base64_engine.encode(priv_key_bytes),
             };
 
-            let new_object = Object::TpmObject(
-                Envelope {
-                    object_type: "object".to_string(),
-                    data: data.to_json(),
-                }
-                .to_json()
-                .dump(),
-            );
+            let new_object = Object::Key(data);
             io.push_object(new_object);
             io.finalize()
         })();
@@ -141,8 +138,8 @@ impl Command for Import {
             };
             if let Err(flush_err) = chip.execute(&flush_cmd, &[], log_format) {
                 warn!(
-					"Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
-				);
+                    "Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
+                );
                 if result.is_ok() {
                     return Err(flush_err);
                 }

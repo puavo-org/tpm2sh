@@ -4,8 +4,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Convert, KeyFormat},
-    from_json_str, parse_args, Command, Envelope, ObjectData, TpmDevice, TpmError, TpmKey,
+    cli::{self, Commands, Convert, KeyFormat, Object},
+    parse_args, Command, CommandIo, CommandType, ObjectData, TpmDevice, TpmError, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -32,10 +32,8 @@ const OPTIONS: &[CommandLineOption] = &[
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
-/// Parses a JSON string into an intermediate `TpmKey` representation.
-fn json_to_tpm_key(json_str: &str) -> Result<TpmKey, TpmError> {
-    let json_value = from_json_str(json_str, "object")?;
-    let data = ObjectData::from_json(&json_value)?;
+/// Parses a JSON object into an intermediate `TpmKey` representation.
+fn json_to_tpm_key(data: &ObjectData) -> Result<TpmKey, TpmError> {
     Ok(TpmKey {
         oid: data
             .oid
@@ -45,15 +43,15 @@ fn json_to_tpm_key(json_str: &str) -> Result<TpmKey, TpmError> {
                     .map_err(|_| TpmError::Parse("invalid OID arc".to_string()))
             })
             .collect::<Result<_, _>>()?,
-        parent: data.parent,
-        pub_key: base64_engine.decode(data.public)?,
-        priv_key: base64_engine.decode(data.private)?,
+        parent: data.parent.clone(),
+        pub_key: base64_engine.decode(&data.public)?,
+        priv_key: base64_engine.decode(&data.private)?,
     })
 }
 
-/// Converts an intermediate `TpmKey` into a final enveloped JSON string.
-fn tpm_key_to_json_string(key: TpmKey) -> String {
-    let data = ObjectData {
+/// Converts an intermediate `TpmKey` into a final `ObjectData` struct.
+fn tpm_key_to_object_data(key: TpmKey) -> ObjectData {
+    ObjectData {
         oid: key
             .oid
             .iter()
@@ -64,12 +62,7 @@ fn tpm_key_to_json_string(key: TpmKey) -> String {
         parent: key.parent,
         public: base64_engine.encode(key.pub_key),
         private: base64_engine.encode(key.priv_key),
-    };
-    let envelope = Envelope {
-        object_type: "object".to_string(),
-        data: data.to_json(),
-    };
-    envelope.to_json().dump()
+    }
 }
 
 fn read_all(path: Option<&str>) -> Result<Vec<u8>, TpmError> {
@@ -90,6 +83,10 @@ fn read_all(path: Option<&str>) -> Result<Vec<u8>, TpmError> {
 }
 
 impl Command for Convert {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -125,39 +122,31 @@ impl Command for Convert {
     fn run(
         &self,
         _device: &mut Option<TpmDevice>,
-        _log_format: cli::LogFormat,
+        log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
-        let input = read_all(None)?;
-        match (self.from, self.to) {
-            (KeyFormat::Json, KeyFormat::Pem) => {
-                let json_str =
-                    String::from_utf8(input).map_err(|e| TpmError::Parse(e.to_string()))?;
-                let key = json_to_tpm_key(&json_str)?;
-                println!("{}", key.to_pem()?);
+        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+
+        let input_key = match self.from {
+            KeyFormat::Json => {
+                let obj = io.consume_object(|obj| matches!(obj, Object::Key(_)))?;
+                let Object::Key(data) = obj else {
+                    unreachable!();
+                };
+                json_to_tpm_key(&data)?
             }
-            (KeyFormat::Json, KeyFormat::Der) => {
-                let json_str =
-                    String::from_utf8(input).map_err(|e| TpmError::Parse(e.to_string()))?;
-                let key = json_to_tpm_key(&json_str)?;
-                io::stdout().write_all(&key.to_der()?)?;
+            KeyFormat::Pem => TpmKey::from_pem(&read_all(None)?)?,
+            KeyFormat::Der => TpmKey::from_der(&read_all(None)?)?,
+        };
+
+        match self.to {
+            KeyFormat::Json => {
+                let data = tpm_key_to_object_data(input_key);
+                io.push_object(Object::Key(data));
             }
-            (KeyFormat::Pem, KeyFormat::Json) => {
-                let key = TpmKey::from_pem(&input)?;
-                println!("{}", tpm_key_to_json_string(key));
-            }
-            (KeyFormat::Der, KeyFormat::Json) => {
-                let key = TpmKey::from_der(&input)?;
-                println!("{}", tpm_key_to_json_string(key));
-            }
-            (from, to) if from == to => {
-                io::stdout().write_all(&input)?;
-            }
-            _ => {
-                return Err(TpmError::Usage(
-                    "Unsupported conversion direction".to_string(),
-                ));
-            }
+            KeyFormat::Pem => println!("{}", input_key.to_pem()?),
+            KeyFormat::Der => std::io::stdout().write_all(&input_key.to_der()?)?,
         }
-        Ok(())
+
+        io.finalize()
     }
 }

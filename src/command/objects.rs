@@ -3,8 +3,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Objects},
-    parse_args, Command, CommandIo, TpmDevice, TpmError,
+    cli::{self, Commands, Object, Objects},
+    parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use tpm2_protocol::data::TpmRh;
 
@@ -13,6 +13,10 @@ const USAGE: &str = "tpm2sh objects";
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Objects {
+    fn command_type(&self) -> CommandType {
+        CommandType::Source
+    }
+
     fn help() {
         println!(
             "{}",
@@ -44,14 +48,12 @@ impl Command for Objects {
 
         let transient_handles = cli::get_handles(device, TpmRh::TransientFirst, log_format)?;
         for handle in transient_handles {
-            let obj = cli::Object::TpmObject(format!("{handle:#010x}"));
-            io.push_object(obj);
+            io.push_object(Object::Handle(handle));
         }
 
         let persistent_handles = cli::get_handles(device, TpmRh::PersistentFirst, log_format)?;
         for handle in persistent_handles {
-            let obj = cli::Object::TpmObject(format!("{handle:#010x}"));
-            io.push_object(obj);
+            io.push_object(Object::Handle(handle));
         }
 
         io.finalize()

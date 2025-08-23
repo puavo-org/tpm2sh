@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, PcrEvent},
-    get_auth_sessions, input_to_bytes, parse_args, parse_hex_u32, Command, CommandIo, TpmDevice,
-    TpmError,
+    get_auth_sessions, input_to_bytes, parse_args, parse_hex_u32, Command, CommandIo, CommandType,
+    TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::Write;
@@ -27,6 +27,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for PcrEvent {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",

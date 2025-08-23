@@ -7,7 +7,7 @@ use crate::{
     cli::{self, Commands, Load},
     get_auth_sessions, parse_args,
     util::{consume_and_get_parent_handle, pop_object_data},
-    Command, CommandIo, TpmDevice, TpmError,
+    Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -32,6 +32,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Load {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -99,7 +103,7 @@ impl Command for Load {
                 .Load()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-            let new_object = cli::Object::TpmObject(format!("{:#010x}", load_resp.object_handle));
+            let new_object = cli::Object::Handle(load_resp.object_handle.into());
             io.push_object(new_object);
 
             io.finalize()

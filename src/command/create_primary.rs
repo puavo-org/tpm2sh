@@ -7,7 +7,7 @@ use crate::{
     cli::{self, Commands, CreatePrimary, Object},
     get_auth_sessions, parse_args, parse_persistent_handle,
     util::{build_to_vec, with_transient_handle},
-    Alg, AlgInfo, Command, ContextData, Envelope, TpmDevice, TpmError,
+    Alg, AlgInfo, Command, CommandIo, CommandType, ContextData, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -109,17 +109,16 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
     }
 }
 
-/// Saves a transient key's context to a JSON string.
+/// Saves a transient key's context.
 ///
 /// # Errors
 ///
-/// Returns a `TpmError` if the context cannot be saved or the file cannot be
-/// written.
+/// Returns a `TpmError` if the context cannot be saved.
 pub fn save_key_context(
     chip: &mut TpmDevice,
     handle: TpmTransient,
     log_format: cli::LogFormat,
-) -> Result<json::JsonValue, TpmError> {
+) -> Result<ContextData, TpmError> {
     let save_command = TpmContextSaveCommand {
         save_handle: handle,
     };
@@ -130,17 +129,16 @@ pub fn save_key_context(
         .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
     let context_bytes = build_to_vec(&save_resp.context)?;
 
-    let data = ContextData {
+    Ok(ContextData {
         context_blob: base64_engine.encode(context_bytes),
-    };
-    let envelope = Envelope {
-        object_type: "context".to_string(),
-        data: data.to_json(),
-    };
-    Ok(envelope.to_json())
+    })
 }
 
 impl Command for CreatePrimary {
+    fn command_type(&self) -> CommandType {
+        CommandType::Source
+    }
+
     fn help() {
         println!(
             "{}",
@@ -189,7 +187,7 @@ impl Command for CreatePrimary {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
-        let mut io = crate::command_io::CommandIo::new(std::io::stdout(), log_format)?;
+        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
         let session = io.take_session()?;
 
         let primary_handle: TpmRh = self.hierarchy.into();
@@ -236,21 +234,17 @@ impl Command for CreatePrimary {
             resp.EvictControl()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-            Object::TpmObject(format!("{persistent_handle:#010x}"))
+            Object::Handle(persistent_handle.into())
         } else {
-            let mut final_json = json::JsonValue::Null;
+            let mut final_context = None;
             with_transient_handle(chip, object_handle, log_format, |chip_inner| {
-                final_json = save_key_context(chip_inner, object_handle, log_format)?;
+                final_context = Some(save_key_context(chip_inner, object_handle, log_format)?);
                 Ok(())
             })?;
-            Object::TpmObject(final_json.dump())
+            Object::Context(final_context.unwrap())
         };
 
-        let output_doc = json::object! {
-            version: 1,
-            objects: [final_object.to_json()]
-        };
-        println!("{}", output_doc.dump());
-        Ok(())
+        io.push_object(final_object);
+        io.finalize()
     }
 }

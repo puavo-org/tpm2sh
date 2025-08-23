@@ -28,10 +28,13 @@ use pkcs8::{
         asn1::{AnyRef, OctetString},
         Decode, DecodeValue, Encode, EncodeValue, Reader, Sequence, Writer,
     },
-    DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+    ObjectIdentifier, PrivateKeyInfo,
 };
 use rand::{thread_rng, RngCore};
-use rsa::{traits::PublicKeyParts, Oaep, RsaPrivateKey, RsaPublicKey};
+use rsa::{
+    traits::{PrivateKeyParts, PublicKeyParts},
+    Oaep, RsaPrivateKey, RsaPublicKey,
+};
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::str::Utf8Error;
@@ -44,6 +47,8 @@ use tpm2_protocol::{
     },
     TpmBuild, TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
+
+use pkcs8::{DecodePrivateKey, EncodePrivateKey};
 
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
@@ -93,9 +98,16 @@ impl EncodeValue for TpmKeyAsn1 {
     }
 }
 
+/// A parsed RSA or ECC private key.
+#[allow(clippy::large_enum_variant)]
+pub enum ParsedKey {
+    Rsa(RsaPrivateKey),
+    Ecc(SecretKey),
+}
+
 /// Loaded private key from PEM file.
 pub struct PrivateKey {
-    private_key_info_der: Vec<u8>,
+    key: ParsedKey,
 }
 
 impl PrivateKey {
@@ -119,13 +131,25 @@ impl PrivateKey {
             )));
         }
 
-        let contents = pem_block.contents().to_vec();
+        let contents = pem_block.contents();
+        let private_key_info = PrivateKeyInfo::from_der(contents)?;
+        let oid = private_key_info.algorithm.oid;
 
-        PrivateKeyInfo::from_der(&contents).map_err(|e| TpmError::Parse(e.to_string()))?;
+        let key = match oid {
+            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
+                ParsedKey::Rsa(RsaPrivateKey::from_pkcs8_der(contents)?)
+            }
+            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
+                ParsedKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
+            }
+            _ => {
+                return Err(TpmError::Parse(
+                    "unsupported key algorithm in PEM file".to_string(),
+                ))
+            }
+        };
 
-        Ok(Self {
-            private_key_info_der: contents,
-        })
+        Ok(Self { key })
     }
 
     /// Convert to TPM's `TpmtPublic` data.
@@ -134,24 +158,8 @@ impl PrivateKey {
     ///
     /// Returns `TpmError`.
     pub fn to_tpmt_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, TpmError> {
-        let private_key_info =
-            PrivateKeyInfo::from_der(&self.private_key_info_der).map_err(TpmError::from)?;
-
-        let oid = private_key_info.algorithm.oid;
-        let object_type = match oid {
-            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => TpmAlgId::Rsa,
-            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => TpmAlgId::Ecc,
-            _ => {
-                return Err(TpmError::Parse(
-                    "unsupported key algorithm in PEM file".to_string(),
-                ))
-            }
-        };
-
-        match object_type {
-            TpmAlgId::Rsa => {
-                let rsa_key = RsaPrivateKey::from_pkcs8_der(&self.private_key_info_der)?;
-
+        match &self.key {
+            ParsedKey::Rsa(rsa_key) => {
                 let modulus_bytes = rsa_key.n().to_bytes_be();
                 let key_bits = u16::try_from(modulus_bytes.len() * 8)
                     .map_err(|_| TpmError::Parse("RSA key size too large".to_string()))?;
@@ -170,7 +178,7 @@ impl PrivateKey {
                 };
 
                 Ok(TpmtPublic {
-                    object_type,
+                    object_type: TpmAlgId::Rsa,
                     name_alg: hash_alg,
                     object_attributes: TpmaObject::RESTRICTED
                         | TpmaObject::DECRYPT
@@ -188,9 +196,7 @@ impl PrivateKey {
                     )?),
                 })
             }
-            TpmAlgId::Ecc => {
-                let secret_key = SecretKey::from_pkcs8_der(&self.private_key_info_der)?;
-
+            ParsedKey::Ecc(secret_key) => {
                 let encoded_point = secret_key.public_key().to_encoded_point(false);
                 let pub_bytes = encoded_point.as_bytes();
 
@@ -202,16 +208,17 @@ impl PrivateKey {
                 let x = &pub_bytes[1..=coord_len];
                 let y = &pub_bytes[1 + coord_len..];
 
-                let params = private_key_info
-                    .algorithm
-                    .parameters
-                    .as_ref()
-                    .ok_or_else(|| TpmError::Parse("missing ECC curve parameters".to_string()))?;
+                let der_bytes = secret_key.to_pkcs8_der()?;
+                let pki = PrivateKeyInfo::from_der(der_bytes.as_bytes())?;
+                let params =
+                    pki.algorithm.parameters.as_ref().ok_or_else(|| {
+                        TpmError::Parse("missing ECC curve parameters".to_string())
+                    })?;
 
                 let curve_id = ec_oid_to_tpm_curve(params)?;
 
                 Ok(TpmtPublic {
-                    object_type,
+                    object_type: TpmAlgId::Ecc,
                     name_alg: hash_alg,
                     object_attributes: TpmaObject::RESTRICTED
                         | TpmaObject::DECRYPT
@@ -230,18 +237,23 @@ impl PrivateKey {
                     }),
                 })
             }
-            _ => unreachable!(),
         }
     }
 
-    /// Returns raw private key bytes.
+    /// Returns the sensitive part of the private key required for import.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::Parse` if the internal DER data is invalid.
-    pub fn get_private_blob(&self) -> Result<&[u8], TpmError> {
-        let private_key_info = PrivateKeyInfo::from_der(&self.private_key_info_der)?;
-        Ok(private_key_info.private_key)
+    /// Returns a `TpmError::Parse` if the key cannot be processed.
+    pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, TpmError> {
+        match &self.key {
+            ParsedKey::Rsa(rsa_key) => {
+                Ok(rsa_key.primes()[0].to_bytes_be())
+            }
+            ParsedKey::Ecc(secret_key) => {
+                Ok(secret_key.to_bytes().to_vec())
+            }
+        }
     }
 }
 

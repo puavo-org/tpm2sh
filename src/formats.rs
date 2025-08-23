@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::TpmError;
+use crate::{key::tpm_alg_id_from_str, TpmError};
 use std::collections::BTreeMap;
+use tpm2_protocol::data;
 
 #[derive(Debug, Clone)]
 pub struct PcrOutput {
@@ -61,5 +62,43 @@ impl PcrOutput {
             update_counter,
             banks,
         })
+    }
+
+    /// Converts a `PcrOutput` into a `TpmlPcrSelection` list.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TpmError` if the structure cannot be converted.
+    pub fn to_tpml_pcr_selection(
+        pcr_values: &PcrOutput,
+        pcr_count: usize,
+    ) -> Result<data::TpmlPcrSelection, TpmError> {
+        let mut list = data::TpmlPcrSelection::new();
+        let pcr_select_size = pcr_count.div_ceil(8);
+        if pcr_select_size > data::TPM_PCR_SELECT_MAX {
+            return Err(TpmError::PcrSelection(format!(
+                "required pcr select size {pcr_select_size} exceeds maximum {}",
+                data::TPM_PCR_SELECT_MAX
+            )));
+        }
+
+        for (bank_name, pcr_map) in &pcr_values.banks {
+            let alg = tpm_alg_id_from_str(bank_name).map_err(TpmError::Parse)?;
+            let mut pcr_select_bytes = vec![0u8; pcr_select_size];
+            for pcr_str in pcr_map.keys() {
+                let pcr_index: usize = pcr_str.parse()?;
+                if pcr_index >= pcr_count {
+                    return Err(TpmError::PcrSelection(format!(
+                        "pcr index {pcr_index} is out of range for a TPM with {pcr_count} PCRs"
+                    )));
+                }
+                pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
+            }
+            list.try_push(data::TpmsPcrSelection {
+                hash: alg,
+                pcr_select: tpm2_protocol::TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
+            })?;
+        }
+        Ok(list)
     }
 }

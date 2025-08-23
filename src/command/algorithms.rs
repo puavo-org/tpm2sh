@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Algorithms, Commands},
-    enumerate_all, parse_args, Command, TpmDevice, TpmError, TPM_CAP_PROPERTY_MAX,
+    enumerate_all, parse_args, Command, CommandType, TpmDevice, TpmError, TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
 use regex::Regex;
@@ -36,6 +36,10 @@ fn get_chip_algorithms(
 }
 
 impl Command for Algorithms {
+    fn command_type(&self) -> CommandType {
+        CommandType::Standalone
+    }
+
     fn help() {
         println!(
             "{}",

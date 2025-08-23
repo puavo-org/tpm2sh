@@ -4,7 +4,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Delete, Object},
-    get_auth_sessions, parse_args, parse_hex_u32, Command, CommandIo, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, parse_hex_u32, Command, CommandIo, CommandType, TpmDevice,
+    TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::{
@@ -25,6 +26,10 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Delete {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -73,9 +78,12 @@ impl Command for Delete {
         let session = io.take_session()?;
 
         let handle = if self.handle == "-" {
-            let obj = io.consume_object(|_| true)?;
-            let Object::TpmObject(hex_string) = obj;
-            parse_hex_u32(&hex_string)?
+            let obj = io.consume_object(|obj| matches!(obj, Object::Handle(_)))?;
+            if let Object::Handle(h) = obj {
+                h
+            } else {
+                unreachable!()
+            }
         } else {
             parse_hex_u32(&self.handle)?
         };
@@ -113,6 +121,6 @@ impl Command for Delete {
                 "'{handle:#010x}' is not a transient or persistent handle"
             )));
         }
-        Ok(())
+        io.finalize()
     }
 }

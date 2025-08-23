@@ -4,8 +4,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Object, Policy},
-    from_json_str, get_pcr_count, parse_args, parse_pcr_selection, AuthSession, Command, CommandIo,
-    Envelope, SessionData, TpmDevice, TpmError,
+    get_pcr_count, parse_args, parse_pcr_selection, AuthSession, Command, CommandIo, CommandType,
+    PcrOutput, SessionData, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use pest::iterators::{Pair, Pairs};
@@ -13,15 +13,12 @@ use pest::Parser;
 use pest_derive::Parser;
 use std::io::{self, Write};
 use tpm2_protocol::{
-    data::{
-        Tpm2b, Tpm2bDigest, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest, TpmlPcrSelection,
-        TpmtSymDefObject,
-    },
+    data::{Tpm2b, Tpm2bDigest, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest, TpmtSymDefObject},
     message::{
         TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
         TpmPolicySecretCommand, TpmStartAuthSessionCommand,
     },
-    TpmParse, TpmSession,
+    TpmSession,
 };
 
 #[derive(Parser)]
@@ -135,16 +132,13 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
         })?)
         .map_err(|e| TpmError::Parse(e.to_string()))?;
         let pcr_selection = if selection_str.is_empty() {
-            let selection_obj = self.io.consume_object(|obj| {
-                let cli::Object::TpmObject(s) = obj;
-                if let Ok(bytes) = hex::decode(s) {
-                    return bytes.len() > 4 && bytes.len() < 100;
-                }
-                false
-            })?;
-            let cli::Object::TpmObject(hex_string) = selection_obj;
-            let bytes = hex::decode(hex_string)?;
-            TpmlPcrSelection::parse(&bytes)?.0
+            let obj = self
+                .io
+                .consume_object(|obj| matches!(obj, Object::PcrValues(_)))?;
+            let Object::PcrValues(pcr_values) = obj else {
+                unreachable!()
+            };
+            PcrOutput::to_tpml_pcr_selection(&pcr_values, self.pcr_count)?
         } else {
             parse_pcr_selection(selection_str, self.pcr_count)?
         };
@@ -298,6 +292,10 @@ fn get_policy_digest(
 }
 
 impl Command for Policy {
+    fn command_type(&self) -> CommandType {
+        CommandType::Pipe
+    }
+
     fn help() {
         println!(
             "{}",
@@ -346,8 +344,12 @@ impl Command for Policy {
         let session = io.take_session()?;
 
         let (mut session_data, session_handle, is_trial) = if let Some(s) = session {
-            let json_val = from_json_str(&s.original_json, "session")?;
-            (SessionData::from_json(&json_val)?, s.handle, false)
+            let obj = Object::from_json(&json::parse(&s.original_json)?)?;
+            if let Object::Session(data) = obj {
+                (data, s.handle, false)
+            } else {
+                unreachable!()
+            }
         } else {
             let trial_handle =
                 start_trial_session(chip, None, cli::SessionType::Trial, log_format)?;
@@ -380,14 +382,7 @@ impl Command for Policy {
             flush_session(chip, session_handle, log_format)?;
             println!("{}", session_data.policy_digest);
         } else {
-            let next_session = Object::TpmObject(
-                Envelope {
-                    object_type: "session".to_string(),
-                    data: session_data.to_json(),
-                }
-                .to_json()
-                .dump(),
-            );
+            let next_session = Object::Session(session_data);
             io.push_object(next_session);
         }
 
