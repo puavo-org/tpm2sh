@@ -5,7 +5,7 @@
 use crate::{build_to_vec, TpmError};
 use aes::Aes128;
 use cfb_mode::Encryptor;
-use cipher::{generic_array::GenericArray, BlockEncryptMut, KeyIvInit};
+use cipher::{AsyncStreamCipher, KeyIvInit};
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use hmac::{Hmac, Mac};
 use num_traits::FromPrimitive;
@@ -552,10 +552,8 @@ macro_rules! ecdh_protect_seed {
         let sym_material = kdfa($name_alg, z, "STORAGE", context_a, &context_b, 256)?;
         let (aes_key, iv) = sym_material.split_at(16);
         let mut encrypted_seed_buf = *$seed;
-        let mut cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
-        let (block1, block2) = encrypted_seed_buf.split_at_mut(16);
-        cipher.encrypt_block_mut(GenericArray::from_mut_slice(block1));
-        cipher.encrypt_block_mut(GenericArray::from_mut_slice(block2));
+        let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
+        cipher.encrypt(&mut encrypted_seed_buf);
 
         (encrypted_seed_buf, ephemeral_pk_bytes.to_vec())
     }};
@@ -703,11 +701,8 @@ pub fn create_import_blob(
     let mut enc_data = sensitive_data_vec;
     let iv = [0u8; 16];
 
-    let mut cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
-    for chunk in enc_data.chunks_mut(16) {
-        let block = GenericArray::from_mut_slice(chunk);
-        cipher.encrypt_block_mut(block);
-    }
+    let cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
+    cipher.encrypt(&mut enc_data);
 
     macro_rules! do_integrity_hmac {
         ($digest:ty) => {{
