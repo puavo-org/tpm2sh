@@ -288,7 +288,7 @@ impl TpmKey {
     /// Returns `TpmError` if the key's OID or other fields cannot be encoded to DER.
     pub fn to_pem(&self) -> Result<String, TpmError> {
         let der = self.to_der()?;
-        Ok(pem::encode(&pem::Pem::new("TPM2 KEY", der)))
+        Ok(pem::encode(&pem::Pem::new("TSS2 PRIVATE KEY", der)))
     }
 
     /// Serialize TPM key to DER bytes.
@@ -316,7 +316,7 @@ impl TpmKey {
     /// Returns `TpmError` if the PEM bytes cannot be parsed.
     pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, TpmError> {
         let pem = pem::parse(pem_bytes)?;
-        if pem.tag() != "TPM2 KEY" {
+        if pem.tag() != "TSS2 PRIVATE KEY" {
             return Err(TpmError::Parse("invalid PEM tag".to_string()));
         }
         Self::from_der(pem.contents())
