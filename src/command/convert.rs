@@ -11,7 +11,7 @@ use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::{
     fs::File,
-    io::{self, IsTerminal, Read, Write},
+    io::{self, Read, Write},
 };
 
 const ABOUT: &str = "Converts keys between ASN.1 and JSON format";
@@ -127,10 +127,6 @@ impl Command for Convert {
         _device: &mut Option<TpmDevice>,
         _log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
-        if io::stdin().is_terminal() {
-            return Err(TpmError::Usage("convert requires piped input.".to_string()));
-        }
-
         let input = read_all(None)?;
         match (self.from, self.to) {
             (KeyFormat::Json, KeyFormat::Pem) => {

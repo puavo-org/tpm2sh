@@ -4,7 +4,7 @@
 
 use crate::{cli, from_json_str, AuthSession, SessionData, TpmError};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, Read, Write};
 use tpm2_protocol::data::{Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmaSession};
 
 /// Manages the streaming I/O for a command in the JSON pipeline.
@@ -23,20 +23,18 @@ impl<W: Write> CommandIo<W> {
     /// Returns a `TpmError` if reading from the input stream fails.
     pub fn new(writer: W, log_format: cli::LogFormat) -> Result<Self, TpmError> {
         let mut input_objects: Vec<cli::Object> = Vec::new();
-        if !io::stdin().is_terminal() {
-            let mut input_string = String::new();
-            io::stdin().read_to_string(&mut input_string)?;
+        let mut input_string = String::new();
+        io::stdin().read_to_string(&mut input_string)?;
 
-            if !input_string.trim().is_empty() {
-                let doc = json::parse(&input_string)?;
-                if !doc["objects"].is_array() {
-                    return Err(TpmError::Parse(
-                        "input JSON document is missing 'objects' array".to_string(),
-                    ));
-                }
-                for value in doc["objects"].members() {
-                    input_objects.push(cli::Object::from_json(value)?);
-                }
+        if !input_string.trim().is_empty() {
+            let doc = json::parse(&input_string)?;
+            if !doc["objects"].is_array() {
+                return Err(TpmError::Parse(
+                    "input JSON document is missing 'objects' array".to_string(),
+                ));
+            }
+            for value in doc["objects"].members() {
+                input_objects.push(cli::Object::from_json(value)?);
             }
         }
 

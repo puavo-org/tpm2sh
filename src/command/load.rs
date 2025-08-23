@@ -12,7 +12,7 @@ use crate::{
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use log::warn;
-use std::io::{self, IsTerminal};
+use std::io;
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmFlushContextCommand, TpmLoadCommand},
@@ -63,10 +63,6 @@ impl Command for Load {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
-        if std::io::stdin().is_terminal() {
-            return Err(TpmError::Usage("load requires piped input.".to_string()));
-        }
-
         let mut io = CommandIo::new(io::stdout(), log_format)?;
         let session = io.take_session()?;
         let (parent_handle, needs_flush) =

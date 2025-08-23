@@ -9,7 +9,6 @@ use crate::{
     TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
-use std::io::IsTerminal;
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand};
 
 const ABOUT: &str = "Saves to non-volatile memory";
@@ -72,12 +71,6 @@ impl Command for Save {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
-        if self.from == "-" && std::io::stdin().is_terminal() {
-            return Err(TpmError::Usage(
-                "save requires piped input for '-' handle.".to_string(),
-            ));
-        }
-
         let mut io = CommandIo::new(std::io::stdout(), log_format)?;
         let session = io.take_session()?;
         let object_handle = if self.from == "-" {

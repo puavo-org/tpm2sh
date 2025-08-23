@@ -10,7 +10,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, Write};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::TpmUnsealCommand,
@@ -56,10 +56,6 @@ impl Command for Unseal {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
-        if std::io::stdin().is_terminal() {
-            return Err(TpmError::Usage("unseal requires piped input.".to_string()));
-        }
-
         let mut io = CommandIo::new(io::stdout(), log_format)?;
         let session = io.take_session()?;
         let object_data = pop_object_data(&mut io)?;
