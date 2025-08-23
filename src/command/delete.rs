@@ -52,8 +52,9 @@ impl Command for Delete {
             args.handle = handle;
             Ok(Commands::Delete(args))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required argument: <HANDLE>".to_string(),
+            ))
         }
     }
 

@@ -325,8 +325,9 @@ impl Command for Policy {
             args.expression = expression;
             Ok(Commands::Policy(args))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required argument: <EXPRESSION>".to_string(),
+            ))
         }
     }
 

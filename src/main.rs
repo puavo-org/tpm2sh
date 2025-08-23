@@ -12,10 +12,16 @@ fn main() {
 
     match execute_cli() {
         Ok(()) => {}
-        Err(TpmError::HelpDisplayed) => {}
+        Err(TpmError::Help) => std::process::exit(0),
+        Err(TpmError::UsageHandled) => std::process::exit(2),
         Err(err) => {
-            error!("{err}");
-            std::process::exit(1);
+            if err.is_interactive() {
+                eprintln!("{err}");
+                std::process::exit(2);
+            } else {
+                error!("{err}");
+                std::process::exit(1);
+            }
         }
     }
 }

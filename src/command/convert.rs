@@ -128,8 +128,7 @@ impl Command for Convert {
         _log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         if io::stdin().is_terminal() {
-            Self::help();
-            return Err(TpmError::HelpDisplayed);
+            return Err(TpmError::Usage("convert requires piped input.".to_string()));
         }
 
         let input = read_all(None)?;
@@ -159,7 +158,7 @@ impl Command for Convert {
             }
             _ => {
                 return Err(TpmError::Usage(
-                    "unsupported conversion direction".to_string(),
+                    "Unsupported conversion direction".to_string(),
                 ));
             }
         }

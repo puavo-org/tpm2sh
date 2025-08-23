@@ -36,8 +36,9 @@ impl Command for PrintError {
                 rc: parse_tpm_rc(&s)?,
             }))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required argument: <RC>".to_string(),
+            ))
         }
     }
 

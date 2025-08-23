@@ -171,8 +171,9 @@ impl Command for CreatePrimary {
         });
 
         if !alg_set {
-            Self::help();
-            return Err(TpmError::HelpDisplayed);
+            return Err(TpmError::Usage(
+                "Missing required argument: --algorithm <ALGORITHM>".to_string(),
+            ));
         }
         Ok(Commands::CreatePrimary(args))
     }

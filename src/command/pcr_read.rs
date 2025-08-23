@@ -38,8 +38,9 @@ impl Command for PcrRead {
         if let Some(selection) = selection {
             Ok(Commands::PcrRead(PcrRead { selection }))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required argument: <SELECTION>".to_string(),
+            ))
         }
     }
 

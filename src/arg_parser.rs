@@ -22,8 +22,7 @@ macro_rules! parse_args {
         while let Some($arg) = $parser.next()? {
             match $arg {
                 lexopt::Arg::Short('h') | lexopt::Arg::Long("help") => {
-                    $help_fn();
-                    return Err($crate::TpmError::HelpDisplayed);
+                    return Err($crate::TpmError::Help);
                 }
                 $($matcher)*
             }
@@ -195,31 +194,67 @@ fn print_version() {
     println!("tpm2sh {VERSION}");
 }
 
+fn dispatch_help(name: &str) {
+    match name {
+        "algorithms" => Algorithms::help(),
+        "convert" => Convert::help(),
+        "create-primary" => CreatePrimary::help(),
+        "delete" => Delete::help(),
+        "import" => Import::help(),
+        "load" => Load::help(),
+        "objects" => Objects::help(),
+        "pcr-event" => PcrEvent::help(),
+        "pcr-read" => PcrRead::help(),
+        "policy" => Policy::help(),
+        "print-error" => PrintError::help(),
+        "print-stack" => PrintStack::help(),
+        "reset-lock" => ResetLock::help(),
+        "save" => Save::help(),
+        "seal" => Seal::help(),
+        "start-session" => StartSession::help(),
+        "unseal" => Unseal::help(),
+        _ => unreachable!(),
+    }
+}
+
 /// Dispatch parsing to the correct subcommand implementation.
-fn dispatch_subcommand(
-    cmd_name: &OsString,
-    parser: &mut lexopt::Parser,
-) -> Result<Commands, TpmError> {
-    match cmd_name.to_str() {
-        Some("algorithms") => Algorithms::parse(parser),
-        Some("convert") => Convert::parse(parser),
-        Some("create-primary") => CreatePrimary::parse(parser),
-        Some("delete") => Delete::parse(parser),
-        Some("import") => Import::parse(parser),
-        Some("load") => Load::parse(parser),
-        Some("objects") => Objects::parse(parser),
-        Some("pcr-event") => PcrEvent::parse(parser),
-        Some("pcr-read") => PcrRead::parse(parser),
-        Some("policy") => Policy::parse(parser),
-        Some("print-error") => PrintError::parse(parser),
-        Some("print-stack") => PrintStack::parse(parser),
-        Some("reset-lock") => ResetLock::parse(parser),
-        Some("save") => Save::parse(parser),
-        Some("seal") => Seal::parse(parser),
-        Some("start-session") => StartSession::parse(parser),
-        Some("unseal") => Unseal::parse(parser),
-        Some(cmd) => Err(TpmError::Usage(format!("unknown command '{cmd}'"))),
-        None => Err(TpmError::Usage("invalid non-UTF8 command".to_string())),
+fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    let Some(name) = name.to_str() else {
+        return Err(TpmError::Usage("Invalid non-UTF8 command".to_string()));
+    };
+
+    let result = match name {
+        "algorithms" => Algorithms::parse(parser),
+        "convert" => Convert::parse(parser),
+        "create-primary" => CreatePrimary::parse(parser),
+        "delete" => Delete::parse(parser),
+        "import" => Import::parse(parser),
+        "load" => Load::parse(parser),
+        "objects" => Objects::parse(parser),
+        "pcr-event" => PcrEvent::parse(parser),
+        "pcr-read" => PcrRead::parse(parser),
+        "policy" => Policy::parse(parser),
+        "print-error" => PrintError::parse(parser),
+        "print-stack" => PrintStack::parse(parser),
+        "reset-lock" => ResetLock::parse(parser),
+        "save" => Save::parse(parser),
+        "seal" => Seal::parse(parser),
+        "start-session" => StartSession::parse(parser),
+        "unseal" => Unseal::parse(parser),
+        cmd => return Err(TpmError::Usage(format!("Unknown command: '{cmd}'"))),
+    };
+
+    match result {
+        Err(TpmError::Usage(msg)) => {
+            eprintln!("{msg}\n");
+            dispatch_help(name);
+            Err(TpmError::UsageHandled)
+        }
+        Err(TpmError::Help) => {
+            dispatch_help(name);
+            Err(TpmError::Help)
+        }
+        res => res,
     }
 }
 
@@ -262,7 +297,7 @@ pub fn parse_cli() -> Result<Option<Cli>, TpmError> {
 
     if cli.command.is_none() {
         print_usage();
-        return Err(TpmError::HelpDisplayed);
+        return Err(TpmError::UsageHandled);
     }
 
     Ok(Some(cli))

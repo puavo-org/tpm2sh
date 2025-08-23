@@ -8,7 +8,7 @@ use crate::{
     pretty_printer::pretty_print_json_object_to_stdout,
     Command, CommandIo, TpmDevice, TpmError,
 };
-use std::io;
+use std::io::{self, IsTerminal};
 
 const ABOUT: &str = "Prints a human-readable summary of the object stack to stdout";
 const USAGE: &str = "tpm2sh print-stack";
@@ -45,13 +45,18 @@ impl Command for PrintStack {
         _device: &mut Option<TpmDevice>,
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
+        if io::stdin().is_terminal() {
+            return Err(TpmError::Usage(
+                "print-stack requires piped input".to_string(),
+            ));
+        }
+
         let mut io = CommandIo::new(io::stdout(), log_format)?;
         let objects = io.consume_all_objects();
 
         if objects.is_empty() {
-            Self::help();
             return Err(TpmError::Usage(
-                "print-stack requires piped input".to_string(),
+                "print-stack received no input objects to print.".to_string(),
             ));
         }
 

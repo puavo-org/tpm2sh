@@ -45,7 +45,7 @@ impl FromStr for Alg {
         match parts.as_slice() {
             ["rsa", key_bits_str, name_alg_str] => {
                 let key_bits: u16 = key_bits_str.parse().map_err(|_| {
-                    TpmError::Usage(format!("invalid RSA key bits value: '{key_bits_str}'"))
+                    TpmError::Usage(format!("Invalid RSA key bits value: '{key_bits_str}'"))
                 })?;
                 let name_alg =
                     crate::key::tpm_alg_id_from_str(name_alg_str).map_err(TpmError::Usage)?;
@@ -78,7 +78,7 @@ impl FromStr for Alg {
                     params: AlgInfo::KeyedHash,
                 })
             }
-            _ => Err(TpmError::Usage(format!("invalid algorithm format: '{s}'"))),
+            _ => Err(TpmError::Usage(format!("Invalid algorithm format: '{s}'"))),
         }
     }
 }

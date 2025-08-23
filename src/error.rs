@@ -10,8 +10,8 @@ pub enum TpmError {
     #[error("TPM protocol error: {0}")]
     Build(TpmErrorKind),
 
-    #[error("Help message was displayed.")]
-    HelpDisplayed,
+    #[error("Help message was requested.")]
+    Help,
 
     #[error("Execution failed: {0}")]
     Execution(String),
@@ -45,6 +45,25 @@ pub enum TpmError {
 
     #[error("{0}")]
     Usage(String),
+
+    #[error("Usage error already handled.")]
+    UsageHandled,
+}
+
+impl TpmError {
+    #[must_use]
+    pub fn is_interactive(&self) -> bool {
+        matches!(
+            self,
+            TpmError::Usage(_)
+                | TpmError::UsageHandled
+                | TpmError::Lexopt(_)
+                | TpmError::Parse(_)
+                | TpmError::PcrSelection(_)
+                | TpmError::InvalidHandle(_)
+                | TpmError::File(_, _)
+        )
+    }
 }
 
 impl From<base64::DecodeError> for TpmError {

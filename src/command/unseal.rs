@@ -57,8 +57,7 @@ impl Command for Unseal {
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
         if std::io::stdin().is_terminal() {
-            Self::help();
-            std::process::exit(1);
+            return Err(TpmError::Usage("unseal requires piped input.".to_string()));
         }
 
         let mut io = CommandIo::new(io::stdout(), log_format)?;

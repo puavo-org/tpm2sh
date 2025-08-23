@@ -58,8 +58,9 @@ impl Command for PcrEvent {
             args.data = data;
             Ok(Commands::PcrEvent(args))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required arguments: <HANDLE> <DATA>".to_string(),
+            ))
         }
     }
 

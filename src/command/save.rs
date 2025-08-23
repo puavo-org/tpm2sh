@@ -56,8 +56,9 @@ impl Command for Save {
             args.to = to;
             Ok(Commands::Save(args))
         } else {
-            Self::help();
-            Err(TpmError::HelpDisplayed)
+            Err(TpmError::Usage(
+                "Missing required arguments: <FROM> <TO>".to_string(),
+            ))
         }
     }
     /// Runs `save`.
@@ -71,9 +72,10 @@ impl Command for Save {
         log_format: cli::LogFormat,
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
-        if self.from.is_empty() && std::io::stdin().is_terminal() {
-            Self::help();
-            return Err(TpmError::HelpDisplayed);
+        if self.from == "-" && std::io::stdin().is_terminal() {
+            return Err(TpmError::Usage(
+                "save requires piped input for '-' handle.".to_string(),
+            ));
         }
 
         let mut io = CommandIo::new(std::io::stdout(), log_format)?;

@@ -76,8 +76,7 @@ impl Command for Seal {
     ) -> Result<(), TpmError> {
         let chip = device.as_mut().unwrap();
         if std::io::stdin().is_terminal() {
-            Self::help();
-            return Err(TpmError::HelpDisplayed);
+            return Err(TpmError::Usage("seal requires piped input.".to_string()));
         }
 
         let mut io = CommandIo::new(io::stdout(), log_format)?;
@@ -166,8 +165,8 @@ impl Command for Seal {
             };
             if let Err(flush_err) = chip.execute(&flush_cmd, &[], log_format) {
                 warn!(
-					"Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
-				);
+                    "Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
+                );
                 if result.is_ok() {
                     return Err(flush_err);
                 }
