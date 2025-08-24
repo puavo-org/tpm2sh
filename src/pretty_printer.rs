@@ -6,23 +6,28 @@ use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use log::trace;
 use std::vec::Vec;
 use tpm2_protocol::{
+    self,
     data::{
         self, Tpm2bPublic, Tpm2bSensitiveCreate, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh,
         TpmSe, TpmSt, TpmaAlgorithm, TpmaLocality, TpmaNv, TpmaObject, TpmaSession, TpmiYesNo,
         TpmsAlgProperty, TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsCreationData,
         TpmsEccPoint, TpmsKeyedhashParms, TpmsPcrSelection, TpmsSensitiveCreate,
-        TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDef,
+        TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject,
         TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa, TpmuPublicId, TpmuPublicParms,
         TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{
-        TpmCommandBody, TpmContextLoadCommand, TpmContextSaveCommand, TpmCreateCommand,
-        TpmCreatePrimaryCommand, TpmDictionaryAttackLockResetCommand, TpmEvictControlCommand,
-        TpmFlushContextCommand, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHashCommand,
-        TpmImportCommand, TpmLoadCommand, TpmPcrEventCommand, TpmPcrReadCommand,
-        TpmPcrReadResponse, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
-        TpmPolicySecretCommand, TpmReadPublicCommand, TpmResponseBody, TpmStartAuthSessionCommand,
-        TpmStartAuthSessionResponse, TpmUnsealCommand,
+        TpmCommandBody, TpmContextLoadCommand, TpmContextLoadResponse, TpmContextSaveCommand,
+        TpmContextSaveResponse, TpmCreateCommand, TpmCreatePrimaryCommand,
+        TpmCreatePrimaryResponse, TpmCreateResponse, TpmDictionaryAttackLockResetCommand,
+        TpmDictionaryAttackLockResetResponse, TpmEvictControlCommand, TpmEvictControlResponse,
+        TpmFlushContextCommand, TpmFlushContextResponse, TpmGetCapabilityCommand,
+        TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
+        TpmLoadResponse, TpmPcrEventCommand, TpmPcrEventResponse, TpmPcrReadCommand,
+        TpmPcrReadResponse, TpmPolicyGetDigestCommand, TpmPolicyGetDigestResponse,
+        TpmPolicyOrCommand, TpmPolicyPcrCommand, TpmPolicySecretCommand, TpmReadPublicCommand,
+        TpmReadPublicResponse, TpmResponseBody, TpmStartAuthSessionCommand,
+        TpmStartAuthSessionResponse, TpmUnsealCommand, TpmUnsealResponse,
     },
     TpmBuffer, TpmList, TpmParse, TpmPersistent, TpmSession, TpmTransient,
 };
@@ -62,9 +67,7 @@ pub fn pretty_print_json_object_to_stdout(envelope: &json::JsonValue, indent: us
                 if let Ok(ctx_bytes) = base64_engine.decode(d.context_blob) {
                     if let Ok((ctx_obj, _)) = data::TpmsContext::parse(&ctx_bytes) {
                         println!("{prefix}  Context:");
-                        println!("{prefix}    Sequence: {:#x}", ctx_obj.sequence);
-                        println!("{prefix}    Saved Handle: {:#010x}", ctx_obj.saved_handle);
-                        println!("{prefix}    Hierarchy: {}", ctx_obj.hierarchy);
+                        ctx_obj.pretty_trace("", indent + 2);
                     }
                 }
             }
@@ -171,6 +174,9 @@ pretty_trace_simple!(TpmiYesNo, "{:?}");
 pretty_trace_simple!(TpmTransient, "{:#010x}");
 pretty_trace_simple!(TpmPersistent, "{:#010x}");
 pretty_trace_simple!(TpmSession, "{:#010x}");
+pretty_trace_simple!(data::TpmiRhHierarchy, "{:#010x}");
+pretty_trace_simple!(data::TpmiDhObject, "{:#010x}");
+pretty_trace_simple!(data::TpmiShAuthSession, "{:#010x}");
 
 pretty_trace_bitflags!(TpmaObject);
 pretty_trace_bitflags!(TpmaAlgorithm);
@@ -248,42 +254,67 @@ pretty_trace_struct!(
     parent_qualified_name => "parentQualifiedName",
     outside_info => "outsideInfo",
 );
-
-pretty_trace_struct!(TpmGetCapabilityCommand, cap => "cap", property => "property", property_count => "propertyCount");
-pretty_trace_struct!(TpmHashCommand, data => "data", hash_alg => "hashAlg", hierarchy => "hierarchy");
-pretty_trace_struct!(TpmPcrReadCommand, pcr_selection_in => "pcrSelectionIn");
-pretty_trace_struct!(TpmUnsealCommand,);
-pretty_trace_struct!(TpmStartAuthSessionCommand, nonce_caller => "nonceCaller", encrypted_salt => "encryptedSalt", session_type => "sessionType", symmetric => "symmetric", auth_hash => "authHash");
-pretty_trace_struct!(TpmPolicyGetDigestCommand,);
-pretty_trace_struct!(TpmPolicySecretCommand, nonce_tpm => "nonceTpm", cp_hash_a => "cpHashA", policy_ref => "policyRef", expiration => "expiration");
-pretty_trace_struct!(TpmPolicyOrCommand, p_hash_list => "pHashList");
-pretty_trace_struct!(TpmPolicyPcrCommand, pcr_digest => "pcrDigest", pcrs => "pcrs");
-pretty_trace_struct!(TpmDictionaryAttackLockResetCommand,);
-pretty_trace_struct!(TpmEvictControlCommand, persistent_handle => "persistentHandle");
-pretty_trace_struct!(TpmContextSaveCommand,);
-pretty_trace_struct!(TpmContextLoadCommand, context => "context");
-pretty_trace_struct!(TpmFlushContextCommand, flush_handle => "flushHandle");
-pretty_trace_struct!(TpmLoadCommand, in_private => "inPrivate", in_public => "inPublic");
-pretty_trace_struct!(TpmCreateCommand, in_sensitive => "inSensitive", in_public => "inPublic", outside_info => "outsideInfo", creation_pcr => "creationPcr");
-pretty_trace_struct!(TpmCreatePrimaryCommand, in_sensitive => "inSensitive", in_public => "inPublic", outside_info => "outsideInfo", creation_pcr => "creationPcr");
-pretty_trace_struct!(TpmImportCommand, encryption_key => "encryptionKey", object_public => "objectPublic", duplicate => "duplicate", in_sym_seed => "inSymSeed", symmetric_alg => "symmetricAlg");
-pretty_trace_struct!(TpmReadPublicCommand,);
-pretty_trace_struct!(TpmPcrEventCommand, event_data => "eventData");
-
 pretty_trace_struct!(Tpm2bPublic, inner => "inner");
 pretty_trace_struct!(Tpm2bSensitiveCreate, inner => "inner");
 pretty_trace_struct!(data::Tpm2bCreationData, inner => "inner");
 
+// Commands
+pretty_trace_struct!(TpmCreatePrimaryCommand, primary_handle => "primaryHandle", in_sensitive => "inSensitive", in_public => "inPublic", outside_info => "outsideInfo", creation_pcr => "creationPcr");
+pretty_trace_struct!(TpmContextSaveCommand, save_handle => "saveHandle");
+pretty_trace_struct!(TpmEvictControlCommand, auth => "auth", object_handle => "objectHandle", persistent_handle => "persistentHandle");
+pretty_trace_struct!(TpmFlushContextCommand, flush_handle => "flushHandle");
+pretty_trace_struct!(TpmReadPublicCommand, object_handle => "objectHandle");
+pretty_trace_struct!(TpmImportCommand, parent_handle => "parentHandle", encryption_key => "encryptionKey", object_public => "objectPublic", duplicate => "duplicate", in_sym_seed => "inSymSeed", symmetric_alg => "symmetricAlg");
+pretty_trace_struct!(TpmLoadCommand, parent_handle => "parentHandle", in_private => "inPrivate", in_public => "inPublic");
+pretty_trace_struct!(TpmPcrEventCommand, pcr_handle => "pcrHandle", event_data => "eventData");
+pretty_trace_struct!(TpmPcrReadCommand, pcr_selection_in => "pcrSelectionIn");
+pretty_trace_struct!(TpmPolicyPcrCommand, policy_session => "policySession", pcr_digest => "pcrDigest", pcrs => "pcrs");
+pretty_trace_struct!(TpmPolicySecretCommand, auth_handle => "authHandle", policy_session => "policySession", nonce_tpm => "nonceTpm", cp_hash_a => "cpHashA", policy_ref => "policyRef", expiration => "expiration");
+pretty_trace_struct!(TpmPolicyOrCommand, policy_session => "policySession", p_hash_list => "pHashList");
+pretty_trace_struct!(TpmPolicyGetDigestCommand, policy_session => "policySession");
+pretty_trace_struct!(TpmDictionaryAttackLockResetCommand, lock_handle => "lockHandle");
+pretty_trace_struct!(TpmCreateCommand, parent_handle => "parentHandle", in_sensitive => "inSensitive", in_public => "inPublic", outside_info => "outsideInfo", creation_pcr => "creationPcr");
+pretty_trace_struct!(TpmUnsealCommand, item_handle => "itemHandle");
+pretty_trace_struct!(TpmGetCapabilityCommand, cap => "cap", property => "property", property_count => "propertyCount");
+pretty_trace_struct!(TpmStartAuthSessionCommand, tpm_key => "tpmKey", bind => "bind", nonce_caller => "nonceCaller", encrypted_salt => "encryptedSalt", session_type => "sessionType", symmetric => "symmetric", auth_hash => "authHash");
+pretty_trace_struct!(TpmContextLoadCommand, context => "context");
+
+// Responses
+pretty_trace_struct!(TpmCreatePrimaryResponse, object_handle => "objectHandle", out_public => "outPublic", creation_data => "creationData", creation_hash => "creationHash", creation_ticket => "creationTicket", name => "name");
+pretty_trace_struct!(TpmContextSaveResponse, context => "context");
+pretty_trace_struct!(TpmEvictControlResponse,);
+pretty_trace_struct!(TpmFlushContextResponse,);
+pretty_trace_struct!(TpmReadPublicResponse, out_public => "outPublic", name => "name", qualified_name => "qualifiedName");
+pretty_trace_struct!(TpmImportResponse, out_private => "outPrivate");
+pretty_trace_struct!(TpmLoadResponse, object_handle => "objectHandle", name => "name");
+pretty_trace_struct!(TpmPcrEventResponse, digests => "digests");
+pretty_trace_struct!(TpmPolicyGetDigestResponse, policy_digest => "policyDigest");
+pretty_trace_struct!(TpmDictionaryAttackLockResetResponse,);
+pretty_trace_struct!(TpmCreateResponse, out_private => "outPrivate", out_public => "outPublic", creation_data => "creationData", creation_hash => "creationHash", creation_ticket => "creationTicket");
+pretty_trace_struct!(TpmUnsealResponse, out_data => "outData");
+pretty_trace_struct!(TpmGetCapabilityResponse, more_data => "moreData", capability_data => "capabilityData");
+pretty_trace_struct!(TpmPcrReadResponse, pcr_update_counter => "pcrUpdateCounter", pcr_selection_out => "pcrSelectionOut", pcr_values => "pcrValues");
+pretty_trace_struct!(TpmStartAuthSessionResponse, session_handle => "sessionHandle", nonce_tpm => "nonceTpm");
+pretty_trace_struct!(TpmContextLoadResponse, loaded_handle => "loadedHandle");
+
 impl PrettyTrace for TpmuHa {
     fn pretty_trace(&self, name: &str, indent: usize) {
         let prefix = " ".repeat(indent * INDENT);
+        let (variant, bytes): (&str, &[u8]) = match self {
+            Self::Sha1(d) => ("Sha1", d),
+            Self::Sha256(d) => ("Sha256", d),
+            Self::Sha384(d) => ("Sha384", d),
+            Self::Sha512(d) => ("Sha512", d),
+            Self::Sm3_256(d) => ("Sm3_256", d),
+        };
         trace!(
             target: "cli::device",
-            "{}{}: (size={}) {}",
+            "{}{}: (size={}) {} ({})",
             prefix,
             name,
-            self.len(),
-            hex::encode(&**self)
+            bytes.len(),
+            hex::encode(bytes),
+            variant,
         );
     }
 }
@@ -370,7 +401,7 @@ impl PrettyTrace for TpmuPublicParms {
     }
 }
 
-impl PrettyTrace for TpmtSymDef {
+impl PrettyTrace for TpmtSymDefObject {
     fn pretty_trace(&self, name: &str, indent: usize) {
         if self.algorithm == TpmAlgId::Null {
             self.algorithm.pretty_trace(name, indent);
@@ -421,32 +452,28 @@ impl PrettyTrace for TpmuSensitiveComposite {
     }
 }
 
-pretty_trace_struct!(TpmGetCapabilityResponse, more_data => "moreData", capability_data => "capabilityData");
-pretty_trace_struct!(TpmPcrReadResponse, pcr_update_counter => "pcrUpdateCounter", pcr_selection_out => "pcrSelectionOut", pcr_values => "pcrValues");
-
 impl PrettyTrace for TpmCommandBody {
     fn pretty_trace(&self, name: &str, indent: usize) {
         match self {
-            Self::GetCapability(cmd) => cmd.pretty_trace(name, indent),
+            Self::CreatePrimary(cmd) => cmd.pretty_trace(name, indent),
+            Self::ContextSave(cmd) => cmd.pretty_trace(name, indent),
+            Self::EvictControl(cmd) => cmd.pretty_trace(name, indent),
+            Self::FlushContext(cmd) => cmd.pretty_trace(name, indent),
+            Self::ReadPublic(cmd) => cmd.pretty_trace(name, indent),
+            Self::Import(cmd) => cmd.pretty_trace(name, indent),
+            Self::Load(cmd) => cmd.pretty_trace(name, indent),
+            Self::PcrEvent(cmd) => cmd.pretty_trace(name, indent),
             Self::PcrRead(cmd) => cmd.pretty_trace(name, indent),
-            Self::Hash(cmd) => cmd.pretty_trace(name, indent),
-            Self::Unseal(cmd) => cmd.pretty_trace(name, indent),
-            Self::StartAuthSession(cmd) => cmd.pretty_trace(name, indent),
-            Self::PolicyGetDigest(cmd) => cmd.pretty_trace(name, indent),
+            Self::PolicyPcr(cmd) => cmd.pretty_trace(name, indent),
             Self::PolicySecret(cmd) => cmd.pretty_trace(name, indent),
             Self::PolicyOr(cmd) => cmd.pretty_trace(name, indent),
-            Self::PolicyPcr(cmd) => cmd.pretty_trace(name, indent),
+            Self::PolicyGetDigest(cmd) => cmd.pretty_trace(name, indent),
             Self::DictionaryAttackLockReset(cmd) => cmd.pretty_trace(name, indent),
-            Self::EvictControl(cmd) => cmd.pretty_trace(name, indent),
-            Self::ContextSave(cmd) => cmd.pretty_trace(name, indent),
-            Self::ContextLoad(cmd) => cmd.pretty_trace(name, indent),
-            Self::FlushContext(cmd) => cmd.pretty_trace(name, indent),
-            Self::Load(cmd) => cmd.pretty_trace(name, indent),
             Self::Create(cmd) => cmd.pretty_trace(name, indent),
-            Self::CreatePrimary(cmd) => cmd.pretty_trace(name, indent),
-            Self::Import(cmd) => cmd.pretty_trace(name, indent),
-            Self::ReadPublic(cmd) => cmd.pretty_trace(name, indent),
-            Self::PcrEvent(cmd) => cmd.pretty_trace(name, indent),
+            Self::Unseal(cmd) => cmd.pretty_trace(name, indent),
+            Self::GetCapability(cmd) => cmd.pretty_trace(name, indent),
+            Self::StartAuthSession(cmd) => cmd.pretty_trace(name, indent),
+            Self::ContextLoad(cmd) => cmd.pretty_trace(name, indent),
             _ => {
                 let prefix = " ".repeat(indent * INDENT);
                 trace!(target: "cli::device", "{prefix}{name}: {self:?} (unimplemented pretty trace)");
@@ -461,6 +488,19 @@ impl PrettyTrace for TpmResponseBody {
             Self::GetCapability(resp) => resp.pretty_trace(name, indent),
             Self::PcrRead(resp) => resp.pretty_trace(name, indent),
             Self::StartAuthSession(resp) => resp.pretty_trace(name, indent),
+            Self::CreatePrimary(resp) => resp.pretty_trace(name, indent),
+            Self::ContextSave(resp) => resp.pretty_trace(name, indent),
+            Self::EvictControl(resp) => resp.pretty_trace(name, indent),
+            Self::FlushContext(resp) => resp.pretty_trace(name, indent),
+            Self::ReadPublic(resp) => resp.pretty_trace(name, indent),
+            Self::Import(resp) => resp.pretty_trace(name, indent),
+            Self::Load(resp) => resp.pretty_trace(name, indent),
+            Self::PcrEvent(resp) => resp.pretty_trace(name, indent),
+            Self::PolicyGetDigest(resp) => resp.pretty_trace(name, indent),
+            Self::DictionaryAttackLockReset(resp) => resp.pretty_trace(name, indent),
+            Self::Create(resp) => resp.pretty_trace(name, indent),
+            Self::Unseal(resp) => resp.pretty_trace(name, indent),
+            Self::ContextLoad(resp) => resp.pretty_trace(name, indent),
             _ => {
                 let prefix = " ".repeat(indent * INDENT);
                 trace!(target: "cli::device", "{prefix}{name}: {self:?} (unimplemented pretty trace)");
@@ -468,5 +508,3 @@ impl PrettyTrace for TpmResponseBody {
         }
     }
 }
-
-pretty_trace_struct!(TpmStartAuthSessionResponse, session_handle => "sessionHandle", nonce_tpm => "nonceTpm");
