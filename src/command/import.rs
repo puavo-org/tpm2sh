@@ -94,17 +94,23 @@ impl Command for Import {
                 &parent_name,
             )?;
 
+            let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
+                TpmtSymDef::default()
+            } else {
+                TpmtSymDef {
+                    algorithm: TpmAlgId::Aes,
+                    key_bits: TpmuSymKeyBits::Aes(128),
+                    mode: TpmuSymMode::Aes(TpmAlgId::Cfb),
+                }
+            };
+
             let import_cmd = TpmImportCommand {
                 parent_handle: parent_handle.0.into(),
                 encryption_key,
                 object_public: public_bytes,
                 duplicate,
                 in_sym_seed,
-                symmetric_alg: TpmtSymDef {
-                    algorithm: TpmAlgId::Aes,
-                    key_bits: TpmuSymKeyBits::Aes(128),
-                    mode: TpmuSymMode::Aes(TpmAlgId::Cfb),
-                },
+                symmetric_alg,
             };
             let handles = [parent_handle.into()];
             let sessions = get_auth_sessions(

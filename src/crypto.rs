@@ -182,8 +182,7 @@ impl PrivateKey {
                     name_alg: hash_alg,
                     object_attributes: TpmaObject::RESTRICTED
                         | TpmaObject::DECRYPT
-                        | TpmaObject::FIXED_TPM
-                        | TpmaObject::FIXED_PARENT,
+                        | TpmaObject::USER_WITH_AUTH,
                     auth_policy: Tpm2bDigest::default(),
                     parameters: TpmuPublicParms::Rsa(TpmsRsaParms {
                         symmetric: TpmtSymDefObject::default(),
@@ -222,8 +221,7 @@ impl PrivateKey {
                     name_alg: hash_alg,
                     object_attributes: TpmaObject::RESTRICTED
                         | TpmaObject::DECRYPT
-                        | TpmaObject::FIXED_TPM
-                        | TpmaObject::FIXED_PARENT,
+                        | TpmaObject::USER_WITH_AUTH,
                     auth_policy: Tpm2bDigest::default(),
                     parameters: TpmuPublicParms::Ecc(TpmsEccParms {
                         symmetric: TpmtSymDefObject::default(),
@@ -247,12 +245,8 @@ impl PrivateKey {
     /// Returns a `TpmError::Parse` if the key cannot be processed.
     pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, TpmError> {
         match &self.key {
-            ParsedKey::Rsa(rsa_key) => {
-                Ok(rsa_key.primes()[0].to_bytes_be())
-            }
-            ParsedKey::Ecc(secret_key) => {
-                Ok(secret_key.to_bytes().to_vec())
-            }
+            ParsedKey::Rsa(rsa_key) => Ok(rsa_key.primes()[0].to_bytes_be()),
+            ParsedKey::Ecc(secret_key) => Ok(secret_key.to_bytes().to_vec()),
         }
     }
 }
