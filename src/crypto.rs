@@ -53,7 +53,7 @@ use pkcs8::{DecodePrivateKey, EncodePrivateKey};
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
 
-const KDF_DUPLICATE: &[u8] = b"DUPLICATE\0";
+const KDF_DUPLICATE: &str = "DUPLICATE\0";
 const KDF_INTEGRITY: &[u8] = b"INTEGRITY\0";
 const KDF_STORAGE: &[u8] = b"STORAGE\0";
 
@@ -436,7 +436,6 @@ fn kdfa(
 
                 hmac.update(&counter.to_be_bytes());
                 hmac.update(label);
-                hmac.update(&[0x00]);
                 hmac.update(context_a);
                 hmac.update(context_b);
                 hmac.update(&u32::from(key_bits).to_be_bytes());
@@ -466,46 +465,60 @@ fn kdfa(
 }
 
 /// Encrypts the import seed using the parent's RSA public key.
+///
+/// See Table 27 in TCG TPM 2.0 Architectures specification for more information.
 fn protect_seed_with_rsa(
     parent_public: &TpmtPublic,
     seed: &[u8; 32],
 ) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), TpmError> {
     let n = match &parent_public.unique {
         TpmuPublicId::Rsa(data) => Ok(data.as_ref()),
-        _ => Err(TpmError::Execution(
-            "parent is RSA type but unique field is not RSA".to_string(),
-        )),
+        _ => Err(TpmError::Execution("RSA: invalid unique".to_string())),
     }?;
     let e_raw = match &parent_public.parameters {
         TpmuPublicParms::Rsa(params) => Ok(params.exponent),
-        _ => Err(TpmError::Execution(
-            "parent is RSA type but parameters field is not RSA".to_string(),
-        )),
+        _ => Err(TpmError::Execution("RSA: invalid parameters".to_string())),
     }?;
     let e = if e_raw == 0 { 65537 } else { e_raw };
     let rsa_pub_key = RsaPublicKey::new(
         rsa::BigUint::from_bytes_be(n),
-        rsa::BigUint::from_u32(e).ok_or_else(|| {
-            TpmError::Execution("failed to convert exponent to BigUint".to_string())
-        })?,
+        rsa::BigUint::from_u32(e)
+            .ok_or_else(|| TpmError::Execution("RSA: invalid integer conversion".to_string()))?,
     )
-    .map_err(|e| TpmError::Execution(format!("failed to construct RSA public key: {e}")))?;
+    .map_err(|e| TpmError::Execution(format!("RSA: invalid public key: {e}")))?;
 
     let mut rng = thread_rng();
     let parent_name_alg = parent_public.name_alg;
+
     let encrypted_seed_result = match parent_name_alg {
-        TpmAlgId::Sha1 => rsa_pub_key.encrypt(&mut rng, Oaep::new::<Sha1>(), seed),
-        TpmAlgId::Sha256 => rsa_pub_key.encrypt(&mut rng, Oaep::new::<Sha256>(), seed),
-        TpmAlgId::Sha384 => rsa_pub_key.encrypt(&mut rng, Oaep::new::<Sha384>(), seed),
-        TpmAlgId::Sha512 => rsa_pub_key.encrypt(&mut rng, Oaep::new::<Sha512>(), seed),
+        TpmAlgId::Sha1 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha1, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha256 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha256, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha384 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha384, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha512 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha512, _>(KDF_DUPLICATE),
+            seed,
+        ),
         _ => {
             return Err(TpmError::Execution(format!(
-                "unsupported parent nameAlg for RSA OAEP: {parent_name_alg:?}"
+                "RSA-OAEP: unsupported nameAlg: {parent_name_alg:?}"
             )));
         }
     };
     let encrypted_seed = encrypted_seed_result
-        .map_err(|e| TpmError::Execution(format!("RSA-OAEP encryption failed: {e}")))?;
+        .map_err(|e| TpmError::Execution(format!("RSA-OAEP: encryption failed: {e}")))?;
 
     Ok((
         Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())?,
@@ -678,7 +691,7 @@ pub fn create_import_blob(
     let sym_key = kdfa(
         parent_name_alg,
         &seed,
-        KDF_DUPLICATE,
+        KDF_STORAGE,
         &parent_name_len_bytes,
         parent_name,
         128,
