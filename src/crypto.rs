@@ -52,6 +52,11 @@ use pkcs8::{DecodePrivateKey, EncodePrivateKey};
 
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
+
+const KDF_DUPLICATE: &[u8] = b"DUPLICATE\0";
+const KDF_INTEGRITY: &[u8] = b"INTEGRITY\0";
+const KDF_STORAGE: &[u8] = b"STORAGE\0";
+
 const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -414,7 +419,7 @@ pub fn create_auth(
 fn kdfa(
     auth_hash: TpmAlgId,
     hmac_key: &[u8],
-    label: &str,
+    label: &[u8],
     context_a: &[u8],
     context_b: &[u8],
     key_bits: u16,
@@ -430,7 +435,7 @@ fn kdfa(
                     .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
 
                 hmac.update(&counter.to_be_bytes());
-                hmac.update(label.as_bytes());
+                hmac.update(label);
                 hmac.update(&[0x00]);
                 hmac.update(context_a);
                 hmac.update(context_b);
@@ -550,7 +555,7 @@ macro_rules! ecdh_protect_seed {
 
         let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
         let z = shared_secret.raw_secret_bytes();
-        let sym_material = kdfa($name_alg, z, "STORAGE", context_a, &context_b, 256)?;
+        let sym_material = kdfa($name_alg, z, KDF_STORAGE, context_a, &context_b, 256)?;
         let (aes_key, iv) = sym_material.split_at(16);
         let mut encrypted_seed_buf = *$seed;
         let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
@@ -673,7 +678,7 @@ pub fn create_import_blob(
     let sym_key = kdfa(
         parent_name_alg,
         &seed,
-        "DUPLICATE",
+        KDF_DUPLICATE,
         &parent_name_len_bytes,
         parent_name,
         128,
@@ -689,7 +694,7 @@ pub fn create_import_blob(
     let hmac_key = kdfa(
         parent_name_alg,
         &seed,
-        "INTEGRITY",
+        KDF_INTEGRITY,
         &parent_name_len_bytes,
         parent_name,
         integrity_key_bits,
