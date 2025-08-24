@@ -152,7 +152,11 @@ impl PrivateKey {
         Ok(Self { key })
     }
 
-    /// Convert to TPM's `TpmtPublic` data.
+    /// Converts key to `TpmtPublic`.
+    ///
+    /// Implementation note: according to TCG TPM 2.0 Structures specification,
+    /// exponent zero maps to the default RSA exponent 65537, and the support
+    /// for other values is optional.
     ///
     /// # Errors
     ///
@@ -162,19 +166,22 @@ impl PrivateKey {
             ParsedKey::Rsa(rsa_key) => {
                 let modulus_bytes = rsa_key.n().to_bytes_be();
                 let key_bits = u16::try_from(modulus_bytes.len() * 8)
-                    .map_err(|_| TpmError::Parse("RSA key size too large".to_string()))?;
+                    .map_err(|_| TpmError::Parse("RSA key is too large".to_string()))?;
 
-                let public_exponent = {
+                let exponent = {
                     let e_bytes = rsa_key.e().to_bytes_be();
                     if e_bytes.len() > 4 {
-                        return Err(TpmError::Parse(
-						"RSA public exponent is larger than 32 bits and is not supported for import."
-								.to_string(),
-						));
+                        return Err(TpmError::Parse("RSA exponent is too large".to_string()));
                     }
                     let mut buf = [0u8; 4];
                     buf[4 - e_bytes.len()..].copy_from_slice(&e_bytes);
                     u32::from_be_bytes(buf)
+                };
+
+                let exponent = if exponent == 65537 {
+                    0
+                } else {
+                    return Err(TpmError::Parse("RSA exponent is unsupported".to_string()));
                 };
 
                 Ok(TpmtPublic {
@@ -188,7 +195,7 @@ impl PrivateKey {
                         symmetric: TpmtSymDefObject::default(),
                         scheme: TpmtScheme::default(),
                         key_bits,
-                        exponent: public_exponent,
+                        exponent,
                     }),
                     unique: TpmuPublicId::Rsa(Tpm2bPublicKeyRsa::try_from(
                         modulus_bytes.as_slice(),
