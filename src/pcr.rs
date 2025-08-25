@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, device, key::tpm_alg_id_to_str, PcrOutput, TpmDevice, TpmError};
+use crate::{device, key::tpm_alg_id_to_str, PcrOutput, TpmDevice, TpmError};
 use pest::Parser as PestParser;
 use pest_derive::Parser;
 use std::collections::BTreeMap;
@@ -14,16 +14,8 @@ use tpm2_protocol::{data, message};
 pub struct PcrSelectionParser;
 
 /// Gets the number of PCRs from the TPM.
-pub(crate) fn get_pcr_count(
-    chip: &mut TpmDevice,
-    log_format: cli::LogFormat,
-) -> Result<usize, TpmError> {
-    let cap_data = chip.get_capability(
-        data::TpmCap::Pcrs,
-        0,
-        device::TPM_CAP_PROPERTY_MAX,
-        log_format,
-    )?;
+pub(crate) fn get_pcr_count(chip: &mut TpmDevice) -> Result<usize, TpmError> {
+    let cap_data = chip.get_capability(data::TpmCap::Pcrs, 0, device::TPM_CAP_PROPERTY_MAX)?;
     let Some(first_cap) = cap_data.into_iter().next() else {
         return Err(TpmError::Execution(
             "TPM reported no capabilities for PCRs.".to_string(),

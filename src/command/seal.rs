@@ -4,14 +4,13 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Object, Seal},
-    get_auth_sessions, input_to_bytes, parse_args,
-    util::{build_to_vec, consume_and_get_parent_handle},
-    Command, CommandIo, CommandType, ObjectData, TpmDevice, TpmError, ID_SEALED_DATA,
+    cli::{Commands, Object, Seal},
+    get_auth_sessions, get_tpm_device, input_to_bytes, parse_args,
+    util::build_to_vec,
+    Command, CommandIo, CommandType, ObjectData, TpmError, ID_SEALED_DATA,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use log::warn;
 use std::io;
 use tpm2_protocol::{
     data::{
@@ -19,7 +18,7 @@ use tpm2_protocol::{
         TpmAlgId, TpmaObject, TpmlPcrSelection, TpmsKeyedhashParms, TpmsSensitiveCreate,
         TpmtPublic, TpmtScheme, TpmuPublicId, TpmuPublicParms,
     },
-    message::{TpmCreateCommand, TpmFlushContextCommand},
+    message::TpmCreateCommand,
 };
 
 const ABOUT: &str = "Seals a keyedhash object";
@@ -73,100 +72,83 @@ impl Command for Seal {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(io::stdout())?;
         let session = io.take_session()?;
-        let (parent_handle, needs_flush) =
-            consume_and_get_parent_handle(&mut io, chip, log_format)?;
-        let result = (|| {
-            let data_to_seal_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
-            let Object::KeyData(data_str) = data_to_seal_obj else {
-                unreachable!()
-            };
-            let data_to_seal = input_to_bytes(&data_str)?;
 
-            let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
-            if self.object_password.password.is_some() {
-                object_attributes |= TpmaObject::USER_WITH_AUTH;
-            }
-            let public_template = TpmtPublic {
-                object_type: TpmAlgId::KeyedHash,
-                name_alg: TpmAlgId::Sha256,
-                object_attributes,
-                auth_policy: Tpm2bDigest::default(),
-                parameters: TpmuPublicParms::KeyedHash(TpmsKeyedhashParms {
-                    scheme: TpmtScheme {
-                        scheme: TpmAlgId::Null,
-                    },
-                }),
-                unique: TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
-            };
+        let parent_handle_guard = io.consume_handle()?;
+        let parent_handle = parent_handle_guard.handle();
 
-            let sealed_obj_password = self
-                .object_password
-                .password
-                .as_deref()
-                .unwrap_or("")
-                .as_bytes();
-            let cmd = TpmCreateCommand {
-                parent_handle: parent_handle.0.into(),
-                in_sensitive: Tpm2bSensitiveCreate {
-                    inner: TpmsSensitiveCreate {
-                        user_auth: Tpm2bAuth::try_from(sealed_obj_password)?,
-                        data: Tpm2bSensitiveData::try_from(data_to_seal.as_slice())?,
-                    },
-                },
-                in_public: Tpm2bPublic {
-                    inner: public_template,
-                },
-                outside_info: Tpm2bData::default(),
-                creation_pcr: TpmlPcrSelection::default(),
-            };
-            let handles = [parent_handle.into()];
-            let sessions = get_auth_sessions(
-                &cmd,
-                &handles,
-                session.as_ref(),
-                self.parent_password.password.as_deref(),
-            )?;
-            let (resp, _) = chip.execute(&cmd, &sessions, log_format)?;
+        let data_to_seal_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
+        let Object::KeyData(data_str) = data_to_seal_obj else {
+            return Err(TpmError::Execution(
+                "Expected a KeyData object from the pipeline".to_string(),
+            ));
+        };
+        let data_to_seal = input_to_bytes(&data_str)?;
 
-            let create_resp = resp.Create().map_err(|e| {
-                TpmError::Execution(format!("unexpected response type for Create: {e:?}"))
-            })?;
-            let pub_bytes = build_to_vec(&create_resp.out_public)?;
-            let priv_bytes = build_to_vec(&create_resp.out_private)?;
-
-            let data = ObjectData {
-                oid: ID_SEALED_DATA.to_string(),
-                empty_auth: sealed_obj_password.is_empty(),
-                parent: format!("{parent_handle:#010x}"),
-                public: base64_engine.encode(pub_bytes),
-                private: base64_engine.encode(priv_bytes),
-            };
-            let new_object = Object::Key(data);
-            io.push_object(new_object);
-            io.finalize()
-        })();
-
-        if needs_flush {
-            let flush_cmd = TpmFlushContextCommand {
-                flush_handle: parent_handle.into(),
-            };
-            if let Err(flush_err) = chip.execute(&flush_cmd, &[], log_format) {
-                warn!(
-                    "Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
-                );
-                if result.is_ok() {
-                    return Err(flush_err);
-                }
-            }
+        let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
+        if self.object_password.password.is_some() {
+            object_attributes |= TpmaObject::USER_WITH_AUTH;
         }
-        result
+        let public_template = TpmtPublic {
+            object_type: TpmAlgId::KeyedHash,
+            name_alg: TpmAlgId::Sha256,
+            object_attributes,
+            auth_policy: Tpm2bDigest::default(),
+            parameters: TpmuPublicParms::KeyedHash(TpmsKeyedhashParms {
+                scheme: TpmtScheme {
+                    scheme: TpmAlgId::Null,
+                },
+            }),
+            unique: TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
+        };
+
+        let sealed_obj_password = self
+            .object_password
+            .password
+            .as_deref()
+            .unwrap_or("")
+            .as_bytes();
+        let cmd = TpmCreateCommand {
+            parent_handle: parent_handle.0.into(),
+            in_sensitive: Tpm2bSensitiveCreate {
+                inner: TpmsSensitiveCreate {
+                    user_auth: Tpm2bAuth::try_from(sealed_obj_password)?,
+                    data: Tpm2bSensitiveData::try_from(data_to_seal.as_slice())?,
+                },
+            },
+            in_public: Tpm2bPublic {
+                inner: public_template,
+            },
+            outside_info: Tpm2bData::default(),
+            creation_pcr: TpmlPcrSelection::default(),
+        };
+        let handles = [parent_handle.into()];
+        let sessions = get_auth_sessions(
+            &cmd,
+            &handles,
+            session.as_ref(),
+            self.parent_password.password.as_deref(),
+        )?;
+        let (resp, _) = chip.execute(&cmd, &sessions)?;
+
+        let create_resp = resp.Create().map_err(|e| {
+            TpmError::Execution(format!("unexpected response type for Create: {e:?}"))
+        })?;
+        let pub_bytes = build_to_vec(&create_resp.out_public)?;
+        let priv_bytes = build_to_vec(&create_resp.out_private)?;
+
+        let data = ObjectData {
+            oid: ID_SEALED_DATA.to_string(),
+            empty_auth: sealed_obj_password.is_empty(),
+            parent: format!("{parent_handle:#010x}"),
+            public: base64_engine.encode(pub_bytes),
+            private: base64_engine.encode(priv_bytes),
+        };
+        let new_object = Object::Key(data);
+        io.push_object(new_object);
+        io.finalize()
     }
 }

@@ -4,9 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, Object, PcrRead},
-    get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, Command, CommandIo,
-    CommandType, TpmDevice, TpmError,
+    cli::{Commands, Object, PcrRead},
+    get_pcr_count, get_tpm_device, parse_args, parse_pcr_selection, pcr_response_to_output,
+    Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::message::TpmPcrReadCommand;
@@ -53,18 +53,14 @@ impl Command for PcrRead {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
-        let pcr_count = get_pcr_count(chip, log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
+        let pcr_count = get_pcr_count(&mut chip)?;
         let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
 
         let cmd = TpmPcrReadCommand { pcr_selection_in };
-        let (resp, _) = chip.execute(&cmd, &[], log_format)?;
+        let (resp, _) = chip.execute(&cmd, &[])?;
         let pcr_read_resp = resp
             .PcrRead()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;

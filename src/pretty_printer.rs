@@ -258,7 +258,6 @@ pretty_trace_struct!(Tpm2bPublic, inner => "inner");
 pretty_trace_struct!(Tpm2bSensitiveCreate, inner => "inner");
 pretty_trace_struct!(data::Tpm2bCreationData, inner => "inner");
 
-// Commands
 pretty_trace_struct!(TpmCreatePrimaryCommand, primary_handle => "primaryHandle", in_sensitive => "inSensitive", in_public => "inPublic", outside_info => "outsideInfo", creation_pcr => "creationPcr");
 pretty_trace_struct!(TpmContextSaveCommand, save_handle => "saveHandle");
 pretty_trace_struct!(TpmEvictControlCommand, auth => "auth", object_handle => "objectHandle", persistent_handle => "persistentHandle");
@@ -279,7 +278,6 @@ pretty_trace_struct!(TpmGetCapabilityCommand, cap => "cap", property => "propert
 pretty_trace_struct!(TpmStartAuthSessionCommand, tpm_key => "tpmKey", bind => "bind", nonce_caller => "nonceCaller", encrypted_salt => "encryptedSalt", session_type => "sessionType", symmetric => "symmetric", auth_hash => "authHash");
 pretty_trace_struct!(TpmContextLoadCommand, context => "context");
 
-// Responses
 pretty_trace_struct!(TpmCreatePrimaryResponse, object_handle => "objectHandle", out_public => "outPublic", creation_data => "creationData", creation_hash => "creationHash", creation_ticket => "creationTicket", name => "name");
 pretty_trace_struct!(TpmContextSaveResponse, context => "context");
 pretty_trace_struct!(TpmEvictControlResponse,);

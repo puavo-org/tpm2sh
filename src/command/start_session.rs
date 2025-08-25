@@ -4,8 +4,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Object, StartSession},
-    parse_args, Command, CommandType, SessionData, TpmDevice, TpmError,
+    cli::{Commands, Object, StartSession},
+    parse_args, Command, CommandType, SessionData, TpmError, TPM_DEVICE,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -66,12 +66,12 @@ impl Command for StartSession {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = TPM_DEVICE
+            .get()
+            .unwrap()
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
         let mut nonce_bytes = vec![0; 16];
         thread_rng().fill_bytes(&mut nonce_bytes);
 
@@ -86,7 +86,7 @@ impl Command for StartSession {
             symmetric: TpmtSymDefObject::default(),
             auth_hash,
         };
-        let (response, _) = chip.execute(&cmd, &[], log_format)?;
+        let (response, _) = chip.execute(&cmd, &[])?;
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;

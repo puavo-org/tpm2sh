@@ -3,8 +3,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Object, Objects},
-    parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
+    cli::{Commands, Object, Objects},
+    get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
 };
 use tpm2_protocol::data::TpmRh;
 
@@ -38,20 +38,16 @@ impl Command for Objects {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let device = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut device = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
 
-        let transient_handles = cli::get_handles(device, TpmRh::TransientFirst, log_format)?;
+        let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
             io.push_object(Object::Handle(handle));
         }
 
-        let persistent_handles = cli::get_handles(device, TpmRh::PersistentFirst, log_format)?;
+        let persistent_handles = device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
             io.push_object(Object::Handle(handle));
         }

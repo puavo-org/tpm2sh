@@ -2,12 +2,12 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, get_auth_sessions, session::AuthSession, TpmDevice, TpmError};
-use log::debug;
+use crate::{get_tpm_device, TpmError};
 use std::{cmp::Ordering, str::FromStr};
 use tpm2_protocol::{
+    self,
     data::{self, TpmAlgId, TpmEccCurve, TpmtPublic},
-    message::{TpmFlushContextCommand, TpmLoadCommand, TpmReadPublicCommand},
+    message::TpmReadPublicCommand,
     TpmTransient,
 };
 
@@ -206,81 +206,13 @@ pub fn enumerate_all() -> impl Iterator<Item = Alg> {
 /// # Errors
 ///
 /// Returns `TpmError` if the `ReadPublic` command fails.
-pub fn read_public(
-    chip: &mut TpmDevice,
-    handle: TpmTransient,
-    log_format: cli::LogFormat,
-) -> Result<(TpmtPublic, data::Tpm2bName), TpmError> {
+pub fn read_public(handle: TpmTransient) -> Result<(TpmtPublic, data::Tpm2bName), TpmError> {
     let cmd = TpmReadPublicCommand {
         object_handle: handle.0.into(),
     };
-    let (resp, _) = chip.execute(&cmd, &[], log_format)?;
+    let (resp, _) = get_tpm_device()?.execute(&cmd, &[])?;
     let read_public_resp = resp
         .ReadPublic()
         .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
     Ok((read_public_resp.out_public.inner, read_public_resp.name))
-}
-
-/// Loads a TPM object, executes an operation with its handle, and ensures it's flushed.
-///
-/// This helper abstracts the common pattern:
-/// 1. Load a key/object from its public and private parts under a parent.
-/// 2. Execute a given closure with the handle of the newly loaded transient object.
-/// 3. Automatically flush the transient object's context after the operation completes.
-///
-/// # Errors
-///
-/// Returns the error from the primary operation (`op`). If `op` succeeds but
-/// the subsequent flush fails, the flush error is returned instead.
-#[allow(clippy::module_name_repetitions)]
-#[allow(clippy::too_many_arguments)]
-pub fn with_loaded_object<F, R>(
-    chip: &mut TpmDevice,
-    parent_handle: TpmTransient,
-    parent_password: &cli::PasswordArgs,
-    session: Option<&AuthSession>,
-    in_public: data::Tpm2bPublic,
-    in_private: data::Tpm2bPrivate,
-    log_format: cli::LogFormat,
-    op: F,
-) -> Result<R, TpmError>
-where
-    F: FnOnce(&mut TpmDevice, TpmTransient) -> Result<R, TpmError>,
-{
-    let load_cmd = TpmLoadCommand {
-        parent_handle: parent_handle.0.into(),
-        in_private,
-        in_public,
-    };
-    let parent_handles = [parent_handle.into()];
-    let parent_sessions = get_auth_sessions(
-        &load_cmd,
-        &parent_handles,
-        session,
-        parent_password.password.as_deref(),
-    )?;
-    let (load_resp, _) = chip.execute(&load_cmd, &parent_sessions, log_format)?;
-    let load_resp = load_resp
-        .Load()
-        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-    let object_handle = load_resp.object_handle;
-
-    let op_result = op(chip, object_handle);
-
-    let flush_cmd = TpmFlushContextCommand {
-        flush_handle: object_handle.into(),
-    };
-    let flush_err = chip.execute(&flush_cmd, &[], log_format).err();
-
-    if let Some(e) = flush_err {
-        debug!(
-            target: "cli::device",
-            "failed to flush object context after operation: handle = {object_handle:?}, error = {e}"
-        );
-        if op_result.is_ok() {
-            return Err(e);
-        }
-    }
-
-    op_result
 }

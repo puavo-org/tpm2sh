@@ -4,8 +4,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Convert, KeyFormat, Object},
-    parse_args, Command, CommandIo, CommandType, ObjectData, TpmDevice, TpmError, TpmKey,
+    cli::{Commands, Convert, KeyFormat, Object},
+    parse_args, Command, CommandIo, CommandType, ObjectData, TpmError, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -119,12 +119,8 @@ impl Command for Convert {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        _device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut io = CommandIo::new(std::io::stdout())?;
 
         let input_key = match self.from {
             KeyFormat::Json => {

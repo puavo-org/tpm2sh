@@ -4,9 +4,10 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, CreatePrimary, Object},
-    get_auth_sessions, parse_args, parse_persistent_handle,
-    util::{build_to_vec, with_transient_handle},
+    cli::{Commands, CreatePrimary, Object},
+    command_io::ScopedHandle,
+    get_auth_sessions, get_tpm_device, parse_args, parse_persistent_handle,
+    util::build_to_vec,
     Alg, AlgInfo, Command, CommandIo, CommandType, ContextData, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -114,15 +115,11 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
 /// # Errors
 ///
 /// Returns a `TpmError` if the context cannot be saved.
-pub fn save_key_context(
-    chip: &mut TpmDevice,
-    handle: TpmTransient,
-    log_format: cli::LogFormat,
-) -> Result<ContextData, TpmError> {
+fn save_key_context(chip: &mut TpmDevice, handle: TpmTransient) -> Result<ContextData, TpmError> {
     let save_command = TpmContextSaveCommand {
         save_handle: handle,
     };
-    let (resp, _) = chip.execute(&save_command, &[], log_format)?;
+    let (resp, _) = chip.execute(&save_command, &[])?;
 
     let save_resp = resp
         .ContextSave()
@@ -181,13 +178,9 @@ impl Command for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
         let session = io.take_session()?;
 
         let primary_handle: TpmRh = self.hierarchy.into();
@@ -214,7 +207,7 @@ impl Command for CreatePrimary {
             session.as_ref(),
             self.password.password.as_deref(),
         )?;
-        let (resp, _) = chip.execute(&cmd, &sessions, log_format)?;
+        let (resp, _) = chip.execute(&cmd, &sessions)?;
 
         let create_primary_resp = resp
             .CreatePrimary()
@@ -230,18 +223,15 @@ impl Command for CreatePrimary {
             let evict_handles = [TpmRh::Owner as u32, object_handle.into()];
             let evict_sessions =
                 get_auth_sessions(&evict_cmd, &evict_handles, session.as_ref(), None)?;
-            let (resp, _) = chip.execute(&evict_cmd, &evict_sessions, log_format)?;
+            let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
             Object::Handle(persistent_handle.into())
         } else {
-            let mut final_context = None;
-            with_transient_handle(chip, object_handle, log_format, |chip_inner| {
-                final_context = Some(save_key_context(chip_inner, object_handle, log_format)?);
-                Ok(())
-            })?;
-            Object::Context(final_context.unwrap())
+            let _handle_guard = ScopedHandle::new(object_handle);
+            let context = save_key_context(&mut chip, object_handle)?;
+            Object::Context(context)
         };
 
         io.push_object(final_object);

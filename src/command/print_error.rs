@@ -4,8 +4,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, PrintError},
-    parse_args, parse_tpm_rc, Command, CommandType, TpmDevice, TpmError,
+    cli::{Commands, PrintError},
+    parse_args, parse_tpm_rc, Command, CommandType, TpmError,
 };
 use lexopt::prelude::*;
 
@@ -50,11 +50,7 @@ impl Command for PrintError {
         true
     }
 
-    fn run(
-        &self,
-        _device: &mut Option<TpmDevice>,
-        _log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
+    fn run(&self) -> Result<(), TpmError> {
         println!("{}", self.rc);
         Ok(())
     }

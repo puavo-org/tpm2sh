@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use std::{io::Error as IoError, num::ParseIntError};
+use std::{io::Error as IoError, num::ParseIntError, str::Utf8Error};
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 
@@ -84,12 +84,6 @@ impl From<ParseIntError> for TpmError {
     }
 }
 
-impl From<indicatif::style::TemplateError> for TpmError {
-    fn from(err: indicatif::style::TemplateError) -> Self {
-        TpmError::Execution(format!("Spinner template error: {err}"))
-    }
-}
-
 impl From<pkcs8::der::Error> for TpmError {
     fn from(err: pkcs8::der::Error) -> Self {
         TpmError::Parse(err.to_string())
@@ -111,5 +105,11 @@ impl From<pem::PemError> for TpmError {
 impl From<TpmErrorKind> for TpmError {
     fn from(err: TpmErrorKind) -> Self {
         TpmError::Build(err)
+    }
+}
+
+impl From<Utf8Error> for TpmError {
+    fn from(err: Utf8Error) -> Self {
+        TpmError::Parse(err.to_string())
     }
 }

@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use cli::{execute_cli, TpmError};
+use cli::{execute_cli, TpmError, POOL};
 use log::error;
 
 fn main() {
@@ -10,7 +10,11 @@ fn main() {
         .format_timestamp_micros()
         .init();
 
-    match execute_cli() {
+    let result = execute_cli();
+
+    POOL.join();
+
+    match result {
         Ok(()) => {}
         Err(TpmError::Help) => std::process::exit(0),
         Err(TpmError::UsageHandled) => std::process::exit(2),

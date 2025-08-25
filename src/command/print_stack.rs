@@ -3,10 +3,10 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, PrintStack},
+    cli::{Commands, PrintStack},
     parse_args,
     pretty_printer::pretty_print_json_object_to_stdout,
-    Command, CommandIo, CommandType, TpmDevice, TpmError,
+    Command, CommandIo, CommandType, TpmError,
 };
 use std::io;
 
@@ -44,12 +44,8 @@ impl Command for PrintStack {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails.
-    fn run(
-        &self,
-        _device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut io = CommandIo::new(io::stdout())?;
         let objects = io.consume_all_objects()?;
 
         if objects.is_empty() {

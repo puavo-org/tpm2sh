@@ -2,20 +2,44 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
+use std::io;
+
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Import, Object},
-    create_import_blob, get_auth_sessions, parse_args, read_public,
-    util::{build_to_vec, consume_and_get_parent_handle},
-    Command, CommandIo, CommandType, ObjectData, PrivateKey, TpmDevice, TpmError,
-    ID_IMPORTABLE_KEY,
+    cli::{Commands, Import, Object},
+    get_auth_sessions, get_tpm_device, parse_args, read_public,
+    util::build_to_vec,
+    Command, CommandIo, CommandType, ObjectData, PrivateKey, TpmError, ID_IMPORTABLE_KEY,
 };
+use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
+use cfb_mode::Encryptor;
+use cipher::{AsyncStreamCipher, KeyIvInit};
+use hmac::{Hmac, Mac};
 use lexopt::prelude::*;
-use log::warn;
-use std::io;
-use tpm2_protocol::data::{Tpm2bPublic, TpmAlgId, TpmtSymDef, TpmuSymKeyBits, TpmuSymMode};
-use tpm2_protocol::message::{TpmFlushContextCommand, TpmImportCommand};
+use num_traits::FromPrimitive;
+use p256::{ecdh::diffie_hellman, elliptic_curve::sec1::FromEncodedPoint, AffinePoint, SecretKey};
+use p384::{
+    ecdh::diffie_hellman as p384_ecdh, elliptic_curve::sec1::ToEncodedPoint as ToEncodedPoint384,
+    AffinePoint as AffinePoint384, PublicKey as PublicKey384, SecretKey as SecretKey384,
+};
+use p521::{
+    ecdh::diffie_hellman as p521_ecdh, AffinePoint as AffinePoint521, PublicKey as PublicKey521,
+    SecretKey as SecretKey521,
+};
+use rand::{thread_rng, RngCore};
+use rsa::{Oaep, RsaPublicKey};
+use sha1::Sha1;
+use sha2::{Sha256, Sha384, Sha512};
+use tpm2_protocol::{
+    data::{
+        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
+        TpmsEccPoint, TpmtPublic, TpmtSymDef, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits,
+        TpmuSymMode,
+    },
+    message::TpmImportCommand,
+    TpmBuild, TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
+};
 
 const ABOUT: &str = "Imports an external key";
 const USAGE: &str = "tpm2sh import [OPTIONS]";
@@ -28,6 +52,352 @@ const OPTIONS: &[CommandLineOption] = &[
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
+
+const KDF_DUPLICATE: &str = "DUPLICATE\0";
+const KDF_INTEGRITY: &[u8] = b"INTEGRITY\0";
+const KDF_STORAGE: &[u8] = b"STORAGE\0";
+
+fn kdfa(
+    auth_hash: TpmAlgId,
+    hmac_key: &[u8],
+    label: &[u8],
+    context_a: &[u8],
+    context_b: &[u8],
+    key_bits: u16,
+) -> Result<Vec<u8>, TpmError> {
+    let mut key_stream = Vec::new();
+    let key_bytes = key_bits as usize / 8;
+
+    macro_rules! kdfa_hmac {
+        ($digest:ty) => {{
+            let mut counter: u32 = 1;
+            while key_stream.len() < key_bytes {
+                let mut hmac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
+                    .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
+
+                hmac.update(&counter.to_be_bytes());
+                hmac.update(label);
+                hmac.update(context_a);
+                hmac.update(context_b);
+                hmac.update(&u32::from(key_bits).to_be_bytes());
+
+                let result = hmac.finalize().into_bytes();
+                let remaining = key_bytes - key_stream.len();
+                let to_take = remaining.min(result.len());
+                key_stream.extend_from_slice(&result[..to_take]);
+
+                counter += 1;
+            }
+        }};
+    }
+
+    match auth_hash {
+        TpmAlgId::Sha256 => kdfa_hmac!(Sha256),
+        TpmAlgId::Sha384 => kdfa_hmac!(Sha384),
+        TpmAlgId::Sha512 => kdfa_hmac!(Sha512),
+        _ => {
+            return Err(TpmError::Execution(format!(
+                "unsupported hash algorithm for KDFa: {auth_hash}"
+            )))
+        }
+    }
+
+    Ok(key_stream)
+}
+
+/// Encrypts the import seed using the parent's RSA public key.
+///
+/// See Table 27 in TCG TPM 2.0 Architectures specification for more information.
+fn protect_seed_with_rsa(
+    parent_public: &TpmtPublic,
+    seed: &[u8; 32],
+) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), TpmError> {
+    let n = match &parent_public.unique {
+        TpmuPublicId::Rsa(data) => Ok(data.as_ref()),
+        _ => Err(TpmError::Execution("RSA: invalid unique".to_string())),
+    }?;
+    let e_raw = match &parent_public.parameters {
+        TpmuPublicParms::Rsa(params) => Ok(params.exponent),
+        _ => Err(TpmError::Execution("RSA: invalid parameters".to_string())),
+    }?;
+    let e = if e_raw == 0 { 65537 } else { e_raw };
+    let rsa_pub_key = RsaPublicKey::new(
+        rsa::BigUint::from_bytes_be(n),
+        rsa::BigUint::from_u32(e)
+            .ok_or_else(|| TpmError::Execution("RSA: invalid integer conversion".to_string()))?,
+    )
+    .map_err(|e| TpmError::Execution(format!("RSA: invalid public key: {e}")))?;
+
+    let mut rng = thread_rng();
+    let parent_name_alg = parent_public.name_alg;
+
+    let encrypted_seed_result = match parent_name_alg {
+        TpmAlgId::Sha1 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha1, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha256 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha256, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha384 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha384, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        TpmAlgId::Sha512 => rsa_pub_key.encrypt(
+            &mut rng,
+            Oaep::new_with_label::<Sha512, _>(KDF_DUPLICATE),
+            seed,
+        ),
+        _ => {
+            return Err(TpmError::Execution(format!(
+                "RSA-OAEP: unsupported nameAlg: {parent_name_alg:?}"
+            )));
+        }
+    };
+    let encrypted_seed = encrypted_seed_result
+        .map_err(|e| TpmError::Execution(format!("RSA-OAEP: encryption failed: {e}")))?;
+
+    Ok((
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())?,
+        Tpm2bData::default(),
+    ))
+}
+
+macro_rules! ecdh_protect_seed {
+    (
+		$parent_point:expr, $name_alg:expr, $seed:expr,
+		$pk_ty:ty, $sk_ty:ty, $affine_ty:ty, $dh_fn:ident, $encoded_point_ty:ty
+	) => {{
+        let encoded_point = <$encoded_point_ty>::from_affine_coordinates(
+            $parent_point.x.as_ref().into(),
+            $parent_point.y.as_ref().into(),
+            false,
+        );
+        let affine_point_opt: Option<$affine_ty> =
+            <$affine_ty>::from_encoded_point(&encoded_point).into();
+        let affine_point = affine_point_opt.ok_or_else(|| {
+            TpmError::Execution("Invalid parent public key: not on curve".to_string())
+        })?;
+
+        if affine_point.is_identity().into() {
+            return Err(TpmError::Execution(
+                "Invalid parent public key: point at infinity".to_string(),
+            ));
+        }
+
+        let parent_pk = <$pk_ty>::from_affine(affine_point)
+            .map_err(|e| TpmError::Execution(format!("failed to construct public key: {e}")))?;
+
+        let context_b: Vec<u8> = [$parent_point.x.as_ref(), $parent_point.y.as_ref()].concat();
+
+        let ephemeral_sk = <$sk_ty>::random(&mut thread_rng());
+        let ephemeral_pk_bytes_encoded = ephemeral_sk.public_key().to_encoded_point(false);
+        let ephemeral_pk_bytes = ephemeral_pk_bytes_encoded.as_bytes();
+        if ephemeral_pk_bytes.is_empty()
+            || ephemeral_pk_bytes[0] != crate::crypto::UNCOMPRESSED_POINT_TAG
+        {
+            return Err(TpmError::Execution(
+                "invalid ephemeral ECC public key format".to_string(),
+            ));
+        }
+        let context_a = &ephemeral_pk_bytes[1..];
+
+        let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
+        let z = shared_secret.raw_secret_bytes();
+        let sym_material = kdfa($name_alg, z, KDF_STORAGE, context_a, &context_b, 256)?;
+        let (aes_key, iv) = sym_material.split_at(16);
+        let mut encrypted_seed_buf = *$seed;
+        let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
+        cipher.encrypt(&mut encrypted_seed_buf);
+
+        (encrypted_seed_buf, ephemeral_pk_bytes.to_vec())
+    }};
+}
+
+/// Encrypts the import seed using an ECDH shared secret derived from the parent's ECC public key.
+fn protect_seed_with_ecc(
+    parent_public: &TpmtPublic,
+    seed: &[u8; 32],
+) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), TpmError> {
+    let (parent_point, curve_id) = match (&parent_public.unique, &parent_public.parameters) {
+        (TpmuPublicId::Ecc(point), TpmuPublicParms::Ecc(params)) => Ok((point, params.curve_id)),
+        _ => Err(TpmError::Execution(
+            "parent is not a valid ECC key".to_string(),
+        )),
+    }?;
+
+    let (encrypted_seed, ephemeral_point_bytes) = match curve_id {
+        TpmEccCurve::NistP256 => ecdh_protect_seed!(
+            parent_point,
+            parent_public.name_alg,
+            seed,
+            p256::PublicKey,
+            SecretKey,
+            AffinePoint,
+            diffie_hellman,
+            p256::EncodedPoint
+        ),
+        TpmEccCurve::NistP384 => ecdh_protect_seed!(
+            parent_point,
+            parent_public.name_alg,
+            seed,
+            PublicKey384,
+            SecretKey384,
+            AffinePoint384,
+            p384_ecdh,
+            p384::EncodedPoint
+        ),
+        TpmEccCurve::NistP521 => ecdh_protect_seed!(
+            parent_point,
+            parent_public.name_alg,
+            seed,
+            PublicKey521,
+            SecretKey521,
+            AffinePoint521,
+            p521_ecdh,
+            p521::EncodedPoint
+        ),
+        _ => {
+            return Err(TpmError::Execution(format!(
+                "unsupported parent ECC curve for import: {curve_id:?}"
+            )))
+        }
+    };
+
+    if ephemeral_point_bytes.is_empty()
+        || ephemeral_point_bytes[0] != crate::crypto::UNCOMPRESSED_POINT_TAG
+    {
+        return Err(TpmError::Execution(
+            "invalid ephemeral ECC public key format".to_string(),
+        ));
+    }
+    let coord_len = (ephemeral_point_bytes.len() - 1) / 2;
+    let x = &ephemeral_point_bytes[1..=coord_len];
+    let y = &ephemeral_point_bytes[1 + coord_len..];
+
+    Ok((
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())?,
+        Tpm2bData::try_from(
+            build_to_vec(&TpmsEccPoint {
+                x: tpm2_protocol::data::Tpm2bEccParameter::try_from(x)?,
+                y: tpm2_protocol::data::Tpm2bEccParameter::try_from(y)?,
+            })?
+            .as_slice(),
+        )?,
+    ))
+}
+
+/// Creates the encrypted blobs needed for `TPM2_Import`.
+///
+/// This function protects the sensitive private key material for import under a
+/// parent key. It secures the seed used for symmetric encryption using the
+/// parent's public key (RSA-OAEP for RSA parents, ECDH for ECC parents).
+///
+/// # Errors
+///
+/// Returns a `TpmError` for cryptographic failures or invalid input.
+fn create_import_blob(
+    parent_public: &TpmtPublic,
+    object_alg: TpmAlgId,
+    private_bytes: &[u8],
+    parent_name: &[u8],
+) -> Result<(Tpm2bPrivate, Tpm2bEncryptedSecret, Tpm2bData), TpmError> {
+    let mut seed = [0u8; 32];
+    thread_rng().fill_bytes(&mut seed);
+    let parent_name_alg = parent_public.name_alg;
+
+    let (in_sym_seed, encryption_key) = match parent_public.object_type {
+        TpmAlgId::Rsa => protect_seed_with_rsa(parent_public, &seed)?,
+        TpmAlgId::Ecc => protect_seed_with_ecc(parent_public, &seed)?,
+        _ => {
+            return Err(TpmError::Execution(
+                "parent key must be RSA or ECC".to_string(),
+            ))
+        }
+    };
+
+    let parent_name_len_bytes = u16::try_from(parent_name.len())
+        .map_err(|_| TpmErrorKind::InvalidValue)?
+        .to_be_bytes();
+
+    let sym_key = kdfa(
+        parent_name_alg,
+        &seed,
+        KDF_STORAGE,
+        &parent_name_len_bytes,
+        parent_name,
+        128,
+    )?;
+
+    let integrity_key_bits = u16::try_from(
+        tpm2_protocol::tpm_hash_size(&parent_name_alg).ok_or_else(|| {
+            TpmError::Execution("parent nameAlg is not a supported hash".to_string())
+        })? * 8,
+    )
+    .map_err(|_| TpmError::Execution("hash size conversion error".to_string()))?;
+
+    let hmac_key = kdfa(
+        parent_name_alg,
+        &seed,
+        KDF_INTEGRITY,
+        &parent_name_len_bytes,
+        parent_name,
+        integrity_key_bits,
+    )?;
+
+    let sensitive =
+        tpm2_protocol::data::TpmtSensitive::from_private_bytes(object_alg, private_bytes)?;
+    let sensitive_data_vec = build_to_vec(&sensitive)?;
+
+    let mut enc_data = sensitive_data_vec;
+    let iv = [0u8; 16];
+
+    let cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
+    cipher.encrypt(&mut enc_data);
+
+    macro_rules! do_integrity_hmac {
+        ($digest:ty) => {{
+            let mut integrity_mac =
+                <hmac::Hmac<$digest> as hmac::Mac>::new_from_slice(&hmac_key)
+                    .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
+            integrity_mac.update(&enc_data);
+            integrity_mac.update(parent_name);
+            integrity_mac.finalize().into_bytes().to_vec()
+        }};
+    }
+
+    let final_mac = match parent_name_alg {
+        TpmAlgId::Sha256 => do_integrity_hmac!(Sha256),
+        TpmAlgId::Sha384 => do_integrity_hmac!(Sha384),
+        TpmAlgId::Sha512 => do_integrity_hmac!(Sha512),
+        _ => {
+            return Err(TpmError::Execution(format!(
+                "unsupported hash algorithm for integrity HMAC: {parent_name_alg}"
+            )))
+        }
+    };
+
+    let duplicate_blob = {
+        let mut duplicate_blob_buf = [0u8; TPM_MAX_COMMAND_SIZE];
+        let len = {
+            let mut writer = TpmWriter::new(&mut duplicate_blob_buf);
+            tpm2_protocol::data::Tpm2bDigest::try_from(final_mac.as_slice())?.build(&mut writer)?;
+            writer.write_bytes(&enc_data)?;
+            writer.len()
+        };
+        duplicate_blob_buf[..len].to_vec()
+    };
+
+    Ok((
+        Tpm2bPrivate::try_from(duplicate_blob.as_slice())?,
+        in_sym_seed,
+        encryption_key,
+    ))
+}
 
 impl Command for Import {
     fn command_type(&self) -> CommandType {
@@ -60,98 +430,80 @@ impl Command for Import {
     ///
     /// Returns a `TpmError`.
     #[allow(clippy::too_many_lines)]
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut io = CommandIo::new(io::stdout())?;
         let session = io.take_session()?;
 
-        let (parent_handle, needs_flush) =
-            consume_and_get_parent_handle(&mut io, chip, log_format)?;
-        let result = (|| {
-            let (parent_public, parent_name) = read_public(chip, parent_handle, log_format)?;
-            let parent_name_alg = parent_public.name_alg;
+        let parent_handle_guard = io.consume_handle()?;
+        let parent_handle = parent_handle_guard.handle();
 
-            let private_key_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
-            let Object::KeyData(private_key_path) = private_key_obj else {
-                unreachable!()
-            };
+        let (parent_public, parent_name) = read_public(parent_handle)?;
+        let parent_name_alg = parent_public.name_alg;
 
-            let private_key = PrivateKey::from_pem_file(private_key_path.trim().as_ref())?;
-            let public = private_key.to_tpmt_public(parent_name_alg)?;
-            let public_bytes = Tpm2bPublic {
-                inner: public.clone(),
-            };
-            let private_bytes = private_key.get_sensitive_blob()?;
+        let private_key_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
+        let Object::KeyData(private_key_path) = private_key_obj else {
+            return Err(TpmError::Execution(
+                "Expected a KeyData object from the pipeline".to_string(),
+            ));
+        };
 
-            let (duplicate, in_sym_seed, encryption_key) = create_import_blob(
-                &parent_public,
-                public.object_type,
-                &private_bytes,
-                &parent_name,
-            )?;
+        let private_key = PrivateKey::from_pem_file(private_key_path.trim().as_ref())?;
+        let public = private_key.to_tpmt_public(parent_name_alg)?;
+        let public_bytes = Tpm2bPublic {
+            inner: public.clone(),
+        };
+        let private_bytes = private_key.get_sensitive_blob()?;
 
-            let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
-                TpmtSymDef::default()
-            } else {
-                TpmtSymDef {
-                    algorithm: TpmAlgId::Aes,
-                    key_bits: TpmuSymKeyBits::Aes(128),
-                    mode: TpmuSymMode::Aes(TpmAlgId::Cfb),
-                }
-            };
+        let (duplicate, in_sym_seed, encryption_key) = create_import_blob(
+            &parent_public,
+            public.object_type,
+            &private_bytes,
+            &parent_name,
+        )?;
 
-            let import_cmd = TpmImportCommand {
-                parent_handle: parent_handle.0.into(),
-                encryption_key,
-                object_public: public_bytes,
-                duplicate,
-                in_sym_seed,
-                symmetric_alg,
-            };
-            let handles = [parent_handle.into()];
-            let sessions = get_auth_sessions(
-                &import_cmd,
-                &handles,
-                session.as_ref(),
-                self.parent_password.password.as_deref(),
-            )?;
-            let (resp, _) = chip.execute(&import_cmd, &sessions, log_format)?;
-            let import_resp = resp.Import().map_err(|e| {
-                TpmError::Execution(format!("unexpected response type for Import: {e:?}"))
-            })?;
-            let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
-            let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
-            let data = ObjectData {
-                oid: ID_IMPORTABLE_KEY.to_string(),
-                empty_auth: false,
-                parent: format!("{parent_handle:#010x}"),
-                public: base64_engine.encode(pub_key_bytes),
-                private: base64_engine.encode(priv_key_bytes),
-            };
-
-            let new_object = Object::Key(data);
-            io.push_object(new_object);
-            io.finalize()
-        })();
-
-        if needs_flush {
-            let flush_cmd = TpmFlushContextCommand {
-                flush_handle: parent_handle.into(),
-            };
-            if let Err(flush_err) = chip.execute(&flush_cmd, &[], log_format) {
-                warn!(
-                    "Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
-                );
-                if result.is_ok() {
-                    return Err(flush_err);
-                }
+        let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
+            TpmtSymDef::default()
+        } else {
+            TpmtSymDef {
+                algorithm: TpmAlgId::Aes,
+                key_bits: TpmuSymKeyBits::Aes(128),
+                mode: TpmuSymMode::Aes(TpmAlgId::Cfb),
             }
-        }
+        };
 
-        result
+        let import_cmd = TpmImportCommand {
+            parent_handle: parent_handle.0.into(),
+            encryption_key,
+            object_public: public_bytes,
+            duplicate,
+            in_sym_seed,
+            symmetric_alg,
+        };
+        let handles = [parent_handle.into()];
+        let sessions = get_auth_sessions(
+            &import_cmd,
+            &handles,
+            session.as_ref(),
+            self.parent_password.password.as_deref(),
+        )?;
+
+        let mut chip = get_tpm_device()?;
+        let (resp, _) = chip.execute(&import_cmd, &sessions)?;
+        let import_resp = resp.Import().map_err(|e| {
+            TpmError::Execution(format!("unexpected response type for Import: {e:?}"))
+        })?;
+        let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
+        let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
+        let data = ObjectData {
+            oid: ID_IMPORTABLE_KEY.to_string(),
+            empty_auth: false,
+            parent: format!("{parent_handle:#010x}"),
+            public: base64_engine.encode(pub_key_bytes),
+            private: base64_engine.encode(priv_key_bytes),
+        };
+
+        let new_object = Object::Key(data);
+        io.push_object(new_object);
+        io.finalize()
     }
 }

@@ -4,8 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Algorithms, Commands},
-    enumerate_all, parse_args, Command, CommandType, TpmDevice, TpmError, TPM_CAP_PROPERTY_MAX,
+    cli::{Algorithms, Commands},
+    enumerate_all, get_tpm_device, parse_args, Command, CommandType, TpmError,
+    TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
 use regex::Regex;
@@ -17,11 +18,9 @@ const USAGE: &str = "tpm2sh algorithms [OPTIONS] [FILTER]";
 const ARGS: &[CommandLineArgument] = &[("FILTER", "A regex to filter the algorithm names")];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
-fn get_chip_algorithms(
-    device: &mut TpmDevice,
-    log_format: cli::LogFormat,
-) -> Result<HashSet<TpmAlgId>, TpmError> {
-    let cap_data_vec = device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX, log_format)?;
+fn get_chip_algorithms() -> Result<HashSet<TpmAlgId>, TpmError> {
+    let mut device = get_tpm_device()?;
+    let cap_data_vec = device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
     let algs: HashSet<TpmAlgId> = cap_data_vec
         .into_iter()
         .flat_map(|cap_data| {
@@ -65,13 +64,8 @@ impl Command for Algorithms {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let device = device.as_mut().unwrap();
-        let chip_algorithms = get_chip_algorithms(device, log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let chip_algorithms = get_chip_algorithms()?;
         let cli_algorithms = enumerate_all();
 
         let supported_algorithms: Vec<_> = cli_algorithms
