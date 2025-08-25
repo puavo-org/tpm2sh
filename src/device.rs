@@ -2,24 +2,19 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, pretty_printer::PrettyTrace, TpmError};
-use indicatif::{ProgressBar, ProgressStyle};
+use crate::{get_log_format, pretty_printer::PrettyTrace, TpmError, POOL};
 use log::{debug, trace, warn};
 use std::{
-    collections::HashSet,
     fs::{File, OpenOptions},
     io::{self, IsTerminal, Read, Write},
     path::Path,
-    sync::mpsc,
-    thread,
+    sync::mpsc::{self, RecvTimeoutError},
     time::Duration,
 };
 use tpm2_protocol::{
     self,
     data::{self, TpmSt, TpmuCapabilities},
-    message::{
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmReadPublicCommand, TpmResponseBody,
-    },
+    message::{TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmResponseBody},
     TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
@@ -62,11 +57,11 @@ impl TpmDevice {
         &mut self,
         command: &C,
         sessions: &[tpm2_protocol::data::TpmsAuthCommand],
-        log_format: cli::LogFormat,
     ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), TpmError>
     where
         C: tpm2_protocol::message::TpmHeaderCommand + PrettyTrace,
     {
+        let log_format = get_log_format();
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut command_buf);
@@ -79,35 +74,41 @@ impl TpmDevice {
             writer.len()
         };
         let command_bytes = &command_buf[..len];
-        let style = ProgressStyle::with_template("{spinner:.cyan.bold} {msg}")?
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]);
 
         let (tx, rx) = mpsc::channel::<()>();
-        let spinner_thread = if std::io::stderr().is_terminal() {
-            let handle = thread::spawn(move || {
-                if let Err(mpsc::RecvTimeoutError::Timeout) =
-                    rx.recv_timeout(Duration::from_secs(1))
-                {
-                    let pb = ProgressBar::new_spinner();
-                    pb.enable_steady_tick(Duration::from_millis(100));
-                    pb.set_style(style);
-                    pb.set_message("Waiting for TPM...");
+        if std::io::stderr().is_terminal() {
+            POOL.execute(move || {
+                if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
+                    let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                    let message = "Waiting for TPM...";
+                    let mut stderr = io::stderr();
 
-                    let _ = rx.recv();
-                    pb.finish_with_message("✔ TPM operation complete.");
+                    let _ = write!(stderr, "\x1B[?25l");
+                    let _ = stderr.flush();
+
+                    let mut i = 0;
+                    while let Err(RecvTimeoutError::Timeout) =
+                        rx.recv_timeout(Duration::from_millis(100))
+                    {
+                        let frame = spinner_chars[i % spinner_chars.len()];
+                        let _ = write!(stderr, "\r\x1B[1m\x1B[36m{frame} {message}\x1B[0m");
+                        let _ = stderr.flush();
+                        i += 1;
+                    }
+
+                    let final_message = "✔ TPM operation complete.";
+                    let _ = write!(stderr, "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h");
+                    let _ = stderr.flush();
                 }
             });
-            Some(handle)
-        } else {
-            None
-        };
+        }
 
         match log_format {
-            cli::LogFormat::Pretty => {
+            crate::cli::LogFormat::Pretty => {
                 trace!(target: "cli::device", "{}", C::COMMAND);
                 command.pretty_trace("", 1);
             }
-            cli::LogFormat::Plain => {
+            crate::cli::LogFormat::Plain => {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
             }
         }
@@ -118,15 +119,14 @@ impl TpmDevice {
         self.file.read_exact(&mut header)?;
 
         let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            unreachable!();
+            return Err(TpmError::Execution(
+                "Could not read response size".to_string(),
+            ));
         };
         let size = u32::from_be_bytes(size_bytes) as usize;
 
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
             drop(tx);
-            if let Some(handle) = spinner_thread {
-                let _ = handle.join();
-            }
             return Err(TpmError::Parse(format!(
                 "Invalid response size in header: {size}"
             )));
@@ -137,19 +137,16 @@ impl TpmDevice {
         self.file.read_exact(&mut resp_buf[header.len()..])?;
 
         drop(tx);
-        if let Some(handle) = spinner_thread {
-            let _ = handle.join();
-        }
 
         let result = tpm2_protocol::message::tpm_parse_response(C::COMMAND, &resp_buf)?;
 
         match &result {
             Ok((rc, response_body, _)) => match log_format {
-                cli::LogFormat::Pretty => {
+                crate::cli::LogFormat::Pretty => {
                     trace!(target: "cli::device", "Response (rc={rc})");
                     response_body.pretty_trace("", 1);
                 }
-                cli::LogFormat::Plain => {
+                crate::cli::LogFormat::Plain => {
                     trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
                 }
             },
@@ -170,29 +167,28 @@ impl TpmDevice {
         }
     }
 
-    /// Retrieves the names for a list of handles.
+    /// Retrieves all handles of a specific type from the TPM.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the underlying `execute` call fails.
-    pub fn get_handle_names(
-        &mut self,
-        handles: &[u32],
-        log_format: cli::LogFormat,
-    ) -> Result<Vec<Vec<u8>>, TpmError> {
-        handles
-            .iter()
-            .map(|&handle| {
-                let cmd = TpmReadPublicCommand {
-                    object_handle: handle.into(),
-                };
-                let (resp, _) = self.execute(&cmd, &[], log_format)?;
-                let read_public_resp = resp
-                    .ReadPublic()
-                    .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-                Ok(read_public_resp.name.to_vec())
+    /// Returns a `TpmError` if the `get_capability` call to the TPM device fails.
+    pub fn get_all_handles(&mut self, handle_type: data::TpmRh) -> Result<Vec<u32>, TpmError> {
+        let cap_data_vec = self.get_capability(
+            data::TpmCap::Handles,
+            handle_type as u32,
+            TPM_CAP_PROPERTY_MAX,
+        )?;
+        let handles: Vec<u32> = cap_data_vec
+            .into_iter()
+            .flat_map(|cap_data| {
+                if let TpmuCapabilities::Handles(handles) = cap_data.data {
+                    handles.iter().copied().collect()
+                } else {
+                    Vec::new()
+                }
             })
-            .collect()
+            .collect();
+        Ok(handles)
     }
 
     /// Fetches and returns all capabilities of a certain type from the TPM.
@@ -206,7 +202,6 @@ impl TpmDevice {
         cap: data::TpmCap,
         mut property: u32,
         count: u32,
-        log_format: cli::LogFormat,
     ) -> Result<Vec<data::TpmsCapabilityData>, TpmError> {
         let mut all_caps = Vec::new();
         loop {
@@ -216,7 +211,7 @@ impl TpmDevice {
                 property_count: count,
             };
 
-            let (resp, _) = self.execute(&cmd, &[], log_format)?;
+            let (resp, _) = self.execute(&cmd, &[])?;
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
@@ -243,58 +238,5 @@ impl TpmDevice {
             }
         }
         Ok(all_caps)
-    }
-
-    /// Retrieves all algorithms supported by the TPM.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_algorithms(
-        &mut self,
-        log_format: cli::LogFormat,
-    ) -> Result<HashSet<data::TpmAlgId>, TpmError> {
-        let cap_data_vec =
-            self.get_capability(data::TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX, log_format)?;
-        let algs: HashSet<data::TpmAlgId> = cap_data_vec
-            .into_iter()
-            .flat_map(|cap_data| {
-                if let TpmuCapabilities::Algs(p) = cap_data.data {
-                    p.iter().map(|prop| prop.alg).collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
-        Ok(algs)
-    }
-
-    /// Retrieves all handles of a specific type from the TPM.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(
-        &mut self,
-        handle_type: data::TpmRh,
-        log_format: cli::LogFormat,
-    ) -> Result<Vec<u32>, TpmError> {
-        let cap_data_vec = self.get_capability(
-            data::TpmCap::Handles,
-            handle_type as u32,
-            TPM_CAP_PROPERTY_MAX,
-            log_format,
-        )?;
-        let handles: Vec<u32> = cap_data_vec
-            .into_iter()
-            .flat_map(|cap_data| {
-                if let TpmuCapabilities::Handles(handles) = cap_data.data {
-                    handles.iter().copied().collect()
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
-        Ok(handles)
     }
 }

@@ -32,11 +32,11 @@ const-oid = { version = "0.9.6", features = ["db"] }
 env_logger = "0.11.8"
 hex = "0.4"
 hmac = "0.12"
-indicatif = "0.17"
 json = "0.12"
 lexopt = "0.3"
 log = "0.4.27"
 num-traits = "0.2"
+once_cell = "1.21"
 p256 = { version = "0.13", features = ["ecdh"] }
 p384 = { version = "0.13", features = ["ecdh"] }
 p521 = { version = "0.13", features = ["ecdh"] }
@@ -51,7 +51,8 @@ rsa = { version = "0.9", features = ["sha1", "sha2"] }
 sha1 = "0.10"
 sha2 = "0.10"
 thiserror = "2.0"
-tpm2-protocol = "0.10.0"
+threadpool = "1.8.1"
+tpm2-protocol = "0.10"
 
 [dev-dependencies]
 pest = { version = "2.8", features = ["pretty-print"] }

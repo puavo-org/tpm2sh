@@ -4,9 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, PcrEvent},
+    cli::{Commands, PcrEvent},
     get_auth_sessions, input_to_bytes, parse_args, parse_hex_u32, Command, CommandIo, CommandType,
-    TpmDevice, TpmError,
+    TpmError, TPM_DEVICE,
 };
 use lexopt::prelude::*;
 use std::io::Write;
@@ -73,13 +73,13 @@ impl Command for PcrEvent {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = TPM_DEVICE
+            .get()
+            .unwrap()
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+        let mut io = CommandIo::new(std::io::stdout())?;
         let session = io.take_session()?;
 
         if session.is_none() && self.password.password.is_none() {
@@ -104,7 +104,7 @@ impl Command for PcrEvent {
             session.as_ref(),
             self.password.password.as_deref(),
         )?;
-        let (resp, _) = chip.execute(&command, &sessions, log_format)?;
+        let (resp, _) = chip.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 

@@ -2,17 +2,64 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, AuthSession, TpmError};
+use crate::{cli, get_tpm_device, AuthSession, TpmError, POOL, TPM_DEVICE};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
+use log::warn;
 use polling::{Event, Events, Poller};
 use std::io::{self, IsTerminal, Read, Write};
 use std::time::Duration;
-use tpm2_protocol::data::{Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmaSession};
+use tpm2_protocol::{
+    self,
+    data::{self, Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmaSession},
+    message::{TpmContextLoadCommand, TpmFlushContextCommand},
+    TpmParse, TpmTransient,
+};
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 #[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+
+/// A wrapper for a transient handle that ensures it is flushed when it goes out of scope.
+#[derive(Debug)]
+pub struct ScopedHandle {
+    handle: TpmTransient,
+}
+
+impl ScopedHandle {
+    /// Creates a new scoped handle.
+    #[must_use]
+    pub fn new(handle: TpmTransient) -> Self {
+        Self { handle }
+    }
+
+    /// Returns the inner handle.
+    #[must_use]
+    pub const fn handle(&self) -> TpmTransient {
+        self.handle
+    }
+}
+
+impl Drop for ScopedHandle {
+    fn drop(&mut self) {
+        let handle = self.handle;
+        POOL.execute(move || {
+            if let Some(device_arc) = TPM_DEVICE.get() {
+                if let Ok(mut device) = device_arc.lock() {
+                    let cmd = TpmFlushContextCommand {
+                        flush_handle: handle.into(),
+                    };
+                    if let Err(e) = device.execute(&cmd, &[]) {
+                        warn!(
+                            target: "cli::util",
+                            "Failed to flush transient handle {handle:#010x}: {e}"
+                        );
+                    }
+                }
+            }
+        });
+    }
+}
 
 /// Checks if stdin has data ready to be read within a 100ms timeout.
 ///
@@ -49,7 +96,6 @@ pub struct CommandIo<W: Write> {
     writer: W,
     input_objects: Vec<cli::Object>,
     output_objects: Vec<cli::Object>,
-    log_format: cli::LogFormat,
     hydrated: bool,
 }
 
@@ -59,12 +105,11 @@ impl<W: Write> CommandIo<W> {
     /// # Errors
     ///
     /// Returns a `TpmError` if reading from the input stream fails.
-    pub fn new(writer: W, log_format: cli::LogFormat) -> Result<Self, TpmError> {
+    pub fn new(writer: W) -> Result<Self, TpmError> {
         Ok(Self {
             writer,
             input_objects: Vec::new(),
             output_objects: Vec::new(),
-            log_format,
             hydrated: false,
         })
     }
@@ -100,11 +145,6 @@ impl<W: Write> CommandIo<W> {
 
         self.hydrated = true;
         Ok(())
-    }
-
-    /// Returns the log format.
-    pub const fn log_format(&self) -> cli::LogFormat {
-        self.log_format
     }
 
     /// Returns a mutable reference to the underlying writer.
@@ -211,5 +251,40 @@ impl<W: Write> CommandIo<W> {
 
         writeln!(self.writer, "{}", output_doc.dump())?;
         Ok(())
+    }
+
+    /// Resolves an object from the input stack into a transient handle that
+    /// will be auto-flushed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TpmError` if the object is of an invalid type or cannot be loaded.
+    pub fn consume_handle(&mut self) -> Result<ScopedHandle, TpmError> {
+        let parent_obj = self.consume_object(|obj| {
+            matches!(obj, cli::Object::Handle(_) | cli::Object::Context(_))
+        })?;
+
+        let mut device = get_tpm_device()?;
+        match parent_obj {
+            cli::Object::Handle(handle) => Ok(ScopedHandle::new(TpmTransient(handle))),
+            cli::Object::Context(context_data) => {
+                let context_blob = base64_engine.decode(context_data.context_blob)?;
+                let (context, remainder) = data::TpmsContext::parse(&context_blob)?;
+                if !remainder.is_empty() {
+                    return Err(TpmError::Parse(
+                        "Context object contains trailing data".to_string(),
+                    ));
+                }
+                let load_cmd = TpmContextLoadCommand { context };
+                let (resp, _) = device.execute(&load_cmd, &[])?;
+                let load_resp = resp
+                    .ContextLoad()
+                    .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                Ok(ScopedHandle::new(load_resp.loaded_handle))
+            }
+            _ => Err(TpmError::Parse(
+                "pipeline object is not a valid handle or context".to_string(),
+            )),
+        }
     }
 }

@@ -4,9 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, Object, Save},
-    get_auth_sessions, parse_args, parse_hex_u32, parse_persistent_handle, Command, CommandIo,
-    CommandType, TpmDevice, TpmError,
+    cli::{Commands, Object, Save},
+    get_auth_sessions, get_tpm_device, parse_args, parse_hex_u32, parse_persistent_handle, Command,
+    CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand};
@@ -69,20 +69,18 @@ impl Command for Save {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
         let session = io.take_session()?;
         let object_handle = if self.from == "-" {
             let obj = io.consume_object(|obj| matches!(obj, Object::Handle(_)))?;
             if let Object::Handle(h) = obj {
                 h
             } else {
-                unreachable!()
+                return Err(TpmError::Execution(
+                    "Expected a Handle object from the pipeline".to_string(),
+                ));
             }
         } else {
             parse_hex_u32(&self.from)?
@@ -102,7 +100,7 @@ impl Command for Save {
             session.as_ref(),
             self.password.password.as_deref(),
         )?;
-        let (resp, _) = chip.execute(&evict_cmd, &sessions, log_format)?;
+        let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
         let obj = Object::Handle(persistent_handle.into());

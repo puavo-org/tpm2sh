@@ -4,8 +4,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Object, Policy},
-    get_pcr_count, parse_args, parse_pcr_selection, AuthSession, Command, CommandIo, CommandType,
-    PcrOutput, SessionData, TpmDevice, TpmError,
+    get_pcr_count, get_tpm_device, parse_args, parse_pcr_selection, AuthSession, Command,
+    CommandIo, CommandType, PcrOutput, SessionData, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use pest::iterators::{Pair, Pairs};
@@ -40,7 +40,7 @@ enum PolicyAst {
 
 const ABOUT: &str = "Builds a policy using a policy expression";
 const USAGE: &str = "tpm2sh policy [OPTIONS] <EXPRESSION>";
-const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g. 'pcr(\\\"sha256:0\\\",\\\"...\\\")'")];
+const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g. 'pcr(\"sha256:0\",\"...\")'")];
 const OPTIONS: &[CommandLineOption] = &[
     (None, "--password", "<PASSWORD>", "Authorization value"),
     (Some("-h"), "--help", "", "Print help information"),
@@ -115,7 +115,6 @@ struct PolicyExecutor<'a, 'b, W: Write> {
     io: &'b mut CommandIo<W>,
     password: &'b cli::PasswordArgs,
     pcr_count: usize,
-    log_format: cli::LogFormat,
     session: Option<AuthSession>,
 }
 
@@ -136,7 +135,9 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
                 .io
                 .consume_object(|obj| matches!(obj, Object::PcrValues(_)))?;
             let Object::PcrValues(pcr_values) = obj else {
-                unreachable!()
+                return Err(TpmError::Execution(
+                    "Expected PcrValues object from pipeline".to_string(),
+                ));
             };
             PcrOutput::to_tpml_pcr_selection(&pcr_values, self.pcr_count)?
         } else {
@@ -152,7 +153,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
         };
         let handles = [session_handle.into()];
         let sessions = crate::get_auth_sessions(&cmd, &handles, self.session.as_ref(), None)?;
-        self.chip.execute(&cmd, &sessions, self.log_format)?;
+        self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -177,7 +178,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
             self.session.as_ref(),
             self.password.password.as_deref(),
         )?;
-        self.chip.execute(&cmd, &sessions, self.log_format)?;
+        self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -188,23 +189,14 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
     ) -> Result<(), TpmError> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
-            let branch_handle = start_trial_session(
-                self.chip,
-                self.session.as_ref(),
-                cli::SessionType::Trial,
-                self.log_format,
-            )?;
+            let branch_handle =
+                start_trial_session(self.chip, self.session.as_ref(), cli::SessionType::Trial)?;
             self.execute_policy_ast(branch_handle, branch_ast)?;
 
-            let digest = get_policy_digest(
-                self.chip,
-                self.session.as_ref(),
-                branch_handle,
-                self.log_format,
-            )?;
+            let digest = get_policy_digest(self.chip, self.session.as_ref(), branch_handle)?;
             branch_digests.try_push(digest)?;
 
-            flush_session(self.chip, branch_handle, self.log_format)?;
+            flush_session(self.chip, branch_handle)?;
         }
 
         let cmd = TpmPolicyOrCommand {
@@ -213,7 +205,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
         };
         let handles = [session_handle.into()];
         let sessions = crate::get_auth_sessions(&cmd, &handles, self.session.as_ref(), None)?;
-        self.chip.execute(&cmd, &sessions, self.log_format)?;
+        self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -242,7 +234,6 @@ fn start_trial_session(
     chip: &mut TpmDevice,
     session: Option<&AuthSession>,
     session_type: cli::SessionType,
-    log_format: cli::LogFormat,
 ) -> Result<TpmSession, TpmError> {
     let auth_hash = session.map_or(TpmAlgId::Sha256, |s| s.auth_hash);
     let cmd = TpmStartAuthSessionCommand {
@@ -254,22 +245,18 @@ fn start_trial_session(
         symmetric: TpmtSymDefObject::default(),
         auth_hash,
     };
-    let (resp, _) = chip.execute(&cmd, &[], log_format)?;
+    let (resp, _) = chip.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
         .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
     Ok(start_resp.session_handle)
 }
 
-fn flush_session(
-    chip: &mut TpmDevice,
-    handle: TpmSession,
-    log_format: cli::LogFormat,
-) -> Result<(), TpmError> {
+fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
-    chip.execute(&cmd, &[], log_format)?;
+    chip.execute(&cmd, &[])?;
     Ok(())
 }
 
@@ -277,14 +264,13 @@ fn get_policy_digest(
     chip: &mut TpmDevice,
     session: Option<&AuthSession>,
     session_handle: TpmSession,
-    log_format: cli::LogFormat,
 ) -> Result<Tpm2bDigest, TpmError> {
     let cmd = TpmPolicyGetDigestCommand {
         policy_session: session_handle.0.into(),
     };
     let handles = [session_handle.into()];
     let sessions = crate::get_auth_sessions(&cmd, &handles, session, None)?;
-    let (resp, _) = chip.execute(&cmd, &sessions, log_format)?;
+    let (resp, _) = chip.execute(&cmd, &sessions)?;
     let digest_resp = resp
         .PolicyGetDigest()
         .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
@@ -334,13 +320,9 @@ impl Command for Policy {
     /// # Errors
     ///
     /// Returns a `TpmError` on failure.
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(io::stdout())?;
         let session = io.take_session()?;
 
         let (mut session_data, session_handle, is_trial) = if let Some(s) = session {
@@ -348,11 +330,12 @@ impl Command for Policy {
             if let Object::Session(data) = obj {
                 (data, s.handle, false)
             } else {
-                unreachable!()
+                return Err(TpmError::Execution(
+                    "Expected Session object from pipeline".to_string(),
+                ));
             }
         } else {
-            let trial_handle =
-                start_trial_session(chip, None, cli::SessionType::Trial, log_format)?;
+            let trial_handle = start_trial_session(&mut chip, None, cli::SessionType::Trial)?;
             (
                 SessionData {
                     handle: trial_handle.into(),
@@ -364,22 +347,21 @@ impl Command for Policy {
         };
         let ast = parse_policy_expression(&self.expression)
             .map_err(|e| TpmError::Parse(format!("failed to parse policy expression: {e}")))?;
-        let pcr_count = get_pcr_count(chip, log_format)?;
+        let pcr_count = get_pcr_count(&mut chip)?;
 
         let mut executor = PolicyExecutor {
-            chip,
+            chip: &mut chip,
             io: &mut io,
             password: &self.password,
             pcr_count,
-            log_format,
             session: None,
         };
         executor.execute_policy_ast(session_handle, &ast)?;
 
-        let final_digest = get_policy_digest(chip, None, session_handle, log_format)?;
+        let final_digest = get_policy_digest(&mut chip, None, session_handle)?;
         session_data.policy_digest = hex::encode(&*final_digest);
         if is_trial {
-            flush_session(chip, session_handle, log_format)?;
+            flush_session(&mut chip, session_handle)?;
             println!("{}", session_data.policy_digest);
         } else {
             let next_session = Object::Session(session_data);

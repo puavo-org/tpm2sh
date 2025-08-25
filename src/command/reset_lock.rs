@@ -4,8 +4,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, ResetLock},
-    get_auth_sessions, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
+    cli::{Commands, ResetLock},
+    get_auth_sessions, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
@@ -47,13 +47,9 @@ impl Command for ResetLock {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
         let session = io.take_session()?;
 
         let command = TpmDictionaryAttackLockResetCommand {
@@ -66,7 +62,7 @@ impl Command for ResetLock {
             session.as_ref(),
             self.password.password.as_deref(),
         )?;
-        let (resp, _) = chip.execute(&command, &sessions, log_format)?;
+        let (resp, _) = chip.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
         io.finalize()

@@ -5,17 +5,16 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{self, Commands, Load},
-    get_auth_sessions, parse_args,
-    util::{consume_and_get_parent_handle, pop_object_data},
-    Command, CommandIo, CommandType, TpmDevice, TpmError,
+    get_auth_sessions, get_tpm_device, parse_args,
+    util::pop_object_data,
+    Command, CommandIo, CommandType, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use log::warn;
 use std::io;
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
-    message::{TpmFlushContextCommand, TpmLoadCommand},
+    message::TpmLoadCommand,
     TpmParse,
 };
 
@@ -61,68 +60,48 @@ impl Command for Load {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(io::stdout())?;
         let session = io.take_session()?;
-        let (parent_handle, needs_flush) =
-            consume_and_get_parent_handle(&mut io, chip, log_format)?;
-        let result = (|| {
-            let object_data = pop_object_data(&mut io)?;
 
-            let pub_bytes = base64_engine
-                .decode(object_data.public)
-                .map_err(|e| TpmError::Parse(e.to_string()))?;
-            let priv_bytes = base64_engine
-                .decode(object_data.private)
-                .map_err(|e| TpmError::Parse(e.to_string()))?;
+        let parent_handle_guard = io.consume_handle()?;
+        let parent_handle = parent_handle_guard.handle();
 
-            let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
-            let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;
+        let object_data = pop_object_data(&mut io)?;
 
-            let load_cmd = TpmLoadCommand {
-                parent_handle: parent_handle.0.into(),
-                in_private,
-                in_public,
-            };
+        let pub_bytes = base64_engine
+            .decode(object_data.public)
+            .map_err(|e| TpmError::Parse(e.to_string()))?;
+        let priv_bytes = base64_engine
+            .decode(object_data.private)
+            .map_err(|e| TpmError::Parse(e.to_string()))?;
 
-            let handles = [parent_handle.into()];
-            let sessions = get_auth_sessions(
-                &load_cmd,
-                &handles,
-                session.as_ref(),
-                self.parent_password.password.as_deref(),
-            )?;
+        let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
+        let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;
 
-            let (resp, _) = chip.execute(&load_cmd, &sessions, log_format)?;
-            let load_resp = resp
-                .Load()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+        let load_cmd = TpmLoadCommand {
+            parent_handle: parent_handle.0.into(),
+            in_private,
+            in_public,
+        };
 
-            let new_object = cli::Object::Handle(load_resp.object_handle.into());
-            io.push_object(new_object);
+        let handles = [parent_handle.into()];
+        let sessions = get_auth_sessions(
+            &load_cmd,
+            &handles,
+            session.as_ref(),
+            self.parent_password.password.as_deref(),
+        )?;
 
-            io.finalize()
-        })();
+        let (resp, _) = chip.execute(&load_cmd, &sessions)?;
+        let load_resp = resp
+            .Load()
+            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-        if needs_flush {
-            let flush_cmd = TpmFlushContextCommand {
-                flush_handle: parent_handle.into(),
-            };
-            if let Err(flush_err) = chip.execute(&flush_cmd, &[], log_format) {
-                warn!(
-                    "Operation succeeded, but failed to flush transient parent handle {parent_handle:#010x}: {flush_err}"
-                );
-                if result.is_ok() {
-                    return Err(flush_err);
-                }
-            }
-        }
+        let new_object = cli::Object::Handle(load_resp.object_handle.into());
+        io.push_object(new_object);
 
-        result
+        io.finalize()
     }
 }

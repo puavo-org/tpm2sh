@@ -3,8 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    util, Alg, Command, CommandType, ContextData, ObjectData, PcrOutput, SessionData, TpmDevice,
-    TpmError,
+    util, Alg, Command, CommandType, ContextData, ObjectData, PcrOutput, SessionData, TpmError,
 };
 use std::str::FromStr;
 use tpm2_protocol::{
@@ -312,29 +311,25 @@ impl Command for Commands {
         }
     }
 
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: crate::cli::LogFormat,
-    ) -> Result<(), crate::TpmError> {
+    fn run(&self) -> Result<(), crate::TpmError> {
         match self {
-            Self::Algorithms(args) => args.run(device, log_format),
-            Self::Convert(args) => args.run(device, log_format),
-            Self::CreatePrimary(args) => args.run(device, log_format),
-            Self::Delete(args) => args.run(device, log_format),
-            Self::Import(args) => args.run(device, log_format),
-            Self::Load(args) => args.run(device, log_format),
-            Self::Objects(args) => args.run(device, log_format),
-            Self::PcrEvent(args) => args.run(device, log_format),
-            Self::PcrRead(args) => args.run(device, log_format),
-            Self::Policy(args) => args.run(device, log_format),
-            Self::PrintError(args) => args.run(device, log_format),
-            Self::PrintStack(args) => args.run(device, log_format),
-            Self::ResetLock(args) => args.run(device, log_format),
-            Self::Save(args) => args.run(device, log_format),
-            Self::Seal(args) => args.run(device, log_format),
-            Self::StartSession(args) => args.run(device, log_format),
-            Self::Unseal(args) => args.run(device, log_format),
+            Self::Algorithms(args) => args.run(),
+            Self::Convert(args) => args.run(),
+            Self::CreatePrimary(args) => args.run(),
+            Self::Delete(args) => args.run(),
+            Self::Import(args) => args.run(),
+            Self::Load(args) => args.run(),
+            Self::Objects(args) => args.run(),
+            Self::PcrEvent(args) => args.run(),
+            Self::PcrRead(args) => args.run(),
+            Self::Policy(args) => args.run(),
+            Self::PrintError(args) => args.run(),
+            Self::PrintStack(args) => args.run(),
+            Self::ResetLock(args) => args.run(),
+            Self::Save(args) => args.run(),
+            Self::Seal(args) => args.run(),
+            Self::StartSession(args) => args.run(),
+            Self::Unseal(args) => args.run(),
         }
     }
 }
@@ -435,17 +430,4 @@ pub struct Convert {
 pub struct Policy {
     pub expression: String,
     pub password: PasswordArgs,
-}
-
-/// Retrieves all handles of a specific type from the TPM.
-///
-/// # Errors
-///
-/// Returns a `TpmError` if the `get_capability` call to the TPM device fails.
-pub fn get_handles(
-    device: &mut crate::TpmDevice,
-    handle_type: TpmRh,
-    log_format: LogFormat,
-) -> Result<Vec<u32>, TpmError> {
-    device.get_all_handles(handle_type, log_format)
 }

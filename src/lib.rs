@@ -20,7 +20,7 @@ pub mod session;
 pub mod util;
 
 pub use self::arg_parser::parse_cli;
-pub use self::command_io::CommandIo;
+pub use self::command_io::{CommandIo, ScopedHandle};
 pub use self::crypto::*;
 pub use self::device::*;
 pub use self::error::TpmError;
@@ -30,6 +30,28 @@ pub use self::pcr::*;
 pub use self::pretty_printer::PrettyTrace;
 pub use self::session::*;
 pub use self::util::*;
+use once_cell::sync::{Lazy, OnceCell};
+use std::sync::{Arc, Mutex, MutexGuard};
+use threadpool::ThreadPool;
+
+pub static POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(1));
+pub static TPM_DEVICE: OnceCell<Arc<Mutex<TpmDevice>>> = OnceCell::new();
+pub static LOG_FORMAT: OnceCell<cli::LogFormat> = OnceCell::new();
+
+/// Safely accesses the global `TPM_DEVICE` static.
+fn get_tpm_device() -> Result<MutexGuard<'static, TpmDevice>, TpmError> {
+    let device_arc = TPM_DEVICE
+        .get()
+        .ok_or_else(|| TpmError::Execution("TPM device has not been initialized".to_string()))?;
+    device_arc
+        .lock()
+        .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))
+}
+
+/// Safely accesses the global `LOG_FORMAT` static, falling back to the default.
+pub(crate) fn get_log_format() -> cli::LogFormat {
+    *LOG_FORMAT.get().unwrap_or(&cli::LogFormat::default())
+}
 
 /// Describes the role a command plays in the JSON pipeline.
 pub enum CommandType {
@@ -208,11 +230,7 @@ pub trait Command {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError>;
+    fn run(&self) -> Result<(), TpmError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -226,12 +244,16 @@ pub fn execute_cli() -> Result<(), TpmError> {
     };
 
     if let Some(command) = cli.command {
-        let mut device = if command.is_local() {
-            None
-        } else {
-            Some(TpmDevice::new(&cli.device)?)
-        };
-        command.run(&mut device, cli.log_format)
+        let _ = LOG_FORMAT.set(cli.log_format);
+        if !command.is_local() {
+            let device = TpmDevice::new(&cli.device)?;
+            if TPM_DEVICE.set(Arc::new(Mutex::new(device))).is_err() {
+                return Err(TpmError::Execution(
+                    "Failed to initialize global TPM device".to_string(),
+                ));
+            }
+        }
+        command.run()
     } else {
         Ok(())
     }

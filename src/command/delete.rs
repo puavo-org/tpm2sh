@@ -3,8 +3,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, Delete, Object},
-    get_auth_sessions, parse_args, parse_hex_u32, Command, CommandIo, CommandType, TpmDevice,
+    cli::{Commands, Delete, Object},
+    get_auth_sessions, get_tpm_device, parse_args, parse_hex_u32, Command, CommandIo, CommandType,
     TpmError,
 };
 use lexopt::prelude::*;
@@ -68,13 +68,9 @@ impl Command for Delete {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(
-        &self,
-        device: &mut Option<TpmDevice>,
-        log_format: cli::LogFormat,
-    ) -> Result<(), TpmError> {
-        let chip = device.as_mut().unwrap();
-        let mut io = CommandIo::new(std::io::stdout(), log_format)?;
+    fn run(&self) -> Result<(), TpmError> {
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout())?;
         let session = io.take_session()?;
 
         let handle = if self.handle == "-" {
@@ -82,7 +78,9 @@ impl Command for Delete {
             if let Object::Handle(h) = obj {
                 h
             } else {
-                unreachable!()
+                return Err(TpmError::Execution(
+                    "Expected a Handle object from the pipeline".to_string(),
+                ));
             }
         } else {
             parse_hex_u32(&self.handle)?
@@ -103,7 +101,7 @@ impl Command for Delete {
                 session.as_ref(),
                 self.password.password.as_deref(),
             )?;
-            let (resp, _) = chip.execute(&evict_cmd, &sessions, log_format)?;
+            let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
             println!("{persistent_handle:#010x}");
@@ -112,7 +110,7 @@ impl Command for Delete {
             let flush_cmd = TpmFlushContextCommand {
                 flush_handle: flush_handle.into(),
             };
-            let (resp, _) = chip.execute(&flush_cmd, &[], log_format)?;
+            let (resp, _) = chip.execute(&flush_cmd, &[])?;
             resp.FlushContext()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
             println!("{flush_handle:#010x}");
