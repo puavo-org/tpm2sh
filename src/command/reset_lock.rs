@@ -13,7 +13,12 @@ use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 const ABOUT: &str = "Resets the dictionary attack lockout timer";
 const USAGE: &str = "tpm2sh reset-lock [OPTIONS]";
 const OPTIONS: &[CommandLineOption] = &[
-    (None, "--password", "<PASSWORD>", "Authorization value"),
+    (
+        None,
+        "--password",
+        "<PASSWORD>",
+        "Authorization value for the Lockout hierarchy",
+    ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
@@ -49,22 +54,19 @@ impl Command for ResetLock {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout())?;
-        let session = io.take_session()?;
+        let io = CommandIo::new(std::io::stdout());
 
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
         let handles = [TpmRh::Lockout as u32];
-        let sessions = get_auth_sessions(
-            &command,
-            &handles,
-            session.as_ref(),
-            self.password.password.as_deref(),
-        )?;
+        let sessions =
+            get_auth_sessions(&command, &handles, None, self.password.password.as_deref())?;
         let (resp, _) = chip.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+
+        println!("Dictionary attack lockout has been reset.");
         io.finalize()
     }
 }

@@ -7,46 +7,46 @@ use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 
 #[derive(Debug, Error)]
 pub enum TpmError {
-    #[error("TPM protocol error: {0}")]
+    #[error("TPM protocol: {0}")]
     Build(TpmErrorKind),
 
-    #[error("Help message was requested.")]
+    #[error("")]
     Help,
 
-    #[error("Execution failed: {0}")]
+    #[error("Execution: {0}")]
     Execution(String),
 
-    #[error("File operation on '{0}': {1}")]
+    #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("Invalid handle: {0}")]
+    #[error("Handle: {0}")]
     InvalidHandle(String),
 
-    #[error("I/O error: {0}")]
+    #[error("I/O: {0}")]
     Io(#[from] IoError),
 
-    #[error("JSON operation failed: {0}")]
-    Json(#[from] json::Error),
+    #[error("JSON: {0}")]
+    Json(#[from] serde_json::Error),
 
-    #[error("Argument parsing failed: {0}")]
+    #[error("Lexopt: {0}")]
     Lexopt(#[from] lexopt::Error),
 
-    #[error("Parsing failed: {0}")]
+    #[error("Parser: {0}")]
     Parse(String),
 
-    #[error("Invalid PCR selection: {0}")]
+    #[error("PCR: {0}")]
     PcrSelection(String),
 
-    #[error("TPM returned an error: {0}")]
+    #[error("TPM RC: {0}")]
     TpmRc(TpmRc),
 
-    #[error("Unexpected response type from TPM: {0}")]
+    #[error("TPM unexpected: {0}")]
     UnexpectedResponse(String),
 
     #[error("{0}")]
     Usage(String),
 
-    #[error("Usage error already handled.")]
+    #[error("")]
     UsageHandled,
 }
 
@@ -98,7 +98,7 @@ impl From<pkcs8::Error> for TpmError {
 
 impl From<pem::PemError> for TpmError {
     fn from(err: pem::PemError) -> Self {
-        TpmError::Parse(err.to_string())
+        TpmError::Parse(format!("invalid PEM data: {err}"))
     }
 }
 
@@ -111,5 +111,11 @@ impl From<TpmErrorKind> for TpmError {
 impl From<Utf8Error> for TpmError {
     fn from(err: Utf8Error) -> Self {
         TpmError::Parse(err.to_string())
+    }
+}
+
+impl From<url::ParseError> for TpmError {
+    fn from(err: url::ParseError) -> Self {
+        TpmError::Parse(format!("Invalid URI: {err}"))
     }
 }

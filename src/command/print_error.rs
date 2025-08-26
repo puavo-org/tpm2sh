@@ -11,7 +11,7 @@ use lexopt::prelude::*;
 
 const ABOUT: &str = "Encodes and print a TPM error code";
 const USAGE: &str = "tpm2sh print-error <RC>";
-const ARGS: &[CommandLineArgument] = &[("<RC>", "TPM error code")];
+const ARGS: &[CommandLineArgument] = &[("<RC>", "TPM error code (e.g., '0x100')")];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PrintError {

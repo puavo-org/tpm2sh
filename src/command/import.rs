@@ -2,14 +2,12 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use std::io;
-
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Import, Object},
+    cli::{Commands, Import},
     get_auth_sessions, get_tpm_device, parse_args, read_public,
     util::build_to_vec,
-    Command, CommandIo, CommandType, ObjectData, PrivateKey, TpmError, ID_IMPORTABLE_KEY,
+    Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmError,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -31,6 +29,7 @@ use rand::{thread_rng, RngCore};
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
+use std::io;
 use tpm2_protocol::{
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
@@ -40,10 +39,17 @@ use tpm2_protocol::{
     message::TpmImportCommand,
     TpmBuild, TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
+use url::Url;
 
 const ABOUT: &str = "Imports an external key";
-const USAGE: &str = "tpm2sh import [OPTIONS]";
+const USAGE: &str = "tpm2sh import --key <KEY_URI> [OPTIONS]";
 const OPTIONS: &[CommandLineOption] = &[
+    (
+        None,
+        "--key",
+        "<KEY_URI>",
+        "URI of the external private key to import (e.g., 'file:///path/to/key.pem')",
+    ),
     (
         None,
         "--parent-password",
@@ -53,20 +59,25 @@ const OPTIONS: &[CommandLineOption] = &[
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
-const KDF_DUPLICATE: &str = "DUPLICATE\0";
-const KDF_INTEGRITY: &[u8] = b"INTEGRITY\0";
-const KDF_STORAGE: &[u8] = b"STORAGE\0";
+const KDF_DUPLICATE: &str = "DUPLICATE";
+const KDF_INTEGRITY: &str = "INTEGRITY";
+const KDF_STORAGE: &str = "STORAGE";
 
 fn kdfa(
     auth_hash: TpmAlgId,
     hmac_key: &[u8],
-    label: &[u8],
+    label: &str,
     context_a: &[u8],
     context_b: &[u8],
     key_bits: u16,
 ) -> Result<Vec<u8>, TpmError> {
     let mut key_stream = Vec::new();
     let key_bytes = key_bits as usize / 8;
+    let label_bytes = {
+        let mut bytes = label.as_bytes().to_vec();
+        bytes.push(0);
+        bytes
+    };
 
     macro_rules! kdfa_hmac {
         ($digest:ty) => {{
@@ -76,7 +87,7 @@ fn kdfa(
                     .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
 
                 hmac.update(&counter.to_be_bytes());
-                hmac.update(label);
+                hmac.update(&label_bytes);
                 hmac.update(context_a);
                 hmac.update(context_b);
                 hmac.update(&u32::from(key_bits).to_be_bytes());
@@ -414,6 +425,9 @@ impl Command for Import {
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
         let mut args = Import::default();
         parse_args!(parser, arg, Self::help, {
+            Long("key") => {
+                args.key_uri = Some(parser.value()?.string()?);
+            }
             Long("parent-password") => {
                 args.parent_password.password = Some(parser.value()?.string()?);
             }
@@ -421,6 +435,11 @@ impl Command for Import {
                 return Err(TpmError::from(arg.unexpected()));
             }
         });
+        if args.key_uri.is_none() {
+            return Err(TpmError::Usage(
+                "Missing required argument: --key <KEY_URI>".to_string(),
+            ));
+        }
         Ok(Commands::Import(args))
     }
 
@@ -431,33 +450,38 @@ impl Command for Import {
     /// Returns a `TpmError`.
     #[allow(clippy::too_many_lines)]
     fn run(&self) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(io::stdout())?;
-        let session = io.take_session()?;
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(io::stdout());
 
-        let parent_handle_guard = io.consume_handle()?;
+        let parent_obj = io.pop_tpm()?;
+        let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
         let (parent_public, parent_name) = read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
-        let private_key_obj = io.consume_object(|obj| matches!(obj, Object::KeyData(_)))?;
-        let Object::KeyData(private_key_path) = private_key_obj else {
-            return Err(TpmError::Execution(
-                "Expected a KeyData object from the pipeline".to_string(),
+        let key_uri_str = self.key_uri.as_ref().unwrap();
+        let key_url = Url::parse(key_uri_str)?;
+        if key_url.scheme() != "file" {
+            return Err(TpmError::Usage(
+                "Key URI must use the 'file://' scheme".to_string(),
             ));
-        };
+        }
+        let private_key_path = key_url
+            .to_file_path()
+            .map_err(|()| TpmError::Parse("Invalid file path in URI".to_string()))?;
 
-        let private_key = PrivateKey::from_pem_file(private_key_path.trim().as_ref())?;
+        let private_key = PrivateKey::from_pem_file(&private_key_path)?;
         let public = private_key.to_tpmt_public(parent_name_alg)?;
-        let public_bytes = Tpm2bPublic {
+        let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
         };
-        let private_bytes = private_key.get_sensitive_blob()?;
+        let private_bytes_blob = private_key.get_sensitive_blob()?;
 
         let (duplicate, in_sym_seed, encryption_key) = create_import_blob(
             &parent_public,
             public.object_type,
-            &private_bytes,
+            &private_bytes_blob,
             &parent_name,
         )?;
 
@@ -474,7 +498,7 @@ impl Command for Import {
         let import_cmd = TpmImportCommand {
             parent_handle: parent_handle.0.into(),
             encryption_key,
-            object_public: public_bytes,
+            object_public: public_bytes_struct,
             duplicate,
             in_sym_seed,
             symmetric_alg,
@@ -483,27 +507,24 @@ impl Command for Import {
         let sessions = get_auth_sessions(
             &import_cmd,
             &handles,
-            session.as_ref(),
+            None,
             self.parent_password.password.as_deref(),
         )?;
 
-        let mut chip = get_tpm_device()?;
         let (resp, _) = chip.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
             TpmError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;
+
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
-        let data = ObjectData {
-            oid: ID_IMPORTABLE_KEY.to_string(),
-            empty_auth: false,
-            parent: format!("{parent_handle:#010x}"),
-            public: base64_engine.encode(pub_key_bytes),
-            private: base64_engine.encode(priv_key_bytes),
+
+        let new_key = Key {
+            public: format!("data://base64,{}", base64_engine.encode(pub_key_bytes)),
+            private: format!("data://base64,{}", base64_engine.encode(priv_key_bytes)),
         };
 
-        let new_object = Object::Key(data);
-        io.push_object(new_object);
+        io.push_object(PipelineObject::Key(new_key));
         io.finalize()
     }
 }

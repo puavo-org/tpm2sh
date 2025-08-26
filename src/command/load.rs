@@ -4,21 +4,20 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{self, Commands, Load},
-    get_auth_sessions, get_tpm_device, parse_args,
-    util::pop_object_data,
-    Command, CommandIo, CommandType, TpmError,
+    cli::{Commands, Load},
+    get_auth_sessions, get_tpm_device, parse_args, resolve_uri_to_bytes, util, Command, CommandIo,
+    CommandType, PipelineObject, ScopedHandle, Tpm, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::io;
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
-    message::TpmLoadCommand,
+    message::{TpmContextSaveCommand, TpmLoadCommand},
     TpmParse,
 };
 
-const ABOUT: &str = "Loads a TPM key";
+const ABOUT: &str = "Loads a TPM key or sealed object";
 const USAGE: &str = "tpm2sh load [OPTIONS]";
 const OPTIONS: &[CommandLineOption] = &[
     (
@@ -62,20 +61,15 @@ impl Command for Load {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout())?;
-        let session = io.take_session()?;
+        let mut io = CommandIo::new(io::stdout());
 
-        let parent_handle_guard = io.consume_handle()?;
+        let key_to_load = io.pop_key()?;
+        let parent_obj = io.pop_tpm()?;
+        let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
-        let object_data = pop_object_data(&mut io)?;
-
-        let pub_bytes = base64_engine
-            .decode(object_data.public)
-            .map_err(|e| TpmError::Parse(e.to_string()))?;
-        let priv_bytes = base64_engine
-            .decode(object_data.private)
-            .map_err(|e| TpmError::Parse(e.to_string()))?;
+        let pub_bytes = resolve_uri_to_bytes(&key_to_load.public, &[])?;
+        let priv_bytes = resolve_uri_to_bytes(&key_to_load.private, &[])?;
 
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;
@@ -90,7 +84,7 @@ impl Command for Load {
         let sessions = get_auth_sessions(
             &load_cmd,
             &handles,
-            session.as_ref(),
+            None,
             self.parent_password.password.as_deref(),
         )?;
 
@@ -99,9 +93,24 @@ impl Command for Load {
             .Load()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-        let new_object = cli::Object::Handle(load_resp.object_handle.into());
-        io.push_object(new_object);
+        let loaded_handle = load_resp.object_handle;
+        let _handle_guard = ScopedHandle::new(loaded_handle);
 
+        let save_cmd = TpmContextSaveCommand {
+            save_handle: loaded_handle,
+        };
+        let (resp, _) = chip.execute(&save_cmd, &[])?;
+        let save_resp = resp
+            .ContextSave()
+            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+        let context_bytes = util::build_to_vec(&save_resp.context)?;
+
+        let new_tpm_obj = Tpm {
+            context: format!("data://base64,{}", base64_engine.encode(context_bytes)),
+            parent: Some(parent_obj.context),
+        };
+
+        io.push_object(PipelineObject::Tpm(new_tpm_obj));
         io.finalize()
     }
 }

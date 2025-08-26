@@ -4,7 +4,7 @@
 
 use cli::{
     command::policy::{PolicyParser, Rule as PolicyRule},
-    PcrSelectionParser, Rule as PcrSelectionRule,
+    pcr::{PcrSelectionParser, Rule as PcrSelectionRule},
 };
 use pest::Parser;
 use rstest::rstest;
@@ -36,12 +36,14 @@ fn test_pcr_selection_parser_invalid(#[case] input: &str) {
 #[case("pcr(\"sha256:0\")")]
 #[case("pcr(\"sha1:0,15\", \"deadbeef\")")]
 #[case("pcr(\"sha256:23\", \"cafebabe\", count=123)")]
-#[case("secret(\"0x40000001\")")]
-#[case("or(pcr(\"sha256:0\"), secret(\"0x40000001\"))")]
+#[case("secret(\"tpm://0x40000001\")")]
+#[case("or(pcr(\"sha256:0\"), secret(\"tpm://0x40000001\"))")]
 #[case("or(pcr(\"s:0\"), pcr(\"s:1\"), pcr(\"s:2\"))")]
 #[case("or(pcr(\"s:0\"), or(secret(\"h:1\"), pcr(\"s:2\")))")]
 fn test_policy_parser_valid(#[case] input: &str) {
-    PolicyParser::parse(PolicyRule::policy_expression, input).expect(input);
+    PolicyParser::parse(PolicyRule::policy_expression, input).unwrap_or_else(|e| {
+        panic!("policy parser failed on valid input \"{input}\": {e}");
+    });
 }
 
 #[rstest]

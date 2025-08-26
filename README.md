@@ -1,6 +1,15 @@
-# TPM 2.0 library crate
+# tpm2sh
 
 A command-line interface for TPM 2.0 chips.
+
+Example:
+
+```fish
+tpm2sh create-primary --algorithm rsa:2048:sha256 |
+tpm2sh seal --object-password "abc" --data data://utf8,my-secret-password |
+tpm2sh load --parent-password "" |
+tpm2sh unseal --password "abc"
+```
 
 ## Development
 

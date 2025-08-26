@@ -2,96 +2,9 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{
-    util, Alg, Command, CommandType, ContextData, ObjectData, PcrOutput, SessionData, TpmError,
-};
+use crate::{Command, CommandType, TpmError};
 use std::str::FromStr;
-use tpm2_protocol::{
-    data::{TpmRc, TpmRh},
-    TpmPersistent,
-};
-
-#[derive(Debug, Clone)]
-pub enum Object {
-    Context(ContextData),
-    Handle(u32),
-    KeyData(String),
-    Key(ObjectData),
-    PcrValues(PcrOutput),
-    Session(SessionData),
-}
-
-impl Object {
-    #[must_use]
-    pub fn to_json(&self) -> json::JsonValue {
-        match self {
-            Self::Handle(handle) => json::object! {
-                "type": "handle",
-                "data": { "handle": format!("{handle:#010x}") }
-            },
-            Self::Key(data) => json::object! {
-                "type": "object",
-                "data": data.to_json()
-            },
-            Self::Context(data) => json::object! {
-                "type": "context",
-                "data": data.to_json()
-            },
-            Self::Session(data) => json::object! {
-                "type": "session",
-                "data": data.to_json()
-            },
-            Self::PcrValues(data) => json::object! {
-                "type": "pcr-values",
-                "data": data.to_json()
-            },
-            Self::KeyData(s) => json::object! {
-                "type": "key-data",
-                "data": { "value": s.clone() }
-            },
-        }
-    }
-
-    /// Deserializes an `Object` from a `json::JsonValue`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError::Parse` if the JSON object is malformed.
-    pub fn from_json(value: &json::JsonValue) -> Result<Self, TpmError> {
-        let obj_type = value["type"].as_str().ok_or_else(|| {
-            TpmError::Parse("object in pipeline missing 'type' field".to_string())
-        })?;
-        let data = &value["data"];
-        if data.is_null() {
-            return Err(TpmError::Parse(
-                "object in pipeline missing 'data' field".to_string(),
-            ));
-        }
-
-        match obj_type {
-            "handle" => {
-                let handle_str = data["handle"].as_str().ok_or_else(|| {
-                    TpmError::Parse("handle object missing 'handle' string".to_string())
-                })?;
-                let handle = util::parse_hex_u32(handle_str)?;
-                Ok(Self::Handle(handle))
-            }
-            "object" => Ok(Self::Key(ObjectData::from_json(data)?)),
-            "context" => Ok(Self::Context(ContextData::from_json(data)?)),
-            "session" => Ok(Self::Session(SessionData::from_json(data)?)),
-            "pcr-values" => Ok(Self::PcrValues(PcrOutput::from_json(data)?)),
-            "key-data" => {
-                let s = data["value"].as_str().ok_or_else(|| {
-                    TpmError::Parse("string object missing 'value' field".to_string())
-                })?;
-                Ok(Self::KeyData(s.to_string()))
-            }
-            _ => Err(TpmError::Parse(format!(
-                "Unknown object type in pipeline: '{obj_type}'"
-            ))),
-        }
-    }
-}
+use tpm2_protocol::data::TpmRh;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum LogFormat {
@@ -342,26 +255,26 @@ pub struct PasswordArgs {
 #[derive(Debug, Default)]
 pub struct CreatePrimary {
     pub hierarchy: Hierarchy,
-    pub algorithm: Alg,
-    pub handle: Option<TpmPersistent>,
+    pub algorithm: crate::Alg,
+    pub handle_uri: Option<String>,
     pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Save {
-    pub from: String,
-    pub to: String,
+    pub to_uri: Option<String>,
     pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Delete {
-    pub handle: String,
+    pub handle_uri: Option<String>,
     pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Import {
+    pub key_uri: Option<String>,
     pub parent_password: PasswordArgs,
 }
 
@@ -376,7 +289,7 @@ pub struct Load {
 }
 
 #[derive(Debug, Default)]
-pub struct Objects {}
+pub struct Objects;
 
 #[derive(Debug, Default)]
 pub struct PcrRead {
@@ -385,18 +298,18 @@ pub struct PcrRead {
 
 #[derive(Debug, Default)]
 pub struct PcrEvent {
-    pub handle: u32,
-    pub data: String,
+    pub handle_uri: String,
+    pub data_uri: String,
     pub password: PasswordArgs,
 }
 
 #[derive(Debug)]
 pub struct PrintError {
-    pub rc: TpmRc,
+    pub rc: tpm2_protocol::data::TpmRc,
 }
 
 #[derive(Debug, Default)]
-pub struct PrintStack {}
+pub struct PrintStack;
 
 #[derive(Debug, Default)]
 pub struct ResetLock {
@@ -411,6 +324,7 @@ pub struct StartSession {
 
 #[derive(Debug, Default)]
 pub struct Seal {
+    pub data_uri: Option<String>,
     pub parent_password: PasswordArgs,
     pub object_password: PasswordArgs,
 }
@@ -424,10 +338,10 @@ pub struct Unseal {
 pub struct Convert {
     pub from: KeyFormat,
     pub to: KeyFormat,
+    pub input_uri: Option<String>,
 }
 
 #[derive(Debug, Default)]
 pub struct Policy {
     pub expression: String,
-    pub password: PasswordArgs,
 }

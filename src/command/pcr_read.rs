@@ -4,9 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, Object, PcrRead},
+    cli::{Commands, PcrRead},
     get_pcr_count, get_tpm_device, parse_args, parse_pcr_selection, pcr_response_to_output,
-    Command, CommandIo, CommandType, TpmError,
+    Command, CommandIo, CommandType, PipelineObject, TpmError,
 };
 use lexopt::prelude::*;
 use tpm2_protocol::message::TpmPcrReadCommand;
@@ -55,7 +55,7 @@ impl Command for PcrRead {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout())?;
+        let mut io = CommandIo::new(std::io::stdout());
         let pcr_count = get_pcr_count(&mut chip)?;
         let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
 
@@ -66,7 +66,7 @@ impl Command for PcrRead {
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
         let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
 
-        io.push_object(Object::PcrValues(pcr_output));
+        io.push_object(PipelineObject::PcrValues(pcr_output));
         io.finalize()
     }
 }

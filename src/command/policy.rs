@@ -3,11 +3,11 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, Object, Policy},
-    get_pcr_count, get_tpm_device, parse_args, parse_pcr_selection, AuthSession, Command,
-    CommandIo, CommandType, PcrOutput, SessionData, TpmDevice, TpmError,
+    cli::{self, Commands, Policy},
+    get_pcr_count, get_tpm_device, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri,
+    Command, CommandIo, CommandType, PipelineObject, PolicySession, TpmError,
 };
-use lexopt::prelude::*;
+use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
@@ -33,18 +33,15 @@ enum PolicyAst {
         count: Option<u32>,
     },
     Secret {
-        auth_handle: String,
+        auth_handle_uri: String,
     },
     Or(Vec<PolicyAst>),
 }
 
 const ABOUT: &str = "Builds a policy using a policy expression";
-const USAGE: &str = "tpm2sh policy [OPTIONS] <EXPRESSION>";
-const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g. 'pcr(\"sha256:0\",\"...\")'")];
-const OPTIONS: &[CommandLineOption] = &[
-    (None, "--password", "<PASSWORD>", "Authorization value"),
-    (Some("-h"), "--help", "", "Print help information"),
-];
+const USAGE: &str = "tpm2sh policy <EXPRESSION>";
+const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g., 'pcr(\"sha256:0\",\"...\")'")];
+const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, TpmError> {
     if pair.as_rule() != Rule::quoted_string {
@@ -68,7 +65,12 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, TpmErr
                 .transpose()?;
             let count = inner_pairs
                 .next()
-                .map(|p| p.as_str().parse::<u32>())
+                .map(|p| {
+                    p.as_str()
+                        .strip_prefix("count=")
+                        .unwrap_or("")
+                        .parse::<u32>()
+                })
                 .transpose()
                 .map_err(|e| TpmError::Parse(e.to_string()))?;
             PolicyAst::Pcr {
@@ -78,8 +80,8 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, TpmErr
             }
         }
         Rule::secret_expression => {
-            let auth_handle = parse_quoted_string(&pair.into_inner().next().unwrap())?;
-            PolicyAst::Secret { auth_handle }
+            let auth_handle_uri = parse_quoted_string(&pair.into_inner().next().unwrap())?;
+            PolicyAst::Secret { auth_handle_uri }
         }
         Rule::or_expression => {
             let mut or_pairs = pair.into_inner();
@@ -110,15 +112,13 @@ fn parse_policy_expression(input: &str) -> Result<PolicyAst, TpmError> {
     parse_policy_internal(root_pairs.next().unwrap().into_inner())
 }
 
-struct PolicyExecutor<'a, 'b, W: Write> {
-    chip: &'a mut TpmDevice,
-    io: &'b mut CommandIo<W>,
-    password: &'b cli::PasswordArgs,
+struct PolicyExecutor<'a, W: Write> {
+    chip: &'a mut crate::TpmDevice,
     pcr_count: usize,
-    session: Option<AuthSession>,
+    io: &'a mut CommandIo<W>,
 }
 
-impl<W: Write> PolicyExecutor<'_, '_, W> {
+impl<W: Write> PolicyExecutor<'_, W> {
     fn execute_pcr_policy(
         &mut self,
         session_handle: TpmSession,
@@ -128,18 +128,11 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
     ) -> Result<(), TpmError> {
         let pcr_digest_bytes = hex::decode(digest.ok_or_else(|| {
             TpmError::Usage("PCR digest must be provided as an argument".to_string())
-        })?)
-        .map_err(|e| TpmError::Parse(e.to_string()))?;
+        })?)?;
+
         let pcr_selection = if selection_str.is_empty() {
-            let obj = self
-                .io
-                .consume_object(|obj| matches!(obj, Object::PcrValues(_)))?;
-            let Object::PcrValues(pcr_values) = obj else {
-                return Err(TpmError::Execution(
-                    "Expected PcrValues object from pipeline".to_string(),
-                ));
-            };
-            PcrOutput::to_tpml_pcr_selection(&pcr_values, self.pcr_count)?
+            let pcr_values = self.io.pop_pcr_values()?;
+            crate::pcr::pcr_values_to_selection(&pcr_values, self.pcr_count)?
         } else {
             parse_pcr_selection(selection_str, self.pcr_count)?
         };
@@ -152,7 +145,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
             pcrs: pcr_selection,
         };
         let handles = [session_handle.into()];
-        let sessions = crate::get_auth_sessions(&cmd, &handles, self.session.as_ref(), None)?;
+        let sessions = crate::get_auth_sessions(&cmd, &handles, None, None)?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -160,9 +153,9 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
     fn execute_secret_policy(
         &mut self,
         session_handle: TpmSession,
-        auth_handle_str: &str,
+        auth_handle_uri: &str,
     ) -> Result<(), TpmError> {
-        let auth_handle = crate::parse_hex_u32(auth_handle_str)?;
+        let auth_handle = parse_tpm_handle_from_uri(auth_handle_uri)?;
         let cmd = TpmPolicySecretCommand {
             auth_handle: auth_handle.into(),
             policy_session: session_handle.0.into(),
@@ -172,12 +165,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
             expiration: 0,
         };
         let handles = [auth_handle, session_handle.into()];
-        let sessions = crate::get_auth_sessions(
-            &cmd,
-            &handles,
-            self.session.as_ref(),
-            self.password.password.as_deref(),
-        )?;
+        let sessions = crate::get_auth_sessions(&cmd, &handles, None, Some(""))?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -190,10 +178,10 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
-                start_trial_session(self.chip, self.session.as_ref(), cli::SessionType::Trial)?;
+                start_trial_session(self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
             self.execute_policy_ast(branch_handle, branch_ast)?;
 
-            let digest = get_policy_digest(self.chip, self.session.as_ref(), branch_handle)?;
+            let digest = get_policy_digest(self.chip, branch_handle)?;
             branch_digests.try_push(digest)?;
 
             flush_session(self.chip, branch_handle)?;
@@ -204,7 +192,7 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
             p_hash_list: branch_digests,
         };
         let handles = [session_handle.into()];
-        let sessions = crate::get_auth_sessions(&cmd, &handles, self.session.as_ref(), None)?;
+        let sessions = crate::get_auth_sessions(&cmd, &handles, None, None)?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -222,8 +210,8 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
             } => {
                 self.execute_pcr_policy(session_handle, selection, digest.as_ref(), count.as_ref())
             }
-            PolicyAst::Secret { auth_handle } => {
-                self.execute_secret_policy(session_handle, auth_handle)
+            PolicyAst::Secret { auth_handle_uri } => {
+                self.execute_secret_policy(session_handle, auth_handle_uri)
             }
             PolicyAst::Or(branches) => self.execute_or_policy(session_handle, branches),
         }
@@ -231,11 +219,10 @@ impl<W: Write> PolicyExecutor<'_, '_, W> {
 }
 
 fn start_trial_session(
-    chip: &mut TpmDevice,
-    session: Option<&AuthSession>,
+    chip: &mut crate::TpmDevice,
     session_type: cli::SessionType,
+    hash_alg: TpmAlgId,
 ) -> Result<TpmSession, TpmError> {
-    let auth_hash = session.map_or(TpmAlgId::Sha256, |s| s.auth_hash);
     let cmd = TpmStartAuthSessionCommand {
         tpm_key: (TpmRh::Null as u32).into(),
         bind: (TpmRh::Null as u32).into(),
@@ -243,7 +230,7 @@ fn start_trial_session(
         encrypted_salt: Tpm2b::default(),
         session_type: session_type.into(),
         symmetric: TpmtSymDefObject::default(),
-        auth_hash,
+        auth_hash: hash_alg,
     };
     let (resp, _) = chip.execute(&cmd, &[])?;
     let start_resp = resp
@@ -252,7 +239,7 @@ fn start_trial_session(
     Ok(start_resp.session_handle)
 }
 
-fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
+fn flush_session(chip: &mut crate::TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
@@ -261,16 +248,13 @@ fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmErro
 }
 
 fn get_policy_digest(
-    chip: &mut TpmDevice,
-    session: Option<&AuthSession>,
+    chip: &mut crate::TpmDevice,
     session_handle: TpmSession,
 ) -> Result<Tpm2bDigest, TpmError> {
     let cmd = TpmPolicyGetDigestCommand {
         policy_session: session_handle.0.into(),
     };
-    let handles = [session_handle.into()];
-    let sessions = crate::get_auth_sessions(&cmd, &handles, session, None)?;
-    let (resp, _) = chip.execute(&cmd, &sessions)?;
+    let (resp, _) = chip.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
         .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
@@ -294,10 +278,7 @@ impl Command for Policy {
         let mut expression_arg: Option<String> = None;
 
         parse_args!(parser, arg, Self::help, {
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
-            }
-            Value(val) if expression_arg.is_none() => {
+            lexopt::Arg::Value(val) if expression_arg.is_none() => {
                 expression_arg = Some(val.string()?);
             }
             _ => {
@@ -322,50 +303,45 @@ impl Command for Policy {
     /// Returns a `TpmError` on failure.
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout())?;
-        let session = io.take_session()?;
+        let mut io = CommandIo::new(io::stdout());
 
-        let (mut session_data, session_handle, is_trial) = if let Some(s) = session {
-            let obj = Object::from_json(&json::parse(&s.original_json)?)?;
-            if let Object::Session(data) = obj {
-                (data, s.handle, false)
-            } else {
-                return Err(TpmError::Execution(
-                    "Expected Session object from pipeline".to_string(),
-                ));
-            }
-        } else {
-            let trial_handle = start_trial_session(&mut chip, None, cli::SessionType::Trial)?;
-            (
-                SessionData {
-                    handle: trial_handle.into(),
-                    ..Default::default()
-                },
-                trial_handle,
-                true,
-            )
-        };
-        let ast = parse_policy_expression(&self.expression)
-            .map_err(|e| TpmError::Parse(format!("failed to parse policy expression: {e}")))?;
+        let (mut session_obj, is_new_trial) =
+            io.pop_policy_session()
+                .map(|s| (s, false))
+                .or_else(|_: TpmError| {
+                    let hash_alg = TpmAlgId::Sha256;
+                    let trial_handle =
+                        start_trial_session(&mut chip, cli::SessionType::Trial, hash_alg)?;
+                    let handle_uri = format!("tpm://{trial_handle:#010x}");
+                    Ok::<_, TpmError>((
+                        PolicySession {
+                            context: handle_uri,
+                            algorithm: key::tpm_alg_id_to_str(hash_alg).to_string(),
+                            digest: String::new(),
+                        },
+                        true,
+                    ))
+                })?;
+
+        let ast = parse_policy_expression(&self.expression)?;
         let pcr_count = get_pcr_count(&mut chip)?;
+        let session_handle = TpmSession(parse_tpm_handle_from_uri(&session_obj.context)?);
 
         let mut executor = PolicyExecutor {
             chip: &mut chip,
-            io: &mut io,
-            password: &self.password,
             pcr_count,
-            session: None,
+            io: &mut io,
         };
         executor.execute_policy_ast(session_handle, &ast)?;
 
-        let final_digest = get_policy_digest(&mut chip, None, session_handle)?;
-        session_data.policy_digest = hex::encode(&*final_digest);
-        if is_trial {
+        let final_digest = get_policy_digest(&mut chip, session_handle)?;
+        session_obj.digest = hex::encode(&*final_digest);
+
+        if is_new_trial {
             flush_session(&mut chip, session_handle)?;
-            println!("{}", session_data.policy_digest);
+            writeln!(io.writer(), "{}", session_obj.digest)?;
         } else {
-            let next_session = Object::Session(session_data);
-            io.push_object(next_session);
+            io.push_object(PipelineObject::PolicySession(session_obj));
         }
 
         io.finalize()

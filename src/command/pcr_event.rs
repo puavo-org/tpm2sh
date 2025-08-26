@@ -5,20 +5,23 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrEvent},
-    get_auth_sessions, input_to_bytes, parse_args, parse_hex_u32, Command, CommandIo, CommandType,
-    TpmError, TPM_DEVICE,
+    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes,
+    Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::Write;
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
 
 const ABOUT: &str = "Extends a PCR with an event";
-const USAGE: &str = "tpm2sh pcr-event [OPTIONS] <HANDLE> <DATA>";
+const USAGE: &str = "tpm2sh pcr-event [OPTIONS] <PCR_HANDLE_URI> <DATA_URI>";
 const ARGS: &[CommandLineArgument] = &[
-    ("HANDLE", "Handle of the PCR to extend"),
     (
-        "DATA",
-        "The data must be prefixed with 'str:', 'hex:', or 'file:'",
+        "PCR_HANDLE_URI",
+        "URI of the PCR to extend (e.g., 'tpm://0x01')",
+    ),
+    (
+        "DATA_URI",
+        "URI of the data to extend with (e.g., 'data://hex,deadbeef')",
     ),
 ];
 const OPTIONS: &[CommandLineOption] = &[
@@ -28,7 +31,7 @@ const OPTIONS: &[CommandLineOption] = &[
 
 impl Command for PcrEvent {
     fn command_type(&self) -> CommandType {
-        CommandType::Pipe
+        CommandType::Sink
     }
 
     fn help() {
@@ -40,30 +43,30 @@ impl Command for PcrEvent {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
         let mut args = PcrEvent::default();
-        let mut handle_arg = None;
-        let mut data_arg = None;
+        let mut handle_uri_arg = None;
+        let mut data_uri_arg = None;
         parse_args!(parser, arg, Self::help, {
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
             }
-            Value(val) if handle_arg.is_none() => {
-                handle_arg = Some(val.string()?);
+            Value(val) if handle_uri_arg.is_none() => {
+                handle_uri_arg = Some(val.string()?);
             }
-            Value(val) if data_arg.is_none() => {
-                data_arg = Some(val.string()?);
+            Value(val) if data_uri_arg.is_none() => {
+                data_uri_arg = Some(val.string()?);
             }
             _ => {
                 return Err(TpmError::from(arg.unexpected()));
             }
         });
 
-        if let (Some(handle), Some(data)) = (handle_arg, data_arg) {
-            args.handle = parse_hex_u32(&handle)?;
-            args.data = data;
+        if let (Some(handle_uri), Some(data_uri)) = (handle_uri_arg, data_uri_arg) {
+            args.handle_uri = handle_uri;
+            args.data_uri = data_uri;
             Ok(Commands::PcrEvent(args))
         } else {
             Err(TpmError::Usage(
-                "Missing required arguments: <HANDLE> <DATA>".to_string(),
+                "Missing required arguments: <PCR_HANDLE_URI> <DATA_URI>".to_string(),
             ))
         }
     }
@@ -74,41 +77,32 @@ impl Command for PcrEvent {
     ///
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
-        let mut chip = TPM_DEVICE
-            .get()
-            .unwrap()
-            .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
-        let mut io = CommandIo::new(std::io::stdout())?;
-        let session = io.take_session()?;
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout());
 
-        if session.is_none() && self.password.password.is_none() {
+        if self.password.password.is_none() {
             return Err(TpmError::Usage(
-                "Authorization is required for pcr-event. Use --password or pipeline session."
-                    .to_string(),
+                "Authorization is required for pcr-event. Use --password.".to_string(),
             ));
         }
 
-        let handles = [self.handle];
+        let pcr_handle = parse_tpm_handle_from_uri(&self.handle_uri)?;
+        let handles = [pcr_handle];
 
-        let data_bytes = input_to_bytes(&self.data)?;
+        let data_bytes = resolve_uri_to_bytes(&self.data_uri, &[])?;
         let event_data = Tpm2bEvent::try_from(data_bytes.as_slice())?;
         let command = TpmPcrEventCommand {
-            pcr_handle: self.handle,
+            pcr_handle,
             event_data,
         };
 
-        let sessions = get_auth_sessions(
-            &command,
-            &handles,
-            session.as_ref(),
-            self.password.password.as_deref(),
-        )?;
+        let sessions =
+            get_auth_sessions(&command, &handles, None, self.password.password.as_deref())?;
         let (resp, _) = chip.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-        writeln!(io.writer(), "{:#010x}", self.handle)?;
+        writeln!(io.writer(), "Extended PCR {pcr_handle:#0x}")?;
 
         io.finalize()
     }

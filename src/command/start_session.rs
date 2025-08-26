@@ -4,14 +4,14 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Object, StartSession},
-    parse_args, Command, CommandType, SessionData, TpmError, TPM_DEVICE,
+    cli::{Commands, StartSession},
+    get_tpm_device, key, parse_args, Command, CommandIo, CommandType, HmacSession, PipelineObject,
+    PolicySession, TpmError,
 };
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
-    data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmaSession, TpmtSymDefObject},
+    data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
     message::TpmStartAuthSessionCommand,
 };
 
@@ -67,22 +67,21 @@ impl Command for StartSession {
     ///
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
-        let mut chip = TPM_DEVICE
-            .get()
-            .unwrap()
-            .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
-        let mut nonce_bytes = vec![0; 16];
-        thread_rng().fill_bytes(&mut nonce_bytes);
+        let mut chip = get_tpm_device()?;
+        let mut io = CommandIo::new(std::io::stdout());
 
         let auth_hash = TpmAlgId::from(self.hash_alg);
-        let session_type = self.session_type;
+        let digest_len = tpm2_protocol::tpm_hash_size(&auth_hash)
+            .ok_or_else(|| TpmError::Execution("Unsupported hash algorithm".to_string()))?;
+        let mut nonce_bytes = vec![0; digest_len];
+        thread_rng().fill_bytes(&mut nonce_bytes);
+
         let cmd = TpmStartAuthSessionCommand {
             tpm_key: (TpmRh::Null as u32).into(),
             bind: (TpmRh::Null as u32).into(),
             nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice())?,
             encrypted_salt: Tpm2b::default(),
-            session_type: session_type.into(),
+            session_type: self.session_type.into(),
             symmetric: TpmtSymDefObject::default(),
             auth_hash,
         };
@@ -90,24 +89,24 @@ impl Command for StartSession {
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-        let digest_len = tpm2_protocol::tpm_hash_size(&auth_hash)
-            .ok_or_else(|| TpmError::Execution("Unsupported hash algorithm".to_string()))?;
-        let data = SessionData {
-            handle: start_auth_session_resp.session_handle.into(),
-            nonce_tpm: base64_engine.encode(&*start_auth_session_resp.nonce_tpm),
-            attributes: TpmaSession::CONTINUE_SESSION.bits(),
-            hmac_key: base64_engine.encode(Vec::<u8>::new()),
-            auth_hash: cmd.auth_hash as u16,
-            policy_digest: hex::encode(vec![0; digest_len]),
-        };
-        let pipe_obj = Object::Session(data);
 
-        let output_doc = json::object! {
-            version: 1,
-            objects: [pipe_obj.to_json()]
-        };
-        println!("{}", output_doc.dump());
+        let handle = start_auth_session_resp.session_handle;
+        let algorithm = key::tpm_alg_id_to_str(auth_hash).to_string();
 
-        Ok(())
+        let session_obj = if self.session_type == crate::cli::SessionType::Policy {
+            PipelineObject::PolicySession(PolicySession {
+                context: format!("tpm://{handle:#010x}"),
+                algorithm,
+                digest: hex::encode(vec![0; digest_len]),
+            })
+        } else {
+            PipelineObject::HmacSession(HmacSession {
+                context: format!("tpm://{handle:#010x}"),
+                algorithm,
+            })
+        };
+
+        io.push_object(session_obj);
+        io.finalize()
     }
 }

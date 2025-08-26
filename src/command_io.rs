@@ -2,15 +2,18 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli, get_tpm_device, AuthSession, TpmError, POOL, TPM_DEVICE};
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
+use crate::{
+    parse_tpm_handle_from_uri, resolve_uri_to_bytes,
+    schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineObject, PolicySession, Tpm},
+    TpmDevice, TpmError, POOL, TPM_DEVICE,
+};
 use log::warn;
 use polling::{Event, Events, Poller};
 use std::io::{self, IsTerminal, Read, Write};
 use std::time::Duration;
 use tpm2_protocol::{
     self,
-    data::{self, Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmaSession},
+    data::TpmsContext,
     message::{TpmContextLoadCommand, TpmFlushContextCommand},
     TpmParse, TpmTransient,
 };
@@ -94,24 +97,20 @@ fn stdin_ready() -> Result<bool, TpmError> {
 /// Manages the streaming I/O for a command in the JSON pipeline.
 pub struct CommandIo<W: Write> {
     writer: W,
-    input_objects: Vec<cli::Object>,
-    output_objects: Vec<cli::Object>,
+    input_objects: Vec<PipelineObject>,
+    output_objects: Vec<PipelineObject>,
     hydrated: bool,
 }
 
 impl<W: Write> CommandIo<W> {
-    /// Creates a new command context for the pipeline. Does not read stdin.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError` if reading from the input stream fails.
-    pub fn new(writer: W) -> Result<Self, TpmError> {
-        Ok(Self {
+    /// Creates a new command context for the pipeline.
+    pub fn new(writer: W) -> Self {
+        Self {
             writer,
             input_objects: Vec::new(),
             output_objects: Vec::new(),
             hydrated: false,
-        })
+        }
     }
 
     /// Reads from stdin on the first call, populating the input objects.
@@ -132,15 +131,8 @@ impl<W: Write> CommandIo<W> {
         }
 
         if !input_string.trim().is_empty() {
-            let doc = json::parse(&input_string)?;
-            if !doc["objects"].is_array() {
-                return Err(TpmError::Parse(
-                    "input JSON document is missing 'objects' array".to_string(),
-                ));
-            }
-            for value in doc["objects"].members() {
-                self.input_objects.push(cli::Object::from_json(value)?);
-            }
+            let pipeline: Pipeline = serde_json::from_str(&input_string)?;
+            self.input_objects = pipeline.objects;
         }
 
         self.hydrated = true;
@@ -152,76 +144,32 @@ impl<W: Write> CommandIo<W> {
         &mut self.writer
     }
 
-    /// Finds and removes the session object from the input pipeline, if it exists.
+    /// Returns the active object (last on the stack) without consuming it.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if an object appears to be a session but is malformed.
-    pub fn take_session(&mut self) -> Result<Option<AuthSession>, TpmError> {
+    /// Returns a `TpmError::Execution` if the pipeline is empty.
+    pub fn get_active_object(&mut self) -> Result<&PipelineObject, TpmError> {
         self.hydrate()?;
-        let session_pos = self
-            .input_objects
-            .iter()
-            .position(|obj| matches!(obj, cli::Object::Session(_)));
-
-        if let Some(pos) = session_pos {
-            let obj = self.input_objects.remove(pos);
-            if let cli::Object::Session(session_data) = obj {
-                let original_json = cli::Object::Session(session_data.clone()).to_json().dump();
-
-                let session = AuthSession {
-                    handle: session_data.handle.into(),
-                    nonce_tpm: Tpm2bNonce::try_from(
-                        base64_engine.decode(session_data.nonce_tpm)?.as_slice(),
-                    )?,
-                    attributes: TpmaSession::from_bits_truncate(session_data.attributes),
-                    hmac_key: Tpm2bAuth::try_from(
-                        base64_engine.decode(session_data.hmac_key)?.as_slice(),
-                    )?,
-                    auth_hash: TpmAlgId::try_from(session_data.auth_hash).map_err(|()| {
-                        TpmError::Parse("invalid auth_hash in session".to_string())
-                    })?,
-                    original_json,
-                };
-                return Ok(Some(session));
-            }
-        }
-
-        Ok(None)
+        self.input_objects.last().ok_or_else(|| {
+            TpmError::Execution("Required object not found in input pipeline".to_string())
+        })
     }
 
-    /// Finds and removes the first object from the input pipeline that matches a predicate.
+    /// Consumes the active object (last on the stack) and returns it.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if no matching object is found.
-    pub fn consume_object<F>(&mut self, predicate: F) -> Result<cli::Object, TpmError>
-    where
-        F: FnMut(&cli::Object) -> bool,
-    {
+    /// Returns a `TpmError::Execution` if the pipeline is empty.
+    pub fn pop_active_object(&mut self) -> Result<PipelineObject, TpmError> {
         self.hydrate()?;
-        let pos = self
-            .input_objects
-            .iter()
-            .position(predicate)
-            .ok_or_else(|| {
-                TpmError::Execution("required object not found in input pipeline".to_string())
-            })?;
-        Ok(self.input_objects.remove(pos))
-    }
-
-    /// Consumes and returns all input objects.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError` if reading from stdin fails.
-    pub fn consume_all_objects(&mut self) -> Result<Vec<cli::Object>, TpmError> {
-        self.hydrate()?;
-        Ok(std::mem::take(&mut self.input_objects))
+        self.input_objects.pop().ok_or_else(|| {
+            TpmError::Execution("Required object not found in input pipeline".to_string())
+        })
     }
 
     /// Adds an object to be written to the output stream upon finalization.
-    pub fn push_object(&mut self, obj: cli::Object) {
+    pub fn push_object(&mut self, obj: PipelineObject) {
         self.output_objects.push(obj);
     }
 
@@ -239,52 +187,105 @@ impl<W: Write> CommandIo<W> {
             return Ok(());
         }
 
-        let mut objects_array = json::JsonValue::new_array();
-        for obj in final_objects {
-            objects_array.push(obj.to_json())?;
-        }
-
-        let output_doc = json::object! {
+        let output_doc = Pipeline {
             version: 1,
-            objects: objects_array
+            objects: final_objects,
         };
 
-        writeln!(self.writer, "{}", output_doc.dump())?;
+        let json_string = serde_json::to_string_pretty(&output_doc)?;
+        writeln!(self.writer, "{json_string}")?;
         Ok(())
     }
 
-    /// Resolves an object from the input stack into a transient handle that
-    /// will be auto-flushed.
+    /// Resolves a `Tpm` object into a transient handle that will be auto-flushed.
+    /// This is the "smart" resolver that handles loading contexts automatically.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the object is of an invalid type or cannot be loaded.
-    pub fn consume_handle(&mut self) -> Result<ScopedHandle, TpmError> {
-        let parent_obj = self.consume_object(|obj| {
-            matches!(obj, cli::Object::Handle(_) | cli::Object::Context(_))
-        })?;
-
-        let mut device = get_tpm_device()?;
-        match parent_obj {
-            cli::Object::Handle(handle) => Ok(ScopedHandle::new(TpmTransient(handle))),
-            cli::Object::Context(context_data) => {
-                let context_blob = base64_engine.decode(context_data.context_blob)?;
-                let (context, remainder) = data::TpmsContext::parse(&context_blob)?;
-                if !remainder.is_empty() {
-                    return Err(TpmError::Parse(
-                        "Context object contains trailing data".to_string(),
-                    ));
-                }
-                let load_cmd = TpmContextLoadCommand { context };
-                let (resp, _) = device.execute(&load_cmd, &[])?;
-                let load_resp = resp
-                    .ContextLoad()
-                    .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-                Ok(ScopedHandle::new(load_resp.loaded_handle))
+    /// Returns a `TpmError` if the context URI is invalid or the context cannot be loaded.
+    pub fn resolve_tpm_context(
+        &mut self,
+        device: &mut TpmDevice,
+        tpm_obj: &Tpm,
+    ) -> Result<ScopedHandle, TpmError> {
+        let uri = &tpm_obj.context;
+        if uri.starts_with("tpm://") {
+            let handle = parse_tpm_handle_from_uri(uri)?;
+            Ok(ScopedHandle::new(TpmTransient(handle)))
+        } else if uri.starts_with("data://") {
+            let context_blob = resolve_uri_to_bytes(uri, &self.input_objects)?;
+            let (context, remainder) = TpmsContext::parse(&context_blob)?;
+            if !remainder.is_empty() {
+                return Err(TpmError::Parse(
+                    "Context object contains trailing data".to_string(),
+                ));
             }
-            _ => Err(TpmError::Parse(
-                "pipeline object is not a valid handle or context".to_string(),
-            )),
+
+            let load_cmd = TpmContextLoadCommand { context };
+            let (resp, _) = device.execute(&load_cmd, &[])?;
+            let load_resp = resp
+                .ContextLoad()
+                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            Ok(ScopedHandle::new(load_resp.loaded_handle))
+        } else {
+            Err(TpmError::Parse(format!(
+                "Unsupported URI scheme for a tpm context: '{uri}'"
+            )))
         }
     }
 }
+
+macro_rules! command_pop {
+    ($name:ident, $variant:path, $struct:ty, $type_str:literal) => {
+        impl<W: Write> CommandIo<W> {
+            /// Pops the first object of a specific type from the pipeline.
+            ///
+            /// # Errors
+            ///
+            /// Returns a `TpmError::Execution` if a required object of this type
+            /// is not found in the pipeline.
+            pub fn $name(&mut self) -> Result<$struct, TpmError> {
+                self.hydrate()?;
+                let pos = self
+                    .input_objects
+                    .iter()
+                    .position(|obj| matches!(obj, $variant(_)))
+                    .ok_or_else(|| {
+                        TpmError::Execution(format!(
+                            "Pipeline missing required '{}' object",
+                            $type_str
+                        ))
+                    })?;
+
+                let obj = self.input_objects.remove(pos);
+                if let $variant(inner) = obj {
+                    Ok(inner)
+                } else {
+                    unreachable!();
+                }
+            }
+        }
+    };
+}
+
+command_pop!(pop_tpm, PipelineObject::Tpm, Tpm, "tpm");
+command_pop!(pop_key, PipelineObject::Key, Key, "key");
+command_pop!(pop_data, PipelineObject::Data, Data, "data");
+command_pop!(
+    pop_pcr_values,
+    PipelineObject::PcrValues,
+    PcrValues,
+    "pcr-values"
+);
+command_pop!(
+    pop_hmac_session,
+    PipelineObject::HmacSession,
+    HmacSession,
+    "hmac-session"
+);
+command_pop!(
+    pop_policy_session,
+    PipelineObject::PolicySession,
+    PolicySession,
+    "policy-session"
+);

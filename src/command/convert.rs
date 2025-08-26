@@ -4,83 +4,36 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Convert, KeyFormat, Object},
-    parse_args, Command, CommandIo, CommandType, ObjectData, TpmError, TpmKey,
+    cli::{Commands, Convert, KeyFormat},
+    parse_args, resolve_uri_to_bytes, util, Command, CommandIo, CommandType, Key, PipelineObject,
+    TpmError, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::{
-    fs::File,
-    io::{self, Read, Write},
-};
+use std::io::{self, Write};
+use tpm2_protocol::{data, TpmParse};
 
-const ABOUT: &str = "Converts keys between ASN.1 and JSON format";
-const USAGE: &str = "tpm2sh convert [OPTIONS]";
+const ABOUT: &str = "Converts key objects between pipeline JSON and PEM/DER formats";
+const USAGE: &str = "tpm2sh convert [OPTIONS] <INPUT_URI>";
+const ARGS: &[(&str, &str)] = &[(
+    "INPUT_URI",
+    "URI of the input object (e.g., 'pipe://-1', 'file:///path/to/key.pem')",
+)];
 const OPTIONS: &[CommandLineOption] = &[
     (
         None,
         "--from",
         "<FORMAT>",
-        "Input format [default: json, possible: json, pem, der]",
+        "Input format [possible: json, pem, der]",
     ),
     (
         None,
         "--to",
         "<FORMAT>",
-        "Output format [default: pem, possible: json, pem, der]",
+        "Output format [possible: json, pem, der]",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
-
-/// Parses a JSON object into an intermediate `TpmKey` representation.
-fn json_to_tpm_key(data: &ObjectData) -> Result<TpmKey, TpmError> {
-    Ok(TpmKey {
-        oid: data
-            .oid
-            .split('.')
-            .map(|s| {
-                s.parse::<u32>()
-                    .map_err(|_| TpmError::Parse("invalid OID arc".to_string()))
-            })
-            .collect::<Result<_, _>>()?,
-        parent: data.parent.clone(),
-        pub_key: base64_engine.decode(&data.public)?,
-        priv_key: base64_engine.decode(&data.private)?,
-    })
-}
-
-/// Converts an intermediate `TpmKey` into a final `ObjectData` struct.
-fn tpm_key_to_object_data(key: TpmKey) -> ObjectData {
-    ObjectData {
-        oid: key
-            .oid
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("."),
-        empty_auth: false,
-        parent: key.parent,
-        public: base64_engine.encode(key.pub_key),
-        private: base64_engine.encode(key.priv_key),
-    }
-}
-
-fn read_all(path: Option<&str>) -> Result<Vec<u8>, TpmError> {
-    let mut buf = Vec::new();
-    match path {
-        Some("-") | None => {
-            io::stdin()
-                .read_to_end(&mut buf)
-                .map_err(|e| TpmError::File("stdin".to_string(), e))?;
-        }
-        Some(file_path) => {
-            File::open(file_path)
-                .and_then(|mut f| f.read_to_end(&mut buf))
-                .map_err(|e| TpmError::File(file_path.to_string(), e))?;
-        }
-    }
-    Ok(buf)
-}
 
 impl Command for Convert {
     fn command_type(&self) -> CommandType {
@@ -90,7 +43,7 @@ impl Command for Convert {
     fn help() {
         println!(
             "{}",
-            format_subcommand_help("convert", ABOUT, USAGE, &[], OPTIONS)
+            format_subcommand_help("convert", ABOUT, USAGE, ARGS, OPTIONS)
         );
     }
 
@@ -103,10 +56,18 @@ impl Command for Convert {
             Long("to") => {
                 args.to = parser.value()?.string()?.parse()?;
             }
+            Value(val) if args.input_uri.is_none() => {
+                args.input_uri = Some(val.string()?);
+            }
             _ => {
                 return Err(TpmError::from(arg.unexpected()));
             }
         });
+        if args.input_uri.is_none() {
+            return Err(TpmError::Usage(
+                "Missing required argument <INPUT_URI>".to_string(),
+            ));
+        }
         Ok(Commands::Convert(args))
     }
 
@@ -120,27 +81,44 @@ impl Command for Convert {
     ///
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(std::io::stdout())?;
+        let mut io = CommandIo::new(io::stdout());
 
-        let input_key = match self.from {
+        let input_bytes = resolve_uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
+
+        let tpm_key = match self.from {
             KeyFormat::Json => {
-                let obj = io.consume_object(|obj| matches!(obj, Object::Key(_)))?;
-                let Object::Key(data) = obj else {
-                    unreachable!();
-                };
-                json_to_tpm_key(&data)?
+                let key_obj: Key = serde_json::from_slice(&input_bytes)?;
+                let public_bytes = resolve_uri_to_bytes(&key_obj.public, &[])?;
+                let private_bytes = resolve_uri_to_bytes(&key_obj.private, &[])?;
+
+                let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
+                TpmKey {
+                    oid: vec![2, 23, 133, 10, 1, 3],
+                    parent: "tpm://0x40000001".to_string(),
+                    pub_key: util::build_to_vec(&public)?,
+                    priv_key: private_bytes,
+                }
             }
-            KeyFormat::Pem => TpmKey::from_pem(&read_all(None)?)?,
-            KeyFormat::Der => TpmKey::from_der(&read_all(None)?)?,
+            KeyFormat::Pem => TpmKey::from_pem(&input_bytes)?,
+            KeyFormat::Der => TpmKey::from_der(&input_bytes)?,
         };
 
         match self.to {
             KeyFormat::Json => {
-                let data = tpm_key_to_object_data(input_key);
-                io.push_object(Object::Key(data));
+                let key_obj = Key {
+                    public: format!("data://base64,{}", base64_engine.encode(&tpm_key.pub_key)),
+                    private: format!("data://base64,{}", base64_engine.encode(&tpm_key.priv_key)),
+                };
+                io.push_object(PipelineObject::Key(key_obj));
             }
-            KeyFormat::Pem => println!("{}", input_key.to_pem()?),
-            KeyFormat::Der => std::io::stdout().write_all(&input_key.to_der()?)?,
+            KeyFormat::Pem => {
+                let pem_string = tpm_key.to_pem()?;
+                write!(io.writer(), "{pem_string}")?;
+            }
+            KeyFormat::Der => {
+                let der_bytes = tpm_key.to_der()?;
+                io.writer().write_all(&der_bytes)?;
+            }
         }
 
         io.finalize()

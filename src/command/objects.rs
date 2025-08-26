@@ -3,8 +3,8 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Object, Objects},
-    get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
+    cli::{Commands, Objects},
+    get_tpm_device, parse_args, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmError,
 };
 use tpm2_protocol::data::TpmRh;
 
@@ -40,16 +40,24 @@ impl Command for Objects {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut device = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout())?;
+        let mut io = CommandIo::new(std::io::stdout());
 
         let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
-            io.push_object(Object::Handle(handle));
+            let tpm_obj = Tpm {
+                context: format!("tpm://{handle:#010x}"),
+                parent: None,
+            };
+            io.push_object(PipelineObject::Tpm(tpm_obj));
         }
 
         let persistent_handles = device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
-            io.push_object(Object::Handle(handle));
+            let tpm_obj = Tpm {
+                context: format!("tpm://{handle:#010x}"),
+                parent: None,
+            };
+            io.push_object(PipelineObject::Tpm(tpm_obj));
         }
 
         io.finalize()

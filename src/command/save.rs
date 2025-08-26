@@ -4,21 +4,29 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, Object, Save},
-    get_auth_sessions, get_tpm_device, parse_args, parse_hex_u32, parse_persistent_handle, Command,
-    CommandIo, CommandType, TpmError,
+    cli::{Commands, Save},
+    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, Command, CommandIo,
+    CommandType, PipelineObject, Tpm, TpmError,
 };
 use lexopt::prelude::*;
-use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand};
+use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent};
 
-const ABOUT: &str = "Saves to non-volatile memory";
-const USAGE: &str = "tpm2sh save [OPTIONS] <FROM> <TO>";
-const ARGS: &[CommandLineArgument] = &[
-    ("FROM", "Handle of the transient object ('-' for stdin)"),
-    ("TO", "Handle for the persistent object to be created"),
-];
+const ABOUT: &str = "Saves a transient object to non-volatile memory";
+const USAGE: &str = "tpm2sh save --to <HANDLE_URI> [OPTIONS]";
+const ARGS: &[CommandLineArgument] = &[];
 const OPTIONS: &[CommandLineOption] = &[
-    (None, "--password", "<PASSWORD>", "Authorization value"),
+    (
+        None,
+        "--to",
+        "<HANDLE_URI>",
+        "URI for the persistent object to be created (e.g., 'tpm://0x81000001')",
+    ),
+    (
+        None,
+        "--password",
+        "<PASSWORD>",
+        "Authorization value for the Owner hierarchy",
+    ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
@@ -36,34 +44,27 @@ impl Command for Save {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
         let mut args = Save::default();
-        let mut from_arg = None;
-        let mut to_arg = None;
-
         parse_args!(parser, arg, Self::help, {
+            Long("to") => {
+                args.to_uri = Some(parser.value()?.string()?);
+            }
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
-            }
-            Value(val) if from_arg.is_none() => {
-                from_arg = Some(val.string()?);
-            }
-            Value(val) if to_arg.is_none() => {
-                to_arg = Some(val.string()?);
             }
             _ => {
                 return Err(TpmError::from(arg.unexpected()));
             }
         });
 
-        if let (Some(from), Some(to)) = (from_arg, to_arg) {
-            args.from = from;
-            args.to = to;
-            Ok(Commands::Save(args))
-        } else {
-            Err(TpmError::Usage(
-                "Missing required arguments: <FROM> <TO>".to_string(),
-            ))
+        if args.to_uri.is_none() {
+            return Err(TpmError::Usage(
+                "Missing required argument: --to <HANDLE_URI>".to_string(),
+            ));
         }
+
+        Ok(Commands::Save(args))
     }
+
     /// Runs `save`.
     ///
     /// # Errors
@@ -71,40 +72,38 @@ impl Command for Save {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout())?;
-        let session = io.take_session()?;
-        let object_handle = if self.from == "-" {
-            let obj = io.consume_object(|obj| matches!(obj, Object::Handle(_)))?;
-            if let Object::Handle(h) = obj {
-                h
-            } else {
-                return Err(TpmError::Execution(
-                    "Expected a Handle object from the pipeline".to_string(),
-                ));
-            }
-        } else {
-            parse_hex_u32(&self.from)?
-        };
+        let mut io = CommandIo::new(std::io::stdout());
 
-        let persistent_handle = parse_persistent_handle(&self.to)?;
+        let object_to_save = io.pop_tpm()?;
+        let object_handle_guard = io.resolve_tpm_context(&mut chip, &object_to_save)?;
+        let object_handle = object_handle_guard.handle();
+
+        let persistent_handle =
+            TpmPersistent(parse_tpm_handle_from_uri(self.to_uri.as_ref().unwrap())?);
         let auth_handle = TpmRh::Owner;
-        let handles = [auth_handle as u32, object_handle];
+        let handles = [auth_handle as u32, object_handle.into()];
+
         let evict_cmd = TpmEvictControlCommand {
             auth: (auth_handle as u32).into(),
-            object_handle: object_handle.into(),
+            object_handle: object_handle.0.into(),
             persistent_handle,
         };
         let sessions = get_auth_sessions(
             &evict_cmd,
             &handles,
-            session.as_ref(),
+            None,
             self.password.password.as_deref(),
         )?;
         let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-        let obj = Object::Handle(persistent_handle.into());
-        io.push_object(obj);
+
+        let persistent_tpm_object = Tpm {
+            context: format!("tpm://{persistent_handle:#010x}"),
+            parent: object_to_save.parent,
+        };
+
+        io.push_object(PipelineObject::Tpm(persistent_tpm_object));
         io.finalize()
     }
 }

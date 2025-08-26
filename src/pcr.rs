@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device, key::tpm_alg_id_to_str, PcrOutput, TpmDevice, TpmError};
+use crate::{device, key::tpm_alg_id_to_str, schema, TpmDevice, TpmError};
 use pest::Parser as PestParser;
 use pest_derive::Parser;
 use std::collections::BTreeMap;
@@ -37,12 +37,12 @@ pub(crate) fn get_pcr_count(chip: &mut TpmDevice) -> Result<usize, TpmError> {
     }
 }
 
-/// Converts a `TpmPcrReadResponse` to the structured `PcrOutput` format.
+/// Converts a `TpmPcrReadResponse` to the structured `PcrValues` format.
 pub(crate) fn pcr_response_to_output(
     resp: &message::TpmPcrReadResponse,
-) -> Result<PcrOutput, TpmError> {
-    let mut pcr_output = PcrOutput {
-        update_counter: resp.pcr_update_counter,
+) -> Result<schema::PcrValues, TpmError> {
+    let mut pcr_output = schema::PcrValues {
+        update: resp.pcr_update_counter,
         banks: BTreeMap::new(),
     };
     let mut digest_iter = resp.pcr_values.iter();
@@ -69,6 +69,40 @@ pub(crate) fn pcr_response_to_output(
         }
     }
     Ok(pcr_output)
+}
+
+/// Converts a `PcrValues` object into a `TpmlPcrSelection` list.
+pub(crate) fn pcr_values_to_selection(
+    pcr_values: &schema::PcrValues,
+    pcr_count: usize,
+) -> Result<data::TpmlPcrSelection, TpmError> {
+    let mut list = data::TpmlPcrSelection::new();
+    let pcr_select_size = pcr_count.div_ceil(8);
+    if pcr_select_size > data::TPM_PCR_SELECT_MAX {
+        return Err(TpmError::PcrSelection(format!(
+            "required pcr select size {pcr_select_size} exceeds maximum {}",
+            data::TPM_PCR_SELECT_MAX
+        )));
+    }
+
+    for (bank_name, pcr_map) in &pcr_values.banks {
+        let alg = crate::key::tpm_alg_id_from_str(bank_name).map_err(TpmError::Parse)?;
+        let mut pcr_select_bytes = vec![0u8; pcr_select_size];
+        for pcr_str in pcr_map.keys() {
+            let pcr_index: usize = pcr_str.parse()?;
+            if pcr_index >= pcr_count {
+                return Err(TpmError::PcrSelection(format!(
+                    "pcr index {pcr_index} is out of range for a TPM with {pcr_count} PCRs"
+                )));
+            }
+            pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
+        }
+        list.try_push(data::TpmsPcrSelection {
+            hash: alg,
+            pcr_select: tpm2_protocol::TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
+        })?;
+    }
+    Ok(list)
 }
 
 /// Parses a PCR selection string (e.g., "sha256:0,7+sha1:1") into a TPM list.

@@ -4,11 +4,9 @@
 
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, CreatePrimary, Object},
-    command_io::ScopedHandle,
-    get_auth_sessions, get_tpm_device, parse_args, parse_persistent_handle,
-    util::build_to_vec,
-    Alg, AlgInfo, Command, CommandIo, CommandType, ContextData, TpmDevice, TpmError,
+    cli::{Commands, CreatePrimary},
+    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo,
+    Command, CommandIo, CommandType, PipelineObject, Tpm, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -20,7 +18,7 @@ use tpm2_protocol::{
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{TpmContextSaveCommand, TpmCreatePrimaryCommand, TpmEvictControlCommand},
-    TpmBuffer, TpmTransient,
+    TpmPersistent,
 };
 
 const ABOUT: &str = "Creates a primary key";
@@ -41,8 +39,8 @@ const OPTIONS: &[CommandLineOption] = &[
     (
         None,
         "--handle",
-        "<HANDLE>",
-        "Store object to non-volatile memory",
+        "<HANDLE_URI>",
+        "Store object to non-volatile memory (e.g., 'tpm://0x81000001')",
     ),
     (
         None,
@@ -72,7 +70,7 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
                     key_bits,
                     exponent: 0,
                 }),
-                TpmuPublicId::Rsa(TpmBuffer::default()),
+                TpmuPublicId::Rsa(tpm2_protocol::TpmBuffer::default()),
             )
         }
         AlgInfo::Ecc { curve_id } => {
@@ -97,7 +95,7 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
                     scheme: TpmAlgId::Null,
                 },
             }),
-            TpmuPublicId::KeyedHash(TpmBuffer::default()),
+            TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
         ),
     };
     TpmtPublic {
@@ -108,27 +106,6 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
         parameters,
         unique,
     }
-}
-
-/// Saves a transient key's context.
-///
-/// # Errors
-///
-/// Returns a `TpmError` if the context cannot be saved.
-fn save_key_context(chip: &mut TpmDevice, handle: TpmTransient) -> Result<ContextData, TpmError> {
-    let save_command = TpmContextSaveCommand {
-        save_handle: handle,
-    };
-    let (resp, _) = chip.execute(&save_command, &[])?;
-
-    let save_resp = resp
-        .ContextSave()
-        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-    let context_bytes = build_to_vec(&save_resp.context)?;
-
-    Ok(ContextData {
-        context_blob: base64_engine.encode(context_bytes),
-    })
 }
 
 impl Command for CreatePrimary {
@@ -155,7 +132,7 @@ impl Command for CreatePrimary {
                 alg_set = true;
             }
             Long("handle") => {
-                args.handle = Some(parse_persistent_handle(&parser.value()?.string()?)?);
+                args.handle_uri = Some(parser.value()?.string()?);
             }
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
@@ -180,8 +157,7 @@ impl Command for CreatePrimary {
     /// Returns a `TpmError` if the execution fails
     fn run(&self) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout())?;
-        let session = io.take_session()?;
+        let mut io = CommandIo::new(std::io::stdout());
 
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
@@ -201,12 +177,7 @@ impl Command for CreatePrimary {
             outside_info: Tpm2bData::default(),
             creation_pcr: TpmlPcrSelection::default(),
         };
-        let sessions = get_auth_sessions(
-            &cmd,
-            &handles,
-            session.as_ref(),
-            self.password.password.as_deref(),
-        )?;
+        let sessions = get_auth_sessions(&cmd, &handles, None, self.password.password.as_deref())?;
         let (resp, _) = chip.execute(&cmd, &sessions)?;
 
         let create_primary_resp = resp
@@ -214,27 +185,41 @@ impl Command for CreatePrimary {
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
         let object_handle = create_primary_resp.object_handle;
 
-        let final_object = if let Some(persistent_handle) = self.handle {
+        let final_object = if let Some(uri) = &self.handle_uri {
+            let persistent_handle = TpmPersistent(parse_tpm_handle_from_uri(uri)?);
             let evict_cmd = TpmEvictControlCommand {
                 auth: (TpmRh::Owner as u32).into(),
                 object_handle: object_handle.0.into(),
                 persistent_handle,
             };
             let evict_handles = [TpmRh::Owner as u32, object_handle.into()];
-            let evict_sessions =
-                get_auth_sessions(&evict_cmd, &evict_handles, session.as_ref(), None)?;
+            let evict_sessions = get_auth_sessions(&evict_cmd, &evict_handles, None, None)?;
             let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-            Object::Handle(persistent_handle.into())
+            Tpm {
+                context: format!("tpm://{persistent_handle:#010x}"),
+                parent: None,
+            }
         } else {
-            let _handle_guard = ScopedHandle::new(object_handle);
-            let context = save_key_context(&mut chip, object_handle)?;
-            Object::Context(context)
+            let _handle_guard = crate::ScopedHandle::new(object_handle);
+            let save_command = TpmContextSaveCommand {
+                save_handle: object_handle,
+            };
+            let (resp, _) = chip.execute(&save_command, &[])?;
+            let save_resp = resp
+                .ContextSave()
+                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            let context_bytes = util::build_to_vec(&save_resp.context)?;
+
+            Tpm {
+                context: format!("data://base64,{}", base64_engine.encode(context_bytes)),
+                parent: None,
+            }
         };
 
-        io.push_object(final_object);
+        io.push_object(PipelineObject::Tpm(final_object));
         io.finalize()
     }
 }
