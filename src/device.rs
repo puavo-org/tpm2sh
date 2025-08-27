@@ -13,7 +13,7 @@ use std::{
 };
 use tpm2_protocol::{
     self,
-    data::{self, TpmSt, TpmuCapabilities},
+    data::{self, TpmSt, TpmaCc, TpmuCapabilities},
     message::{TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmResponseBody},
     TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -223,6 +223,9 @@ impl TpmDevice {
                 match &capability_data.data {
                     TpmuCapabilities::Algs(algs) => algs.last().map(|p| p.alg as u32 + 1),
                     TpmuCapabilities::Handles(handles) => handles.last().map(|&h| h + 1),
+                    TpmuCapabilities::Commands(commands) => commands
+                        .last()
+                        .map(|c| (c.bits() & TpmaCc::COMMAND_INDEX.bits()) + 1),
                     TpmuCapabilities::Pcrs(_) => None,
                 }
             } else {

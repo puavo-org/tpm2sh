@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
+// Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use log::trace;
 use std::vec::Vec;
@@ -7,9 +8,9 @@ use tpm2_protocol::{
     self,
     data::{
         self, Tpm2bPublic, Tpm2bSensitiveCreate, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh,
-        TpmSe, TpmSt, TpmaAlgorithm, TpmaLocality, TpmaNv, TpmaObject, TpmaSession, TpmiYesNo,
-        TpmsAlgProperty, TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsCreationData,
-        TpmsEccPoint, TpmsKeyedhashParms, TpmsPcrSelection, TpmsSensitiveCreate,
+        TpmSe, TpmSt, TpmaAlgorithm, TpmaCc, TpmaLocality, TpmaNv, TpmaObject, TpmaSession,
+        TpmiYesNo, TpmsAlgProperty, TpmsAuthCommand, TpmsCapabilityData, TpmsContext,
+        TpmsCreationData, TpmsEccPoint, TpmsKeyedhashParms, TpmsPcrSelection, TpmsSensitiveCreate,
         TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject,
         TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa, TpmuPublicId, TpmuPublicParms,
         TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
@@ -102,6 +103,7 @@ pretty_trace_bitflags!(TpmaAlgorithm);
 pretty_trace_bitflags!(TpmaSession);
 pretty_trace_bitflags!(TpmaLocality);
 pretty_trace_bitflags!(TpmaNv);
+pretty_trace_bitflags!(TpmaCc);
 
 impl<const CAPACITY: usize> PrettyTrace for TpmBuffer<CAPACITY> {
     fn pretty_trace(&self, name: &str, indent: usize) {
@@ -259,6 +261,7 @@ impl PrettyTrace for TpmuCapabilities {
         match self {
             Self::Algs(algs) => algs.pretty_trace(name, indent),
             Self::Handles(handles) => handles.pretty_trace(name, indent),
+            Self::Commands(commands) => commands.pretty_trace(name, indent),
             Self::Pcrs(pcrs) => pcrs.pretty_trace(name, indent),
         }
     }
