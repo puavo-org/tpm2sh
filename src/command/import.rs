@@ -29,7 +29,7 @@ use rand::{thread_rng, RngCore};
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
-use std::io;
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
@@ -449,9 +449,8 @@ impl Command for Import {
     ///
     /// Returns a `TpmError`.
     #[allow(clippy::too_many_lines)]
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout());
 
         let parent_obj = io.pop_tpm()?;
         let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
@@ -525,6 +524,6 @@ impl Command for Import {
         };
 
         io.push_object(PipelineObject::Key(new_key));
-        io.finalize()
+        Ok(())
     }
 }

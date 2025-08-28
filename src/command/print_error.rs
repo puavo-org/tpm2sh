@@ -5,9 +5,10 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PrintError},
-    parse_args, parse_tpm_rc, Command, CommandType, TpmError,
+    parse_args, parse_tpm_rc, Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 
 const ABOUT: &str = "Encodes and print a TPM error code";
 const USAGE: &str = "tpm2sh print-error <RC>";
@@ -50,8 +51,8 @@ impl Command for PrintError {
         true
     }
 
-    fn run(&self) -> Result<(), TpmError> {
-        println!("{}", self.rc);
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
+        writeln!(io.writer(), "{}", self.rc)?;
         Ok(())
     }
 }

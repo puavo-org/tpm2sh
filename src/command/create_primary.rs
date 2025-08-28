@@ -6,10 +6,11 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
     get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo,
-    Command, CommandIo, CommandType, PipelineObject, Tpm, TpmError,
+    Command, CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -155,9 +156,8 @@ impl Command for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
@@ -203,7 +203,7 @@ impl Command for CreatePrimary {
                 parent: None,
             }
         } else {
-            let _handle_guard = crate::ScopedHandle::new(object_handle);
+            let _ = ScopedHandle::new(object_handle);
             let save_command = TpmContextSaveCommand {
                 save_handle: object_handle,
             };
@@ -220,6 +220,6 @@ impl Command for CreatePrimary {
         };
 
         io.push_object(PipelineObject::Tpm(final_object));
-        io.finalize()
+        Ok(())
     }
 }

@@ -33,7 +33,12 @@ pub use self::session::*;
 pub use self::uri::*;
 pub use self::util::*;
 use once_cell::sync::{Lazy, OnceCell};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    fs::OpenOptions,
+    io::{IsTerminal, Read, Write},
+    os::unix::io::AsRawFd,
+    sync::{Arc, Mutex, MutexGuard},
+};
 use threadpool::ThreadPool;
 
 pub static POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(4));
@@ -96,7 +101,7 @@ pub trait Command {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError>;
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -112,14 +117,24 @@ pub fn execute_cli() -> Result<(), TpmError> {
     if let Some(command) = cli.command {
         let _ = LOG_FORMAT.set(cli.log_format);
         if !command.is_local() {
-            let device = TpmDevice::new(&cli.device)?;
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&cli.device)
+                .map_err(|e| TpmError::File(cli.device.to_string(), e))?;
+            let device = TpmDevice::from_fd(file.as_raw_fd())?;
+
             if TPM_DEVICE.set(Arc::new(Mutex::new(device))).is_err() {
                 return Err(TpmError::Execution(
                     "Failed to initialize global TPM device".to_string(),
                 ));
             }
         }
-        command.run()
+        let stdin = std::io::stdin();
+        let is_tty = stdin.is_terminal();
+        let mut io = CommandIo::new(stdin, std::io::stdout(), is_tty);
+        command.run(&mut io)?;
+        io.finalize()
     } else {
         Ok(())
     }

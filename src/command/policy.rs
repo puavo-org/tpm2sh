@@ -11,7 +11,7 @@ use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{Tpm2b, Tpm2bDigest, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest, TpmtSymDefObject},
     message::{
@@ -112,15 +112,15 @@ fn parse_policy_expression(input: &str) -> Result<PolicyAst, TpmError> {
     parse_policy_internal(root_pairs.next().unwrap().into_inner())
 }
 
-struct PolicyExecutor<'a, W: Write> {
+struct PolicyExecutor<'a> {
     chip: &'a mut crate::TpmDevice,
     pcr_count: usize,
-    io: &'a mut CommandIo<W>,
 }
 
-impl<W: Write> PolicyExecutor<'_, W> {
-    fn execute_pcr_policy(
+impl PolicyExecutor<'_> {
+    fn execute_pcr_policy<R: Read, W: Write>(
         &mut self,
+        io: &mut CommandIo<R, W>,
         session_handle: TpmSession,
         selection_str: &str,
         digest: Option<&String>,
@@ -131,7 +131,7 @@ impl<W: Write> PolicyExecutor<'_, W> {
         })?)?;
 
         let pcr_selection = if selection_str.is_empty() {
-            let pcr_values = self.io.pop_pcr_values()?;
+            let pcr_values = io.pop_pcr_values()?;
             crate::pcr::pcr_values_to_selection(&pcr_values, self.pcr_count)?
         } else {
             parse_pcr_selection(selection_str, self.pcr_count)?
@@ -170,8 +170,9 @@ impl<W: Write> PolicyExecutor<'_, W> {
         Ok(())
     }
 
-    fn execute_or_policy(
+    fn execute_or_policy<R: Read, W: Write>(
         &mut self,
+        io: &mut CommandIo<R, W>,
         session_handle: TpmSession,
         branches: &[PolicyAst],
     ) -> Result<(), TpmError> {
@@ -179,7 +180,7 @@ impl<W: Write> PolicyExecutor<'_, W> {
         for branch_ast in branches {
             let branch_handle =
                 start_trial_session(self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
-            self.execute_policy_ast(branch_handle, branch_ast)?;
+            self.execute_policy_ast(io, branch_handle, branch_ast)?;
 
             let digest = get_policy_digest(self.chip, branch_handle)?;
             branch_digests.try_push(digest)?;
@@ -197,8 +198,9 @@ impl<W: Write> PolicyExecutor<'_, W> {
         Ok(())
     }
 
-    fn execute_policy_ast(
+    fn execute_policy_ast<R: Read, W: Write>(
         &mut self,
+        io: &mut CommandIo<R, W>,
         session_handle: TpmSession,
         ast: &PolicyAst,
     ) -> Result<(), TpmError> {
@@ -207,13 +209,17 @@ impl<W: Write> PolicyExecutor<'_, W> {
                 selection,
                 digest,
                 count,
-            } => {
-                self.execute_pcr_policy(session_handle, selection, digest.as_ref(), count.as_ref())
-            }
+            } => self.execute_pcr_policy(
+                io,
+                session_handle,
+                selection,
+                digest.as_ref(),
+                count.as_ref(),
+            ),
             PolicyAst::Secret { auth_handle_uri } => {
                 self.execute_secret_policy(session_handle, auth_handle_uri)
             }
-            PolicyAst::Or(branches) => self.execute_or_policy(session_handle, branches),
+            PolicyAst::Or(branches) => self.execute_or_policy(io, session_handle, branches),
         }
     }
 }
@@ -301,9 +307,8 @@ impl Command for Policy {
     /// # Errors
     ///
     /// Returns a `TpmError` on failure.
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout());
 
         let (mut session_obj, is_new_trial) =
             io.pop_policy_session()
@@ -327,12 +332,13 @@ impl Command for Policy {
         let pcr_count = get_pcr_count(&mut chip)?;
         let session_handle = TpmSession(parse_tpm_handle_from_uri(&session_obj.context)?);
 
-        let mut executor = PolicyExecutor {
-            chip: &mut chip,
-            pcr_count,
-            io: &mut io,
-        };
-        executor.execute_policy_ast(session_handle, &ast)?;
+        {
+            let mut executor = PolicyExecutor {
+                chip: &mut chip,
+                pcr_count,
+            };
+            executor.execute_policy_ast(io, session_handle, &ast)?;
+        }
 
         let final_digest = get_policy_digest(&mut chip, session_handle)?;
         session_obj.digest = hex::encode(&*final_digest);
@@ -344,6 +350,6 @@ impl Command for Policy {
             io.push_object(PipelineObject::PolicySession(session_obj));
         }
 
-        io.finalize()
+        Ok(())
     }
 }

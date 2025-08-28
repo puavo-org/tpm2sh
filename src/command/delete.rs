@@ -8,6 +8,7 @@ use crate::{
     CommandType, TpmError,
 };
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::TpmRh,
     message::{TpmEvictControlCommand, TpmFlushContextCommand},
@@ -58,9 +59,8 @@ impl Command for Delete {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         let handle = if let Some(uri) = &self.handle_uri {
             parse_tpm_handle_from_uri(uri)?
@@ -102,6 +102,6 @@ impl Command for Delete {
                 "'{handle:#010x}' is not a transient or persistent handle"
             )));
         }
-        io.finalize()
+        Ok(())
     }
 }

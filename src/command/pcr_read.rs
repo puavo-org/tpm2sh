@@ -9,6 +9,7 @@ use crate::{
     Command, CommandIo, CommandType, PipelineObject, TpmError,
 };
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 use tpm2_protocol::message::TpmPcrReadCommand;
 
 const ABOUT: &str = "Reads PCR values from the TPM";
@@ -53,9 +54,8 @@ impl Command for PcrRead {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
         let pcr_count = get_pcr_count(&mut chip)?;
         let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
 
@@ -67,6 +67,6 @@ impl Command for PcrRead {
         let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
 
         io.push_object(PipelineObject::PcrValues(pcr_output));
-        io.finalize()
+        Ok(())
     }
 }

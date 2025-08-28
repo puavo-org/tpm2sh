@@ -10,7 +10,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use tpm2_protocol::{data, TpmParse};
 
 const ABOUT: &str = "Converts key objects between pipeline JSON and PEM/DER formats";
@@ -80,9 +80,7 @@ impl Command for Convert {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(io::stdout());
-
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let input_bytes = resolve_uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
 
         let tpm_key = match self.from {
@@ -121,6 +119,6 @@ impl Command for Convert {
             }
         }
 
-        io.finalize()
+        Ok(())
     }
 }

@@ -8,6 +8,7 @@ use crate::{
     get_auth_sessions, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
 const ABOUT: &str = "Resets the dictionary attack lockout timer";
@@ -52,9 +53,8 @@ impl Command for ResetLock {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, _io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let io = CommandIo::new(std::io::stdout());
 
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
@@ -67,6 +67,6 @@ impl Command for ResetLock {
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
         println!("Dictionary attack lockout has been reset.");
-        io.finalize()
+        Ok(())
     }
 }

@@ -3,11 +3,12 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{get_log_format, pretty_printer::PrettyTrace, TpmError, POOL};
-use log::{debug, trace, warn};
+use log::{trace, warn};
 use std::{
-    fs::{File, OpenOptions},
+    fmt::Debug,
+    fs::File,
     io::{self, IsTerminal, Read, Write},
-    path::Path,
+    os::unix::io::FromRawFd,
     sync::mpsc::{self, RecvTimeoutError},
     time::Duration,
 };
@@ -20,29 +21,20 @@ use tpm2_protocol::{
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
+#[derive(Debug)]
 pub struct TpmDevice {
-    file: File,
+    transport: File,
 }
 
 impl TpmDevice {
-    /// Opens a TPM device for communication.
+    /// Opens a TPM device from a file descriptor.
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::File` if the path cannot be opened.
-    pub fn new(path: &str) -> Result<TpmDevice, TpmError> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(Path::new(path))
-            .map_err(|e| {
-                TpmError::File(
-                    path.to_string(),
-                    io::Error::new(e.kind(), "could not open device node"),
-                )
-            })?;
-        debug!(target: "cli::device", "opening device_path = {path}");
-        Ok(TpmDevice { file })
+    /// Returns a `TpmError` if the file descriptor is invalid.
+    pub fn from_fd(fd: i32) -> Result<Self, TpmError> {
+        let file = unsafe { File::from_raw_fd(fd) };
+        Ok(Self { transport: file })
     }
 
     /// Sends a command to the TPM and waits for the response.
@@ -76,7 +68,7 @@ impl TpmDevice {
         let command_bytes = &command_buf[..len];
 
         let (tx, rx) = mpsc::channel::<()>();
-        if std::io::stderr().is_terminal() {
+        if std::io::stderr().is_terminal() && C::COMMAND != data::TpmCc::FlushContext {
             POOL.execute(move || {
                 if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
                     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -112,11 +104,11 @@ impl TpmDevice {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
             }
         }
-        self.file.write_all(command_bytes)?;
-        self.file.flush()?;
+        self.transport.write_all(command_bytes)?;
+        self.transport.flush()?;
 
         let mut header = [0u8; 10];
-        self.file.read_exact(&mut header)?;
+        self.transport.read_exact(&mut header)?;
 
         let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
             return Err(TpmError::Execution(
@@ -134,7 +126,7 @@ impl TpmDevice {
 
         let mut resp_buf = header.to_vec();
         resp_buf.resize(size, 0);
-        self.file.read_exact(&mut resp_buf[header.len()..])?;
+        self.transport.read_exact(&mut resp_buf[header.len()..])?;
 
         drop(tx);
 

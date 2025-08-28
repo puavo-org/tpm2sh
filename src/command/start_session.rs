@@ -10,6 +10,7 @@ use crate::{
 };
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
     message::TpmStartAuthSessionCommand,
@@ -66,9 +67,8 @@ impl Command for StartSession {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         let auth_hash = TpmAlgId::from(self.hash_alg);
         let digest_len = tpm2_protocol::tpm_hash_size(&auth_hash)
@@ -107,6 +107,6 @@ impl Command for StartSession {
         };
 
         io.push_object(session_obj);
-        io.finalize()
+        Ok(())
     }
 }

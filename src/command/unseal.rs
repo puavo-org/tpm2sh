@@ -8,20 +8,17 @@ use crate::{
     get_auth_sessions, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use tpm2_protocol::message::TpmUnsealCommand;
 
 const ABOUT: &str = "Unseals a secret from a loaded TPM object";
 const USAGE: &str = "tpm2sh unseal [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        None,
-        "--password",
-        "<PASSWORD>",
-        "Authorization value for the sealed object",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
+const OPTIONS: &[CommandLineOption] = &[(
+    None,
+    "--password",
+    "<PASSWORD>",
+    "Authorization value for the sealed object",
+)];
 
 impl Command for Unseal {
     fn command_type(&self) -> CommandType {
@@ -53,9 +50,8 @@ impl Command for Unseal {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout());
 
         let sealed_tpm_obj = io.pop_tpm()?;
         let object_handle_guard = io.resolve_tpm_context(&mut chip, &sealed_tpm_obj)?;
@@ -78,6 +74,6 @@ impl Command for Unseal {
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
         io.writer().write_all(&unseal_resp.out_data)?;
-        io.finalize()
+        Ok(())
     }
 }

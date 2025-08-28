@@ -9,7 +9,7 @@ use crate::{
     Command, CommandIo, CommandType, TpmError,
 };
 use lexopt::prelude::*;
-use std::io::Write;
+use std::io::{Read, Write};
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
 
 const ABOUT: &str = "Extends a PCR with an event";
@@ -76,9 +76,8 @@ impl Command for PcrEvent {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         if self.password.password.is_none() {
             return Err(TpmError::Usage(
@@ -104,6 +103,6 @@ impl Command for PcrEvent {
 
         writeln!(io.writer(), "Extended PCR {pcr_handle:#0x}")?;
 
-        io.finalize()
+        Ok(())
     }
 }

@@ -9,6 +9,7 @@ use crate::{
     CommandType, PipelineObject, Tpm, TpmError,
 };
 use lexopt::prelude::*;
+use std::io::{Read, Write};
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent};
 
 const ABOUT: &str = "Saves a transient object to non-volatile memory";
@@ -70,9 +71,8 @@ impl Command for Save {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         let object_to_save = io.pop_tpm()?;
         let object_handle_guard = io.resolve_tpm_context(&mut chip, &object_to_save)?;
@@ -104,6 +104,6 @@ impl Command for Save {
         };
 
         io.push_object(PipelineObject::Tpm(persistent_tpm_object));
-        io.finalize()
+        Ok(())
     }
 }

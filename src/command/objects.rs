@@ -6,6 +6,7 @@ use crate::{
     cli::{Commands, Objects},
     get_tpm_device, parse_args, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmError,
 };
+use std::io::{Read, Write};
 use tpm2_protocol::data::TpmRh;
 
 const ABOUT: &str = "Lists objects in volatile and non-volatile memory";
@@ -38,9 +39,8 @@ impl Command for Objects {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut device = get_tpm_device()?;
-        let mut io = CommandIo::new(std::io::stdout());
 
         let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
@@ -60,6 +60,6 @@ impl Command for Objects {
             io.push_object(PipelineObject::Tpm(tpm_obj));
         }
 
-        io.finalize()
+        Ok(())
     }
 }

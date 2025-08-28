@@ -5,12 +5,13 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Algorithms, Commands},
-    enumerate_all, get_tpm_device, parse_args, Command, CommandType, TpmError,
+    enumerate_all, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
     TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
+use std::io::{Read, Write};
 use tpm2_protocol::data::{TpmAlgId, TpmCap, TpmuCapabilities};
 
 const ABOUT: &str = "Lists available algorithms";
@@ -64,7 +65,7 @@ impl Command for Algorithms {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let chip_algorithms = get_chip_algorithms()?;
         let cli_algorithms = enumerate_all();
 
@@ -88,7 +89,7 @@ impl Command for Algorithms {
             .collect();
         sorted_names.sort();
         for name in sorted_names {
-            println!("{name}");
+            writeln!(io.writer(), "{name}")?;
         }
         Ok(())
     }

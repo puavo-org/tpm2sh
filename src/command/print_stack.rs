@@ -8,7 +8,7 @@ use crate::{
     schema::{Key, PipelineObject, PublicArea},
     Command, CommandIo, CommandType, TpmError,
 };
-use std::io::{self, Write};
+use std::io::{Read, Write};
 use tpm2_protocol::TpmParse;
 
 const ABOUT: &str = "Prints a human-readable summary of the object stack to stdout";
@@ -45,8 +45,7 @@ impl Command for PrintStack {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails.
-    fn run(&self) -> Result<(), TpmError> {
-        let mut io = CommandIo::new(io::stdout());
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut objects = Vec::new();
 
         while let Ok(obj) = io.pop_active_object() {

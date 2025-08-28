@@ -2,8 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{Command, CommandType, TpmError};
-use std::str::FromStr;
+use crate::{Command, CommandIo, CommandType, TpmError};
+use std::{
+    io::{Read, Write},
+    str::FromStr,
+};
 use tpm2_protocol::data::TpmRh;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -224,25 +227,25 @@ impl Command for Commands {
         }
     }
 
-    fn run(&self) -> Result<(), crate::TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), crate::TpmError> {
         match self {
-            Self::Algorithms(args) => args.run(),
-            Self::Convert(args) => args.run(),
-            Self::CreatePrimary(args) => args.run(),
-            Self::Delete(args) => args.run(),
-            Self::Import(args) => args.run(),
-            Self::Load(args) => args.run(),
-            Self::Objects(args) => args.run(),
-            Self::PcrEvent(args) => args.run(),
-            Self::PcrRead(args) => args.run(),
-            Self::Policy(args) => args.run(),
-            Self::PrintError(args) => args.run(),
-            Self::PrintStack(args) => args.run(),
-            Self::ResetLock(args) => args.run(),
-            Self::Save(args) => args.run(),
-            Self::Seal(args) => args.run(),
-            Self::StartSession(args) => args.run(),
-            Self::Unseal(args) => args.run(),
+            Self::Algorithms(args) => args.run(io),
+            Self::Convert(args) => args.run(io),
+            Self::CreatePrimary(args) => args.run(io),
+            Self::Delete(args) => args.run(io),
+            Self::Import(args) => args.run(io),
+            Self::Load(args) => args.run(io),
+            Self::Objects(args) => args.run(io),
+            Self::PcrEvent(args) => args.run(io),
+            Self::PcrRead(args) => args.run(io),
+            Self::Policy(args) => args.run(io),
+            Self::PrintError(args) => args.run(io),
+            Self::PrintStack(args) => args.run(io),
+            Self::ResetLock(args) => args.run(io),
+            Self::Save(args) => args.run(io),
+            Self::Seal(args) => args.run(io),
+            Self::StartSession(args) => args.run(io),
+            Self::Unseal(args) => args.run(io),
         }
     }
 }

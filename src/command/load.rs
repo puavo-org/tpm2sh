@@ -10,7 +10,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io;
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmContextSaveCommand, TpmLoadCommand},
@@ -59,9 +59,8 @@ impl Command for Load {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout());
 
         let key_to_load = io.pop_key()?;
         let parent_obj = io.pop_tpm()?;
@@ -93,12 +92,10 @@ impl Command for Load {
             .Load()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
-        let loaded_handle = load_resp.object_handle;
-        let _handle_guard = ScopedHandle::new(loaded_handle);
+        let save_handle = load_resp.object_handle;
+        let _ = ScopedHandle::new(save_handle);
 
-        let save_cmd = TpmContextSaveCommand {
-            save_handle: loaded_handle,
-        };
+        let save_cmd = TpmContextSaveCommand { save_handle };
         let (resp, _) = chip.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
@@ -111,6 +108,6 @@ impl Command for Load {
         };
 
         io.push_object(PipelineObject::Tpm(new_tpm_obj));
-        io.finalize()
+        Ok(())
     }
 }

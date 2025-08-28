@@ -11,7 +11,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io;
+use std::io::{Read, Write};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -86,9 +86,8 @@ impl Command for Seal {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run(&self) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
         let mut chip = get_tpm_device()?;
-        let mut io = CommandIo::new(io::stdout());
 
         let parent_obj = io
             .get_active_object()?
@@ -162,6 +161,6 @@ impl Command for Seal {
         };
 
         io.push_object(PipelineObject::Key(new_key_obj));
-        io.finalize()
+        Ok(())
     }
 }

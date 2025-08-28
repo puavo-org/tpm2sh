@@ -9,7 +9,7 @@ use crate::{
 };
 use log::warn;
 use polling::{Event, Events, Poller};
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, Read, Write};
 use std::time::Duration;
 use tpm2_protocol::{
     self,
@@ -95,39 +95,47 @@ fn stdin_ready() -> Result<bool, TpmError> {
 }
 
 /// Manages the streaming I/O for a command in the JSON pipeline.
-pub struct CommandIo<W: Write> {
+pub struct CommandIo<R: Read, W: Write> {
+    reader: R,
     writer: W,
     input_objects: Vec<PipelineObject>,
     output_objects: Vec<PipelineObject>,
     hydrated: bool,
+    is_reader_tty: bool,
 }
 
-impl<W: Write> CommandIo<W> {
+impl<R: Read, W: Write> CommandIo<R, W> {
     /// Creates a new command context for the pipeline.
-    pub fn new(writer: W) -> Self {
+    pub fn new(reader: R, writer: W, is_reader_tty: bool) -> Self {
         Self {
+            reader,
             writer,
             input_objects: Vec::new(),
             output_objects: Vec::new(),
             hydrated: false,
+            is_reader_tty,
         }
     }
 
-    /// Reads from stdin on the first call, populating the input objects.
+    /// Returns a mutable reference to the underlying writer.
+    pub fn writer(&mut self) -> &mut W {
+        &mut self.writer
+    }
+
+    /// Adds an object to be written to the output stream upon finalization.
+    pub fn push_object(&mut self, obj: PipelineObject) {
+        self.output_objects.push(obj);
+    }
+
+    /// Reads from the reader on the first call, populating the input objects.
     fn hydrate(&mut self) -> Result<(), TpmError> {
         if self.hydrated {
             return Ok(());
         }
 
         let mut input_string = String::new();
-        let mut should_read = !io::stdin().is_terminal();
-
-        if io::stdin().is_terminal() {
-            should_read = stdin_ready()?;
-        }
-
-        if should_read {
-            io::stdin().read_to_string(&mut input_string)?;
+        if !self.is_reader_tty || stdin_ready()? {
+            self.reader.read_to_string(&mut input_string)?;
         }
 
         if !input_string.trim().is_empty() {
@@ -137,11 +145,6 @@ impl<W: Write> CommandIo<W> {
 
         self.hydrated = true;
         Ok(())
-    }
-
-    /// Returns a mutable reference to the underlying writer.
-    pub fn writer(&mut self) -> &mut W {
-        &mut self.writer
     }
 
     /// Returns the active object (last on the stack) without consuming it.
@@ -166,11 +169,6 @@ impl<W: Write> CommandIo<W> {
         self.input_objects.pop().ok_or_else(|| {
             TpmError::Execution("Required object not found in input pipeline".to_string())
         })
-    }
-
-    /// Adds an object to be written to the output stream upon finalization.
-    pub fn push_object(&mut self, obj: PipelineObject) {
-        self.output_objects.push(obj);
     }
 
     /// Finalizes the command, writing all new and unconsumed objects to the output stream.
@@ -237,7 +235,7 @@ impl<W: Write> CommandIo<W> {
 
 macro_rules! command_pop {
     ($name:ident, $variant:path, $struct:ty, $type_str:literal) => {
-        impl<W: Write> CommandIo<W> {
+        impl<R: Read, W: Write> CommandIo<R, W> {
             /// Pops the first object of a specific type from the pipeline.
             ///
             /// # Errors
