@@ -16,11 +16,12 @@ use std::{
 
 use lexopt::prelude::*;
 use log::{error, info, warn};
+use rsa::{traits::PublicKeyParts, RsaPrivateKey};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmRc, TpmRcBase, TpmRh, TpmsAuthResponse,
-        TpmtPublic,
+        Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId, TpmRc, TpmRcBase, TpmRh,
+        TpmsAuthResponse, TpmtPublic, TpmuPublicId, TpmuPublicParms,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmCommandBody, TpmContextLoadResponse,
@@ -61,7 +62,6 @@ impl MockTpmResponse for TpmResponseBody {
             Self::ContextSave(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::ContextLoad(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::FlushContext(r) => tpm_build_response(r, auth_responses, rc, writer),
-            // Any new mocked responses would be added here.
             _ => Err(tpm2_protocol::TpmErrorKind::Unreachable),
         }
     }
@@ -109,12 +109,31 @@ impl MockTpmState {
 
         match cmd_body {
             TpmCommandBody::CreatePrimary(cmd) => {
+                let mut public = cmd.in_public.inner;
+
+                if public.object_type == TpmAlgId::Rsa {
+                    let key_bits = if let TpmuPublicParms::Rsa(params) = public.parameters {
+                        params.key_bits
+                    } else {
+                        return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
+                    };
+
+                    let Ok(rsa_key) = RsaPrivateKey::new(&mut rand::thread_rng(), key_bits.into())
+                    else {
+                        return Err((TpmRc::from(TpmRcBase::Failure), TpmAuthResponses::default()));
+                    };
+                    let modulus = rsa_key.n().to_bytes_be();
+                    let Ok(unique_rsa) = Tpm2bPublicKeyRsa::try_from(modulus.as_slice()) else {
+                        return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
+                    };
+                    public.unique = TpmuPublicId::Rsa(unique_rsa);
+                }
+
                 let handle = self.next_handle;
                 self.next_handle += 1;
-                self.transient_objects
-                    .insert(handle, cmd.in_public.inner.clone());
+                self.transient_objects.insert(handle, public.clone());
 
-                let Ok(name_bytes) = calculate_name(&cmd.in_public.inner) else {
+                let Ok(name_bytes) = calculate_name(&public) else {
                     return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()));
                 };
                 let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
@@ -122,7 +141,7 @@ impl MockTpmState {
                 };
                 let resp = TpmCreatePrimaryResponse {
                     object_handle: TpmTransient(handle),
-                    out_public: cmd.in_public,
+                    out_public: Tpm2bPublic { inner: public },
                     creation_data: Default::default(),
                     creation_hash: Default::default(),
                     creation_ticket: Default::default(),
