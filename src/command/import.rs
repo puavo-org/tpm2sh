@@ -483,7 +483,11 @@ impl Command for Import {
         let device_arc =
             device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
 
-        let parent_obj = io.pop_tpm()?;
+        let parent_obj = io
+            .get_active_object()?
+            .as_tpm()
+            .ok_or_else(|| TpmError::Execution("Pipeline missing parent 'tpm' object".to_string()))?
+            .clone();
         let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 

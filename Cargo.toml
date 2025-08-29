@@ -1,7 +1,7 @@
 [package]
 name = "tpm2sh"
 description = "TPM 2.0 shell"
-version = "0.10.0"
+version = "0.11.0"
 license = "GPL-3.0-or-later"
 homepage = "https://github.com/puavo-org/tpm2sh.git"
 repository = "https://github.com/puavo-org/tpm2sh.git"
