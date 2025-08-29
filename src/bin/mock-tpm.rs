@@ -27,7 +27,7 @@ use tpm2_protocol::{
     message::{
         tpm_build_response, tpm_parse_command, TpmCommandBody, TpmContextLoadResponse,
         TpmContextSaveResponse, TpmCreatePrimaryResponse, TpmFlushContextResponse,
-        TpmImportResponse, TpmReadPublicResponse, TpmResponseBody,
+        TpmImportResponse, TpmLoadResponse, TpmReadPublicResponse, TpmResponseBody,
     },
     TpmList, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -60,6 +60,7 @@ impl MockTpmResponse for TpmResponseBody {
             Self::CreatePrimary(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::ReadPublic(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::Import(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::Load(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::ContextSave(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::ContextLoad(r) => tpm_build_response(r, auth_responses, rc, writer),
             Self::FlushContext(r) => tpm_build_response(r, auth_responses, rc, writer),
@@ -195,6 +196,30 @@ impl MockTpmState {
                     TpmResponseBody::Import(resp),
                     TpmAuthResponses::default(),
                 ))
+            }
+            TpmCommandBody::Load(cmd) => {
+                if !self.transient_objects.contains_key(&cmd.parent_handle.0) {
+                    return Err((TpmRc::from(TpmRcBase::Handle), TpmAuthResponses::default()));
+                }
+
+                let public = cmd.in_public.inner;
+                let handle = self.next_handle;
+                self.next_handle += 1;
+                self.transient_objects.insert(handle, public.clone());
+
+                let Ok(name_bytes) = calculate_name(&public) else {
+                    return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()));
+                };
+                let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
+                    return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
+                };
+
+                let resp = TpmLoadResponse {
+                    object_handle: TpmTransient(handle),
+                    name,
+                };
+
+                Ok((rc, TpmResponseBody::Load(resp), TpmAuthResponses::default()))
             }
             TpmCommandBody::ContextSave(cmd) => {
                 let resp = TpmContextSaveResponse {
