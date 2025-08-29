@@ -86,16 +86,13 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
-    /// Load and parse PEM-encoded PKCS#8 private key.
+    /// Load and parse a PEM-encoded PKCS#8 private key from a byte slice.
     ///
     /// # Errors
     ///
-    /// Returns `TpmError`.
-    pub fn from_pem_file(path: &std::path::Path) -> Result<Self, TpmError> {
-        let pem_bytes =
-            std::fs::read(path).map_err(|e| TpmError::File(path.display().to_string(), e))?;
-        let pem_str =
-            std::str::from_utf8(&pem_bytes).map_err(|e| TpmError::Parse(e.to_string()))?;
+    /// Returns `TpmError` on parsing failure.
+    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Self, TpmError> {
+        let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| TpmError::Parse(e.to_string()))?;
 
         let pem_block = pem::parse(pem_str)?;
 
@@ -125,6 +122,17 @@ impl PrivateKey {
         };
 
         Ok(Self { key })
+    }
+
+    /// Load and parse PEM-encoded PKCS#8 private key from a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TpmError` on file I/O or parsing failure.
+    pub fn from_pem_file(path: &std::path::Path) -> Result<Self, TpmError> {
+        let pem_bytes =
+            std::fs::read(path).map_err(|e| TpmError::File(path.display().to_string(), e))?;
+        Self::from_pem_bytes(&pem_bytes)
     }
 
     /// Converts key to `TpmtPublic`.

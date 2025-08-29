@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    get_auth_sessions, parse_args,
+    get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
     Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice, TpmError,
 };
@@ -32,7 +32,6 @@ use tpm2_protocol::{
     message::{TpmImportCommand, TpmReadPublicCommand},
     TpmBuild, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
-use url::Url;
 
 const ABOUT: &str = "Imports an external key";
 const USAGE: &str = "tpm2sh import --key <KEY_URI> [OPTIONS]";
@@ -493,17 +492,9 @@ impl Command for Import {
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = self.key_uri.as_ref().unwrap();
-        let key_url = Url::parse(key_uri_str)?;
-        if key_url.scheme() != "file" {
-            return Err(TpmError::Usage(
-                "Key URI must use the 'file://' scheme".to_string(),
-            ));
-        }
-        let private_key_path = key_url
-            .to_file_path()
-            .map_err(|()| TpmError::Parse("Invalid file path in URI".to_string()))?;
+        let pem_bytes = resolve_uri_to_bytes(key_uri_str, &[])?;
+        let private_key = PrivateKey::from_pem_bytes(&pem_bytes)?;
 
-        let private_key = PrivateKey::from_pem_file(&private_key_path)?;
         let public = private_key.to_tpmt_public(parent_name_alg)?;
         let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
