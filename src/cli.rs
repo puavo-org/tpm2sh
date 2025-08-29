@@ -2,10 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{Command, CommandIo, CommandType, TpmError};
+use crate::{Command, CommandIo, CommandType, TpmDevice, TpmError};
 use std::{
     io::{Read, Write},
     str::FromStr,
+    sync::{Arc, Mutex},
 };
 use tpm2_protocol::data::TpmRh;
 
@@ -227,25 +228,29 @@ impl Command for Commands {
         }
     }
 
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), crate::TpmError> {
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), crate::TpmError> {
         match self {
-            Self::Algorithms(args) => args.run(io),
-            Self::Convert(args) => args.run(io),
-            Self::CreatePrimary(args) => args.run(io),
-            Self::Delete(args) => args.run(io),
-            Self::Import(args) => args.run(io),
-            Self::Load(args) => args.run(io),
-            Self::Objects(args) => args.run(io),
-            Self::PcrEvent(args) => args.run(io),
-            Self::PcrRead(args) => args.run(io),
-            Self::Policy(args) => args.run(io),
-            Self::PrintError(args) => args.run(io),
-            Self::PrintStack(args) => args.run(io),
-            Self::ResetLock(args) => args.run(io),
-            Self::Save(args) => args.run(io),
-            Self::Seal(args) => args.run(io),
-            Self::StartSession(args) => args.run(io),
-            Self::Unseal(args) => args.run(io),
+            Self::Algorithms(args) => args.run(io, device),
+            Self::Convert(args) => args.run(io, device),
+            Self::CreatePrimary(args) => args.run(io, device),
+            Self::Delete(args) => args.run(io, device),
+            Self::Import(args) => args.run(io, device),
+            Self::Load(args) => args.run(io, device),
+            Self::Objects(args) => args.run(io, device),
+            Self::PcrEvent(args) => args.run(io, device),
+            Self::PcrRead(args) => args.run(io, device),
+            Self::Policy(args) => args.run(io, device),
+            Self::PrintError(args) => args.run(io, device),
+            Self::PrintStack(args) => args.run(io, device),
+            Self::ResetLock(args) => args.run(io, device),
+            Self::Save(args) => args.run(io, device),
+            Self::Seal(args) => args.run(io, device),
+            Self::StartSession(args) => args.run(io, device),
+            Self::Unseal(args) => args.run(io, device),
         }
     }
 }

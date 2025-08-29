@@ -5,11 +5,12 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
-    get_pcr_count, get_tpm_device, parse_args, parse_pcr_selection, pcr_response_to_output,
-    Command, CommandIo, CommandType, PipelineObject, TpmError,
+    get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, Command, CommandIo,
+    CommandType, PipelineObject, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmPcrReadCommand;
 
 const ABOUT: &str = "Reads PCR values from the TPM";
@@ -54,8 +55,17 @@ impl Command for PcrRead {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+
         let pcr_count = get_pcr_count(&mut chip)?;
         let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
 

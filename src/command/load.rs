@@ -5,12 +5,13 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Load},
-    get_auth_sessions, get_tpm_device, parse_args, resolve_uri_to_bytes, util, Command, CommandIo,
-    CommandType, PipelineObject, ScopedHandle, Tpm, TpmError,
+    get_auth_sessions, parse_args, resolve_uri_to_bytes, util, Command, CommandIo, CommandType,
+    PipelineObject, ScopedHandle, Tpm, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmContextSaveCommand, TpmLoadCommand},
@@ -19,15 +20,12 @@ use tpm2_protocol::{
 
 const ABOUT: &str = "Loads a TPM key or sealed object";
 const USAGE: &str = "tpm2sh load [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        None,
-        "--parent-password",
-        "<PASSWORD>",
-        "Authorization for the parent object",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
+const OPTIONS: &[CommandLineOption] = &[(
+    None,
+    "--parent-password",
+    "<PASSWORD>",
+    "Authorization for the parent object",
+)];
 
 impl Command for Load {
     fn command_type(&self) -> CommandType {
@@ -59,12 +57,20 @@ impl Command for Load {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let key_to_load = io.pop_key()?;
         let parent_obj = io.pop_tpm()?;
-        let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
+        let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
         let pub_bytes = resolve_uri_to_bytes(&key_to_load.public, &[])?;
@@ -93,7 +99,7 @@ impl Command for Load {
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 
         let save_handle = load_resp.object_handle;
-        let _ = ScopedHandle::new(save_handle);
+        let _ = ScopedHandle::new(save_handle, device_arc.clone());
 
         let save_cmd = TpmContextSaveCommand { save_handle };
         let (resp, _) = chip.execute(&save_cmd, &[])?;

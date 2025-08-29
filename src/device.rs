@@ -6,9 +6,7 @@ use crate::{get_log_format, pretty_printer::PrettyTrace, TpmError, POOL};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
-    fs::File,
     io::{self, IsTerminal, Read, Write},
-    os::unix::io::FromRawFd,
     sync::mpsc::{self, RecvTimeoutError},
     time::Duration,
 };
@@ -21,20 +19,22 @@ use tpm2_protocol::{
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
+/// A trait combining the I/O and safety traits required for a TPM transport.
+pub trait TpmTransport: Read + Write + Send + Debug {}
+/// Blanket implementation to automatically apply `TpmTransport` to all valid types.
+impl<T: Read + Write + Send + Debug> TpmTransport for T {}
+
 #[derive(Debug)]
 pub struct TpmDevice {
-    transport: File,
+    transport: Box<dyn TpmTransport>,
 }
 
 impl TpmDevice {
-    /// Opens a TPM device from a file descriptor.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `TpmError` if the file descriptor is invalid.
-    pub fn from_fd(fd: i32) -> Result<Self, TpmError> {
-        let file = unsafe { File::from_raw_fd(fd) };
-        Ok(Self { transport: file })
+    /// Creates a new TPM device from an owned transport.
+    pub fn new<T: TpmTransport + 'static>(transport: T) -> Self {
+        Self {
+            transport: Box::new(transport),
+        }
     }
 
     /// Sends a command to the TPM and waits for the response.

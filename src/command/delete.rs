@@ -4,11 +4,12 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Delete},
-    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, Command, CommandIo,
-    CommandType, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, Command, CommandIo, CommandType,
+    TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::TpmRh,
     message::{TpmEvictControlCommand, TpmFlushContextCommand},
@@ -59,8 +60,16 @@ impl Command for Delete {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let handle = if let Some(uri) = &self.handle_uri {
             parse_tpm_handle_from_uri(uri)?

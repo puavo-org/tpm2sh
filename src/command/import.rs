@@ -5,9 +5,9 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    get_auth_sessions, get_tpm_device, parse_args, read_public,
+    get_auth_sessions, parse_args,
     util::build_to_vec,
-    Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmError,
+    Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice, TpmError,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -30,14 +30,15 @@ use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
-        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
+        self, Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
         TpmsEccPoint, TpmtPublic, TpmtSymDef, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits,
         TpmuSymMode,
     },
-    message::TpmImportCommand,
-    TpmBuild, TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    message::{TpmImportCommand, TpmReadPublicCommand},
+    TpmBuild, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 use url::Url;
 
@@ -62,6 +63,31 @@ const OPTIONS: &[CommandLineOption] = &[
 const KDF_DUPLICATE: &str = "DUPLICATE";
 const KDF_INTEGRITY: &str = "INTEGRITY";
 const KDF_STORAGE: &str = "STORAGE";
+
+/// Reads the public area and name of a TPM object.
+///
+/// # Errors
+///
+/// Returns `TpmError` if the `ReadPublic` command fails.
+fn read_public(
+    device: Option<Arc<Mutex<TpmDevice>>>,
+    handle: TpmTransient,
+) -> Result<(TpmtPublic, data::Tpm2bName), TpmError> {
+    let cmd = TpmReadPublicCommand {
+        object_handle: handle.0.into(),
+    };
+    let device_arc =
+        device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+    let mut locked_device = device_arc
+        .lock()
+        .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+
+    let (resp, _) = locked_device.execute(&cmd, &[])?;
+    let read_public_resp = resp
+        .ReadPublic()
+        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+    Ok((read_public_resp.out_public.inner, read_public_resp.name))
+}
 
 fn kdfa(
     auth_hash: TpmAlgId,
@@ -449,14 +475,19 @@ impl Command for Import {
     ///
     /// Returns a `TpmError`.
     #[allow(clippy::too_many_lines)]
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
 
         let parent_obj = io.pop_tpm()?;
-        let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
+        let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
-        let (parent_public, parent_name) = read_public(parent_handle)?;
+        let (parent_public, parent_name) = read_public(Some(device_arc.clone()), parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = self.key_uri.as_ref().unwrap();
@@ -510,7 +541,12 @@ impl Command for Import {
             self.parent_password.password.as_deref(),
         )?;
 
-        let (resp, _) = chip.execute(&import_cmd, &sessions)?;
+        let (resp, _) = {
+            let mut chip = device_arc
+                .lock()
+                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            chip.execute(&import_cmd, &sessions)?
+        };
         let import_resp = resp.Import().map_err(|e| {
             TpmError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;

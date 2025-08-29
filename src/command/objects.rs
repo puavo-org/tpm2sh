@@ -4,9 +4,10 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Objects},
-    get_tpm_device, parse_args, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmError,
+    parse_args, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmDevice, TpmError,
 };
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::TpmRh;
 
 const ABOUT: &str = "Lists objects in volatile and non-volatile memory";
@@ -39,10 +40,18 @@ impl Command for Objects {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut device = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut locked_device = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
+        let transient_handles = locked_device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
             let tpm_obj = Tpm {
                 context: format!("tpm://{handle:#010x}"),
@@ -51,7 +60,7 @@ impl Command for Objects {
             io.push_object(PipelineObject::Tpm(tpm_obj));
         }
 
-        let persistent_handles = device.get_all_handles(TpmRh::PersistentFirst)?;
+        let persistent_handles = locked_device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
             let tpm_obj = Tpm {
                 context: format!("tpm://{handle:#010x}"),

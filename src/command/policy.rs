@@ -4,14 +4,15 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
-    get_pcr_count, get_tpm_device, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri,
-    Command, CommandIo, CommandType, PipelineObject, PolicySession, TpmError,
+    get_pcr_count, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri, Command,
+    CommandIo, CommandType, PipelineObject, PolicySession, TpmDevice, TpmError,
 };
 use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex, MutexGuard};
 use tpm2_protocol::{
     data::{Tpm2b, Tpm2bDigest, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest, TpmtSymDefObject},
     message::{
@@ -113,8 +114,8 @@ fn parse_policy_expression(input: &str) -> Result<PolicyAst, TpmError> {
 }
 
 struct PolicyExecutor<'a> {
-    chip: &'a mut crate::TpmDevice,
     pcr_count: usize,
+    chip: MutexGuard<'a, TpmDevice>,
 }
 
 impl PolicyExecutor<'_> {
@@ -179,13 +180,13 @@ impl PolicyExecutor<'_> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
-                start_trial_session(self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
+                start_trial_session(&mut self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
             self.execute_policy_ast(io, branch_handle, branch_ast)?;
 
-            let digest = get_policy_digest(self.chip, branch_handle)?;
+            let digest = get_policy_digest(&mut self.chip, branch_handle)?;
             branch_digests.try_push(digest)?;
 
-            flush_session(self.chip, branch_handle)?;
+            flush_session(&mut self.chip, branch_handle)?;
         }
 
         let cmd = TpmPolicyOrCommand {
@@ -225,7 +226,7 @@ impl PolicyExecutor<'_> {
 }
 
 fn start_trial_session(
-    chip: &mut crate::TpmDevice,
+    chip: &mut TpmDevice,
     session_type: cli::SessionType,
     hash_alg: TpmAlgId,
 ) -> Result<TpmSession, TpmError> {
@@ -245,7 +246,7 @@ fn start_trial_session(
     Ok(start_resp.session_handle)
 }
 
-fn flush_session(chip: &mut crate::TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
+fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
@@ -254,7 +255,7 @@ fn flush_session(chip: &mut crate::TpmDevice, handle: TpmSession) -> Result<(), 
 }
 
 fn get_policy_digest(
-    chip: &mut crate::TpmDevice,
+    chip: &mut TpmDevice,
     session_handle: TpmSession,
 ) -> Result<Tpm2bDigest, TpmError> {
     let cmd = TpmPolicyGetDigestCommand {
@@ -307,8 +308,16 @@ impl Command for Policy {
     /// # Errors
     ///
     /// Returns a `TpmError` on failure.
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let (mut session_obj, is_new_trial) =
             io.pop_policy_session()
@@ -333,12 +342,13 @@ impl Command for Policy {
         let session_handle = TpmSession(parse_tpm_handle_from_uri(&session_obj.context)?);
 
         {
-            let mut executor = PolicyExecutor {
-                chip: &mut chip,
-                pcr_count,
-            };
+            let mut executor = PolicyExecutor { pcr_count, chip };
             executor.execute_policy_ast(io, session_handle, &ast)?;
         }
+
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let final_digest = get_policy_digest(&mut chip, session_handle)?;
         session_obj.digest = hex::encode(&*final_digest);

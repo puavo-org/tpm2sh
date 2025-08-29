@@ -5,13 +5,14 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Seal},
-    get_auth_sessions, get_tpm_device, parse_args, resolve_uri_to_bytes,
+    get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
-    Command, CommandIo, CommandType, Key, PipelineObject, TpmError,
+    Command, CommandIo, CommandType, Key, PipelineObject, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -86,8 +87,16 @@ impl Command for Seal {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let parent_obj = io
             .get_active_object()?
@@ -97,7 +106,7 @@ impl Command for Seal {
             ))?
             .clone();
 
-        let parent_handle_guard = io.resolve_tpm_context(&mut chip, &parent_obj)?;
+        let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
         let data_to_seal = resolve_uri_to_bytes(self.data_uri.as_ref().unwrap(), &[])?;

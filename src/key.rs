@@ -2,14 +2,9 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{get_tpm_device, TpmError};
+use crate::TpmError;
 use std::{cmp::Ordering, str::FromStr};
-use tpm2_protocol::{
-    self,
-    data::{self, TpmAlgId, TpmEccCurve, TpmtPublic},
-    message::TpmReadPublicCommand,
-    TpmTransient,
-};
+use tpm2_protocol::data::{TpmAlgId, TpmEccCurve};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgInfo {
@@ -199,20 +194,4 @@ pub fn enumerate_all() -> impl Iterator<Item = Alg> {
     });
 
     rsa_iter.chain(ecc_iter).chain(keyedhash_iter)
-}
-
-/// Reads the public area and name of a TPM object.
-///
-/// # Errors
-///
-/// Returns `TpmError` if the `ReadPublic` command fails.
-pub fn read_public(handle: TpmTransient) -> Result<(TpmtPublic, data::Tpm2bName), TpmError> {
-    let cmd = TpmReadPublicCommand {
-        object_handle: handle.0.into(),
-    };
-    let (resp, _) = get_tpm_device()?.execute(&cmd, &[])?;
-    let read_public_resp = resp
-        .ReadPublic()
-        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-    Ok((read_public_resp.out_public.inner, read_public_resp.name))
 }

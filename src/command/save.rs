@@ -5,11 +5,12 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Save},
-    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, Command, CommandIo,
-    CommandType, PipelineObject, Tpm, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, Command, CommandIo, CommandType,
+    PipelineObject, Tpm, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent};
 
 const ABOUT: &str = "Saves a transient object to non-volatile memory";
@@ -71,11 +72,16 @@ impl Command for Save {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
 
         let object_to_save = io.pop_tpm()?;
-        let object_handle_guard = io.resolve_tpm_context(&mut chip, &object_to_save)?;
+        let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &object_to_save)?;
         let object_handle = object_handle_guard.handle();
 
         let persistent_handle =
@@ -94,7 +100,12 @@ impl Command for Save {
             None,
             self.password.password.as_deref(),
         )?;
-        let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
+        let (resp, _) = {
+            let mut chip = device_arc
+                .lock()
+                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            chip.execute(&evict_cmd, &sessions)?
+        };
         resp.EvictControl()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
 

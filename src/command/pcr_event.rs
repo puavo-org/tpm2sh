@@ -5,11 +5,12 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrEvent},
-    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes,
-    Command, CommandIo, CommandType, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes, Command,
+    CommandIo, CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
 
 const ABOUT: &str = "Extends a PCR with an event";
@@ -76,14 +77,16 @@ impl Command for PcrEvent {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
-
-        if self.password.password.is_none() {
-            return Err(TpmError::Usage(
-                "Authorization is required for pcr-event. Use --password.".to_string(),
-            ));
-        }
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let pcr_handle = parse_tpm_handle_from_uri(&self.handle_uri)?;
         let handles = [pcr_handle];

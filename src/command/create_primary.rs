@@ -5,12 +5,13 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
-    get_auth_sessions, get_tpm_device, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo,
-    Command, CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo, Command,
+    CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmDevice, TpmError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -156,8 +157,16 @@ impl Command for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
@@ -203,7 +212,7 @@ impl Command for CreatePrimary {
                 parent: None,
             }
         } else {
-            let _ = ScopedHandle::new(object_handle);
+            let _ = ScopedHandle::new(object_handle, device_arc.clone());
             let save_command = TpmContextSaveCommand {
                 save_handle: object_handle,
             };

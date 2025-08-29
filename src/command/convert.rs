@@ -6,11 +6,12 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
     parse_args, resolve_uri_to_bytes, util, Command, CommandIo, CommandType, Key, PipelineObject,
-    TpmError, TpmKey,
+    TpmDevice, TpmError, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data, TpmParse};
 
 const ABOUT: &str = "Converts key objects between pipeline JSON and PEM/DER formats";
@@ -80,7 +81,11 @@ impl Command for Convert {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        _device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
         let input_bytes = resolve_uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
 
         let tpm_key = match self.from {

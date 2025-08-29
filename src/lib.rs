@@ -36,24 +36,12 @@ use once_cell::sync::{Lazy, OnceCell};
 use std::{
     fs::OpenOptions,
     io::{IsTerminal, Read, Write},
-    os::unix::io::AsRawFd,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 use threadpool::ThreadPool;
 
 pub static POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(4));
-pub static TPM_DEVICE: OnceCell<Arc<Mutex<TpmDevice>>> = OnceCell::new();
 pub static LOG_FORMAT: OnceCell<cli::LogFormat> = OnceCell::new();
-
-/// Safely accesses the global `TPM_DEVICE` static.
-fn get_tpm_device() -> Result<MutexGuard<'static, TpmDevice>, TpmError> {
-    let device_arc = TPM_DEVICE
-        .get()
-        .ok_or_else(|| TpmError::Execution("TPM device has not been initialized".to_string()))?;
-    device_arc
-        .lock()
-        .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))
-}
 
 /// Safely accesses the global `LOG_FORMAT` static, falling back to the default.
 pub(crate) fn get_log_format() -> cli::LogFormat {
@@ -101,7 +89,11 @@ pub trait Command {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError>;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -116,24 +108,22 @@ pub fn execute_cli() -> Result<(), TpmError> {
 
     if let Some(command) = cli.command {
         let _ = LOG_FORMAT.set(cli.log_format);
-        if !command.is_local() {
+
+        let device_arc = if command.is_local() {
+            None
+        } else {
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(&cli.device)
                 .map_err(|e| TpmError::File(cli.device.to_string(), e))?;
-            let device = TpmDevice::from_fd(file.as_raw_fd())?;
+            Some(Arc::new(Mutex::new(TpmDevice::new(file))))
+        };
 
-            if TPM_DEVICE.set(Arc::new(Mutex::new(device))).is_err() {
-                return Err(TpmError::Execution(
-                    "Failed to initialize global TPM device".to_string(),
-                ));
-            }
-        }
         let stdin = std::io::stdin();
         let is_tty = stdin.is_terminal();
         let mut io = CommandIo::new(stdin, std::io::stdout(), is_tty);
-        command.run(&mut io)?;
+        command.run(&mut io, device_arc)?;
         io.finalize()
     } else {
         Ok(())

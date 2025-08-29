@@ -5,12 +5,13 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, StartSession},
-    get_tpm_device, key, parse_args, Command, CommandIo, CommandType, HmacSession, PipelineObject,
-    PolicySession, TpmError,
+    key, parse_args, Command, CommandIo, CommandType, HmacSession, PipelineObject, PolicySession,
+    TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
     message::TpmStartAuthSessionCommand,
@@ -67,8 +68,16 @@ impl Command for StartSession {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        let mut chip = device_arc
+            .lock()
+            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
 
         let auth_hash = TpmAlgId::from(self.hash_alg);
         let digest_len = tpm2_protocol::tpm_hash_size(&auth_hash)

@@ -5,10 +5,11 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Unseal},
-    get_auth_sessions, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
+    get_auth_sessions, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmUnsealCommand;
 
 const ABOUT: &str = "Unseals a secret from a loaded TPM object";
@@ -50,11 +51,16 @@ impl Command for Unseal {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let mut chip = get_tpm_device()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let device_arc =
+            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
 
         let sealed_tpm_obj = io.pop_tpm()?;
-        let object_handle_guard = io.resolve_tpm_context(&mut chip, &sealed_tpm_obj)?;
+        let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &sealed_tpm_obj)?;
         let object_handle = object_handle_guard.handle();
 
         let unseal_cmd = TpmUnsealCommand {
@@ -68,7 +74,12 @@ impl Command for Unseal {
             self.password.password.as_deref(),
         )?;
 
-        let (unseal_resp, _) = chip.execute(&unseal_cmd, &unseal_sessions)?;
+        let (unseal_resp, _) = {
+            let mut chip = device_arc
+                .lock()
+                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            chip.execute(&unseal_cmd, &unseal_sessions)?
+        };
         let unseal_resp = unseal_resp
             .Unseal()
             .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;

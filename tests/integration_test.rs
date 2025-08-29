@@ -4,13 +4,13 @@
 use cli::{
     cli::{Commands, CreatePrimary, Import},
     schema::{Key, Pipeline, PipelineObject},
-    Command, CommandIo, TpmDevice, TpmError, LOG_FORMAT, POOL, TPM_DEVICE,
+    Command, CommandIo, TpmDevice, TpmError, LOG_FORMAT,
 };
 
 use std::{
     env,
     io::Cursor,
-    os::unix::{io::AsRawFd, net::UnixStream},
+    os::unix::net::UnixStream,
     process::{Child, Command as ProcessCommand, Stdio},
     sync::{Arc, Mutex},
 };
@@ -22,6 +22,7 @@ use tempfile::tempdir;
 struct TestFixture {
     child: Child,
     socket_path: std::path::PathBuf,
+    device: Arc<Mutex<TpmDevice>>,
 }
 
 impl Drop for TestFixture {
@@ -41,39 +42,42 @@ fn tpm_device() -> TestFixture {
         .arg("--cache-path")
         .arg(cache_dir.path())
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::inherit())
         .spawn()
         .expect("Failed to spawn mock-tpm binary");
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    std::thread::sleep(std::time::Duration::from_millis(100));
     let stream = UnixStream::connect(&socket_path).expect("Failed to connect to mock-tpm socket");
-    let fd = stream.as_raw_fd();
-    let device = TpmDevice::from_fd(fd).unwrap();
-    std::mem::forget(stream);
-    TPM_DEVICE
-        .set(Arc::new(Mutex::new(device)))
-        .expect("Failed to set TPM_DEVICE global");
+    let device = Arc::new(Mutex::new(TpmDevice::new(stream)));
     LOG_FORMAT
         .set(cli::cli::LogFormat::Plain)
         .expect("Failed to set LOG_FORMAT global");
-    TestFixture { child, socket_path }
+    TestFixture {
+        child,
+        socket_path,
+        device,
+    }
 }
 
-fn run_command(cmd: &Commands, input: &str) -> Result<String, TpmError> {
+fn run_command(
+    cmd: &Commands,
+    input: &str,
+    device: Option<Arc<Mutex<TpmDevice>>>,
+) -> Result<String, TpmError> {
     let mut input_cursor = Cursor::new(input.as_bytes());
     let mut output_buf = Vec::new();
     let mut io = CommandIo::new(&mut input_cursor, &mut output_buf, false);
-    cmd.run(&mut io)?;
+    cmd.run(&mut io, device)?;
     io.finalize()?;
     Ok(String::from_utf8(output_buf).unwrap())
 }
 
 #[rstest]
-fn test_subcommand_import(_tpm_device: TestFixture) {
+fn test_subcommand_import(tpm_device: TestFixture) {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
         ..Default::default()
     });
-    let output_json = run_command(&create_cmd, "").unwrap();
+    let output_json = run_command(&create_cmd, "", Some(tpm_device.device.clone())).unwrap();
     let pipeline: Pipeline = serde_json::from_str(&output_json).unwrap();
     let parent_obj = pipeline
         .objects
@@ -97,7 +101,8 @@ fn test_subcommand_import(_tpm_device: TestFixture) {
         key_uri: Some(format!("file://{}", key_path.to_str().unwrap())),
         parent_password: Default::default(),
     });
-    let output_json = run_command(&import_cmd, &input_json).unwrap();
+    let output_json =
+        run_command(&import_cmd, &input_json, Some(tpm_device.device.clone())).unwrap();
     let output_pipeline: Pipeline = serde_json::from_str(&output_json).unwrap();
     assert_eq!(
         output_pipeline.objects.len(),
@@ -117,5 +122,4 @@ fn test_subcommand_import(_tpm_device: TestFixture) {
         ),
         "The last object must be the imported key"
     );
-    POOL.join();
 }

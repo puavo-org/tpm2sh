@@ -5,13 +5,14 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Algorithms, Commands},
-    enumerate_all, get_tpm_device, parse_args, Command, CommandIo, CommandType, TpmError,
+    enumerate_all, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
     TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
 use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::{TpmAlgId, TpmCap, TpmuCapabilities};
 
 const ABOUT: &str = "Lists available algorithms";
@@ -19,9 +20,16 @@ const USAGE: &str = "tpm2sh algorithms [OPTIONS] [FILTER]";
 const ARGS: &[CommandLineArgument] = &[("FILTER", "A regex to filter the algorithm names")];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
-fn get_chip_algorithms() -> Result<HashSet<TpmAlgId>, TpmError> {
-    let mut device = get_tpm_device()?;
-    let cap_data_vec = device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
+fn get_chip_algorithms(
+    device: Option<Arc<Mutex<TpmDevice>>>,
+) -> Result<HashSet<TpmAlgId>, TpmError> {
+    let device_arc =
+        device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+    let mut locked_device = device_arc
+        .lock()
+        .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+
+    let cap_data_vec = locked_device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
     let algs: HashSet<TpmAlgId> = cap_data_vec
         .into_iter()
         .flat_map(|cap_data| {
@@ -65,8 +73,12 @@ impl Command for Algorithms {
     /// # Errors
     ///
     /// Returns a `TpmError` if the execution fails
-    fn run<R: Read, W: Write>(&self, io: &mut CommandIo<R, W>) -> Result<(), TpmError> {
-        let chip_algorithms = get_chip_algorithms()?;
+    fn run<R: Read, W: Write>(
+        &self,
+        io: &mut CommandIo<R, W>,
+        device: Option<Arc<Mutex<TpmDevice>>>,
+    ) -> Result<(), TpmError> {
+        let chip_algorithms = get_chip_algorithms(device)?;
         let cli_algorithms = enumerate_all();
 
         let supported_algorithms: Vec<_> = cli_algorithms

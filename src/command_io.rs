@@ -5,11 +5,12 @@
 use crate::{
     parse_tpm_handle_from_uri, resolve_uri_to_bytes,
     schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineObject, PolicySession, Tpm},
-    TpmDevice, TpmError, POOL, TPM_DEVICE,
+    TpmDevice, TpmError, POOL,
 };
 use log::warn;
 use polling::{Event, Events, Poller};
 use std::io::{self, Read, Write};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tpm2_protocol::{
     self,
@@ -27,13 +28,14 @@ use std::os::windows::io::AsRawHandle;
 #[derive(Debug)]
 pub struct ScopedHandle {
     handle: TpmTransient,
+    device: Arc<Mutex<TpmDevice>>,
 }
 
 impl ScopedHandle {
     /// Creates a new scoped handle.
     #[must_use]
-    pub fn new(handle: TpmTransient) -> Self {
-        Self { handle }
+    pub fn new(handle: TpmTransient, device: Arc<Mutex<TpmDevice>>) -> Self {
+        Self { handle, device }
     }
 
     /// Returns the inner handle.
@@ -46,18 +48,17 @@ impl ScopedHandle {
 impl Drop for ScopedHandle {
     fn drop(&mut self) {
         let handle = self.handle;
+        let device_arc = self.device.clone();
         POOL.execute(move || {
-            if let Some(device_arc) = TPM_DEVICE.get() {
-                if let Ok(mut device) = device_arc.lock() {
-                    let cmd = TpmFlushContextCommand {
-                        flush_handle: handle.into(),
-                    };
-                    if let Err(e) = device.execute(&cmd, &[]) {
-                        warn!(
-                            target: "cli::util",
-                            "Failed to flush transient handle {handle:#010x}: {e}"
-                        );
-                    }
+            if let Ok(mut device) = device_arc.lock() {
+                let cmd = TpmFlushContextCommand {
+                    flush_handle: handle.into(),
+                };
+                if let Err(e) = device.execute(&cmd, &[]) {
+                    warn!(
+                        target: "cli::util",
+                        "Failed to flush transient handle {handle:#010x}: {e}"
+                    );
                 }
             }
         });
@@ -203,13 +204,13 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     /// Returns a `TpmError` if the context URI is invalid or the context cannot be loaded.
     pub fn resolve_tpm_context(
         &mut self,
-        device: &mut TpmDevice,
+        device_arc: Arc<Mutex<TpmDevice>>,
         tpm_obj: &Tpm,
     ) -> Result<ScopedHandle, TpmError> {
         let uri = &tpm_obj.context;
         if uri.starts_with("tpm://") {
             let handle = parse_tpm_handle_from_uri(uri)?;
-            Ok(ScopedHandle::new(TpmTransient(handle)))
+            Ok(ScopedHandle::new(TpmTransient(handle), device_arc))
         } else if uri.starts_with("data://") {
             let context_blob = resolve_uri_to_bytes(uri, &self.input_objects)?;
             let (context, remainder) = TpmsContext::parse(&context_blob)?;
@@ -219,12 +220,18 @@ impl<R: Read, W: Write> CommandIo<R, W> {
                 ));
             }
 
+            let mut device = device_arc
+                .lock()
+                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
             let load_cmd = TpmContextLoadCommand { context };
             let (resp, _) = device.execute(&load_cmd, &[])?;
             let load_resp = resp
                 .ContextLoad()
                 .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
-            Ok(ScopedHandle::new(load_resp.loaded_handle))
+            Ok(ScopedHandle::new(
+                load_resp.loaded_handle,
+                device_arc.clone(),
+            ))
         } else {
             Err(TpmError::Parse(format!(
                 "Unsupported URI scheme for a tpm context: '{uri}'"
