@@ -123,8 +123,13 @@ pub fn execute_cli() -> Result<(), TpmError> {
         let stdin = std::io::stdin();
         let is_tty = stdin.is_terminal();
         let mut io = CommandIo::new(stdin, std::io::stdout(), is_tty);
+        let cmd_type = command.command_type();
         command.run(&mut io, device_arc)?;
-        io.finalize()
+
+        match cmd_type {
+            CommandType::Standalone => Ok(()),
+            _ => io.finalize(),
+        }
     } else {
         Ok(())
     }

@@ -45,6 +45,7 @@ impl Command for Objects {
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), TpmError> {
+        io.clear_input()?;
         let device_arc =
             device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
         let mut locked_device = device_arc

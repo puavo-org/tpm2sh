@@ -128,6 +128,17 @@ impl<R: Read, W: Write> CommandIo<R, W> {
         self.output_objects.push(obj);
     }
 
+    /// Clears any objects read from the input stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TpmError::Execution` if the pipeline is empty.
+    pub fn clear_input(&mut self) -> Result<(), TpmError> {
+        self.hydrate()?;
+        self.input_objects.clear();
+        Ok(())
+    }
+
     /// Reads from the reader on the first call, populating the input objects.
     fn hydrate(&mut self) -> Result<(), TpmError> {
         if self.hydrated {

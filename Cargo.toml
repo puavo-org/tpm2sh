@@ -19,9 +19,9 @@ name = "tpm2sh"
 path = "src/main.rs"
 
 [[bin]]
-name = "mock-tpm"
-path = "src/bin/mock-tpm.rs"
-required-features = ["mock-tpm"]
+name = "mocktpm"
+path = "src/bin/mocktpm.rs"
+required-features = ["mocktpm"]
 
 [[test]]
 name = "parser"
@@ -34,8 +34,8 @@ path = "tests/integration_test.rs"
 harness = true
 
 [features]
-default = ["mock-tpm"]
-mock-tpm = []
+default = ["mocktpm"]
+mocktpm = []
 
 [dependencies]
 aes = "0.8"

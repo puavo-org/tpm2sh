@@ -2,22 +2,25 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use cli::{
-    cli::{Commands, CreatePrimary, Import},
+    cli::{Algorithms, Commands, CreatePrimary, Import, Objects},
     schema::{Key, Pipeline, PipelineObject},
     Command, CommandIo, TpmDevice, TpmError, LOG_FORMAT,
 };
 
 use std::{
+    collections::HashSet,
     env,
     io::Cursor,
     os::unix::net::UnixStream,
     process::{Child, Command as ProcessCommand, Stdio},
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use pkcs8::EncodePrivateKey;
 use rstest::{fixture, rstest};
 use tempfile::tempdir;
+use tpm2_protocol::data::TpmAlgId;
 
 struct TestFixture {
     child: Child,
@@ -34,9 +37,9 @@ impl Drop for TestFixture {
 
 #[fixture]
 fn tpm_device() -> TestFixture {
-    let mock_tpm_path = env!("CARGO_BIN_EXE_mock-tpm");
+    let mock_tpm_path = env!("CARGO_BIN_EXE_mocktpm");
     let cache_dir = tempdir().unwrap();
-    let socket_path = cache_dir.path().join("mock-tpm.sock");
+    let socket_path = cache_dir.path().join("mocktpm.sock");
     eprintln!("");
     let child = ProcessCommand::new(mock_tpm_path)
         .arg("--cache-path")
@@ -44,13 +47,22 @@ fn tpm_device() -> TestFixture {
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .spawn()
-        .expect("Failed to spawn mock-tpm binary");
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let stream = UnixStream::connect(&socket_path).expect("Failed to connect to mock-tpm socket");
+        .expect("Failed to spawn mocktpm binary");
+
+    let mut stream = None;
+    for _ in 0..10 {
+        if let Ok(s) = UnixStream::connect(&socket_path) {
+            stream = Some(s);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let stream = stream.expect("Failed to connect to mocktpm socket after multiple retries");
+
     let device = Arc::new(Mutex::new(TpmDevice::new(stream)));
-    LOG_FORMAT
-        .set(cli::cli::LogFormat::Plain)
-        .expect("Failed to set LOG_FORMAT global");
+
+    let _ = LOG_FORMAT.set(cli::cli::LogFormat::Plain);
+
     TestFixture {
         child,
         socket_path,
@@ -69,6 +81,75 @@ fn run_command(
     cmd.run(&mut io, device)?;
     io.finalize()?;
     Ok(String::from_utf8(output_buf).unwrap())
+}
+
+#[rstest]
+fn test_subcommand_algorithms(tpm_device: TestFixture) {
+    let algorithms_cmd = Commands::Algorithms(Algorithms { filter: None });
+    let output = run_command(&algorithms_cmd, "", Some(tpm_device.device.clone())).unwrap();
+    let mut results: Vec<String> = output.lines().map(String::from).collect();
+    results.sort();
+
+    let supported_tpm_algs: HashSet<TpmAlgId> = [
+        TpmAlgId::Rsa,
+        TpmAlgId::Ecc,
+        TpmAlgId::Sha256,
+        TpmAlgId::Sha384,
+        TpmAlgId::Sha512,
+    ]
+    .into_iter()
+    .collect();
+
+    let mut expected: Vec<String> = cli::enumerate_all()
+        .filter(|alg| supported_tpm_algs.contains(&alg.object_type))
+        .map(|alg| alg.name)
+        .collect();
+    expected.sort();
+
+    assert_eq!(results, expected);
+
+    let filtered_cmd = Commands::Algorithms(Algorithms {
+        filter: Some("rsa:2048".to_string()),
+    });
+    let filtered_output = run_command(&filtered_cmd, "", Some(tpm_device.device.clone())).unwrap();
+    let filtered_results: Vec<String> = filtered_output.lines().map(String::from).collect();
+
+    assert!(filtered_results
+        .iter()
+        .all(|line| line.starts_with("rsa:2048")));
+    assert_eq!(filtered_results.len(), 3);
+}
+
+#[rstest]
+fn test_subcommand_objects(tpm_device: TestFixture) {
+    let create_cmd = Commands::CreatePrimary(CreatePrimary {
+        algorithm: "rsa:2048:sha256".parse().unwrap(),
+        ..Default::default()
+    });
+
+    run_command(&create_cmd, "", Some(tpm_device.device.clone())).unwrap();
+    run_command(&create_cmd, "", Some(tpm_device.device.clone())).unwrap();
+
+    let objects_cmd = Commands::Objects(Objects);
+    let output_json = run_command(&objects_cmd, "", Some(tpm_device.device.clone())).unwrap();
+
+    let pipeline: Pipeline = serde_json::from_str(&output_json).unwrap();
+    let mut handles: Vec<u32> = pipeline
+        .objects
+        .iter()
+        .filter_map(|obj| {
+            if let PipelineObject::Tpm(tpm) = obj {
+                tpm.context
+                    .strip_prefix("tpm://0x")
+                    .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            } else {
+                None
+            }
+        })
+        .collect();
+    handles.sort();
+
+    assert_eq!(handles, vec![0x8000_0000, 0x8000_0001]);
 }
 
 #[rstest]

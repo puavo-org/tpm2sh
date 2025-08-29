@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    get_auth_sessions, parse_args, resolve_uri_to_bytes,
+    get_auth_sessions, kdfa, parse_args, resolve_uri_to_bytes, tpm_make_name,
     util::build_to_vec,
     Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice, TpmError,
 };
@@ -13,7 +13,7 @@ use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
-use hmac::{Hmac, Mac};
+use hmac::Mac;
 use lexopt::prelude::*;
 use num_traits::FromPrimitive;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
@@ -30,7 +30,7 @@ use tpm2_protocol::{
         TpmuSymMode,
     },
     message::{TpmImportCommand, TpmReadPublicCommand},
-    TpmBuild, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 const ABOUT: &str = "Imports an external key";
@@ -164,59 +164,6 @@ fn read_public(
     Ok((read_public_resp.out_public.inner, read_public_resp.name))
 }
 
-fn kdfa(
-    auth_hash: TpmAlgId,
-    hmac_key: &[u8],
-    label: &str,
-    context_a: &[u8],
-    context_b: &[u8],
-    key_bits: u16,
-) -> Result<Vec<u8>, TpmError> {
-    let mut key_stream = Vec::new();
-    let key_bytes = key_bits as usize / 8;
-    let label_bytes = {
-        let mut bytes = label.as_bytes().to_vec();
-        bytes.push(0);
-        bytes
-    };
-
-    macro_rules! kdfa_hmac {
-        ($digest:ty) => {{
-            let mut counter: u32 = 1;
-            while key_stream.len() < key_bytes {
-                let mut hmac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                    .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
-
-                hmac.update(&counter.to_be_bytes());
-                hmac.update(&label_bytes);
-                hmac.update(context_a);
-                hmac.update(context_b);
-                hmac.update(&u32::from(key_bits).to_be_bytes());
-
-                let result = hmac.finalize().into_bytes();
-                let remaining = key_bytes - key_stream.len();
-                let to_take = remaining.min(result.len());
-                key_stream.extend_from_slice(&result[..to_take]);
-
-                counter += 1;
-            }
-        }};
-    }
-
-    match auth_hash {
-        TpmAlgId::Sha256 => kdfa_hmac!(Sha256),
-        TpmAlgId::Sha384 => kdfa_hmac!(Sha384),
-        TpmAlgId::Sha512 => kdfa_hmac!(Sha512),
-        _ => {
-            return Err(TpmError::Execution(format!(
-                "unsupported hash algorithm for KDFa: {auth_hash}"
-            )))
-        }
-    }
-
-    Ok(key_stream)
-}
-
 /// Encrypts the import seed using the parent's RSA public key.
 ///
 /// See Table 27 in TCG TPM 2.0 Architectures specification for more information.
@@ -336,7 +283,7 @@ fn protect_seed_with_ecc(
 /// Returns a `TpmError` for cryptographic failures or invalid input.
 fn create_import_blob(
     parent_public: &TpmtPublic,
-    object_alg: TpmAlgId,
+    object_public: &TpmtPublic,
     private_bytes: &[u8],
     parent_name: &[u8],
 ) -> Result<(Tpm2bPrivate, Tpm2bEncryptedSecret, Tpm2bData), TpmError> {
@@ -354,15 +301,13 @@ fn create_import_blob(
         }
     };
 
-    let parent_name_len_bytes = u16::try_from(parent_name.len())
-        .map_err(|_| TpmErrorKind::InvalidValue)?
-        .to_be_bytes();
+    let object_name = tpm_make_name(object_public)?;
 
     let sym_key = kdfa(
         parent_name_alg,
         &seed,
         KDF_STORAGE,
-        &parent_name_len_bytes,
+        &object_name,
         parent_name,
         128,
     )?;
@@ -378,13 +323,15 @@ fn create_import_blob(
         parent_name_alg,
         &seed,
         KDF_INTEGRITY,
-        &parent_name_len_bytes,
         parent_name,
+        &[],
         integrity_key_bits,
     )?;
 
-    let sensitive =
-        tpm2_protocol::data::TpmtSensitive::from_private_bytes(object_alg, private_bytes)?;
+    let sensitive = tpm2_protocol::data::TpmtSensitive::from_private_bytes(
+        object_public.object_type,
+        private_bytes,
+    )?;
     let sensitive_data_vec = build_to_vec(&sensitive)?;
 
     let mut enc_data = sensitive_data_vec;
@@ -393,7 +340,7 @@ fn create_import_blob(
     let cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
     cipher.encrypt(&mut enc_data);
 
-    macro_rules! do_integrity_hmac {
+    macro_rules! hmac {
         ($digest:ty) => {{
             let mut integrity_mac =
                 <hmac::Hmac<$digest> as hmac::Mac>::new_from_slice(&hmac_key)
@@ -405,9 +352,9 @@ fn create_import_blob(
     }
 
     let final_mac = match parent_name_alg {
-        TpmAlgId::Sha256 => do_integrity_hmac!(Sha256),
-        TpmAlgId::Sha384 => do_integrity_hmac!(Sha384),
-        TpmAlgId::Sha512 => do_integrity_hmac!(Sha512),
+        TpmAlgId::Sha256 => hmac!(Sha256),
+        TpmAlgId::Sha384 => hmac!(Sha384),
+        TpmAlgId::Sha512 => hmac!(Sha512),
         _ => {
             return Err(TpmError::Execution(format!(
                 "unsupported hash algorithm for integrity HMAC: {parent_name_alg}"
@@ -501,12 +448,8 @@ impl Command for Import {
         };
         let private_bytes_blob = private_key.get_sensitive_blob()?;
 
-        let (duplicate, in_sym_seed, encryption_key) = create_import_blob(
-            &parent_public,
-            public.object_type,
-            &private_bytes_blob,
-            &parent_name,
-        )?;
+        let (duplicate, in_sym_seed, encryption_key) =
+            create_import_blob(&parent_public, &public, &private_bytes_blob, &parent_name)?;
 
         let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
             TpmtSymDef::default()
