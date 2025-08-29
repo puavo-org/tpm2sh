@@ -50,22 +50,6 @@ pub enum TpmError {
     UsageHandled,
 }
 
-impl TpmError {
-    #[must_use]
-    pub fn is_interactive(&self) -> bool {
-        matches!(
-            self,
-            TpmError::Usage(_)
-                | TpmError::UsageHandled
-                | TpmError::Lexopt(_)
-                | TpmError::Parse(_)
-                | TpmError::PcrSelection(_)
-                | TpmError::InvalidHandle(_)
-                | TpmError::File(_, _)
-        )
-    }
-}
-
 impl From<base64::DecodeError> for TpmError {
     fn from(err: base64::DecodeError) -> Self {
         TpmError::Parse(err.to_string())

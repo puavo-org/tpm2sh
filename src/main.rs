@@ -18,14 +18,20 @@ fn main() {
         Ok(()) => {}
         Err(TpmError::Help) => std::process::exit(0),
         Err(TpmError::UsageHandled) => std::process::exit(2),
+        Err(
+            err @ TpmError::Usage(_)
+            | err @ TpmError::Lexopt(_)
+            | err @ TpmError::Parse(_)
+            | err @ TpmError::PcrSelection(_)
+            | err @ TpmError::InvalidHandle(_)
+            | err @ TpmError::File(_, _),
+        ) => {
+            eprintln!("{err}");
+            std::process::exit(2);
+        }
         Err(err) => {
-            if err.is_interactive() {
-                eprintln!("{err}");
-                std::process::exit(2);
-            } else {
-                error!("{err}");
-                std::process::exit(1);
-            }
+            error!("{err}");
+            std::process::exit(1);
         }
     }
 }
