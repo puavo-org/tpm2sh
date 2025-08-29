@@ -279,10 +279,29 @@ fn main() {
     let mut parser = lexopt::Parser::from_env();
     let mut cache_path: Option<PathBuf> = None;
 
-    while let Some(arg) = parser.next().unwrap() {
+    while let Some(arg) = match parser.next() {
+        Ok(arg) => arg,
+        Err(e) => {
+            error!("Argument parsing error: {e}");
+            std::process::exit(1);
+        }
+    } {
         match arg {
             Long("cache-path") => {
-                let path_str = parser.value().unwrap().string().unwrap();
+                let value = match parser.value() {
+                    Ok(val) => val,
+                    Err(e) => {
+                        error!("Missing value for --cache-path: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                let path_str = match value.string() {
+                    Ok(s) => s,
+                    Err(_) => {
+                        error!("Value for --cache-path is not valid UTF-8");
+                        std::process::exit(1);
+                    }
+                };
                 cache_path = Some(PathBuf::from(path_str));
             }
             Long("help") => {
@@ -290,7 +309,7 @@ fn main() {
                 return;
             }
             _ => {
-                error!("Unexpected argument: {:?}", arg);
+                error!("Unexpected argument: {}", arg.unexpected());
                 std::process::exit(1);
             }
         }
