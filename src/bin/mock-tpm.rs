@@ -37,6 +37,36 @@ const AUTH_RESPONSE_MAX: usize = 3;
 type TpmAuthResponses = TpmList<TpmsAuthResponse, AUTH_RESPONSE_MAX>;
 type TpmResponse = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), (TpmRc, TpmAuthResponses)>;
 
+/// Trait to build mock responses without a large match statement.
+trait MockTpmResponse {
+    fn build(
+        &self,
+        writer: &mut TpmWriter,
+        rc: TpmRc,
+        auth_responses: &TpmAuthResponses,
+    ) -> Result<(), tpm2_protocol::TpmErrorKind>;
+}
+
+impl MockTpmResponse for TpmResponseBody {
+    fn build(
+        &self,
+        writer: &mut TpmWriter,
+        rc: TpmRc,
+        auth_responses: &TpmAuthResponses,
+    ) -> Result<(), tpm2_protocol::TpmErrorKind> {
+        match self {
+            Self::CreatePrimary(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::ReadPublic(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::Import(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::ContextSave(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::ContextLoad(r) => tpm_build_response(r, auth_responses, rc, writer),
+            Self::FlushContext(r) => tpm_build_response(r, auth_responses, rc, writer),
+            // Any new mocked responses would be added here.
+            _ => Err(tpm2_protocol::TpmErrorKind::Unreachable),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct MockTpmState {
     transient_objects: HashMap<u32, TpmtPublic>,
@@ -71,14 +101,11 @@ impl MockTpmState {
     }
 
     fn handle_command(&mut self, request_buf: &[u8]) -> TpmResponse {
-        let (_handles, cmd_body, _sessions) = match tpm_parse_command(request_buf) {
-            Ok(result) => result,
-            Err(_) => {
-                return Err((TpmRc::from(TpmRcBase::BadTag), TpmAuthResponses::default()));
-            }
+        let Ok((_handles, cmd_body, _sessions)) = tpm_parse_command(request_buf) else {
+            return Err((TpmRc::from(TpmRcBase::BadTag), TpmAuthResponses::default()));
         };
 
-        let rc = TpmRc::try_from(TpmRcBase::Success as u32).unwrap();
+        let rc = TpmRc::from(TpmRcBase::Success);
 
         match cmd_body {
             TpmCommandBody::CreatePrimary(cmd) => {
@@ -87,17 +114,11 @@ impl MockTpmState {
                 self.transient_objects
                     .insert(handle, cmd.in_public.inner.clone());
 
-                let name_bytes = match calculate_name(&cmd.in_public.inner) {
-                    Ok(bytes) => bytes,
-                    Err(_) => {
-                        return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()))
-                    }
+                let Ok(name_bytes) = calculate_name(&cmd.in_public.inner) else {
+                    return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()));
                 };
-                let name = match Tpm2bName::try_from(name_bytes.as_slice()) {
-                    Ok(n) => n,
-                    Err(_) => {
-                        return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()))
-                    }
+                let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
+                    return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
                 };
                 let resp = TpmCreatePrimaryResponse {
                     object_handle: TpmTransient(handle),
@@ -117,17 +138,11 @@ impl MockTpmState {
                 let Some(public) = self.transient_objects.get(&cmd.object_handle.0) else {
                     return Err((TpmRc::from(TpmRcBase::Handle), TpmAuthResponses::default()));
                 };
-                let name_bytes = match calculate_name(public) {
-                    Ok(bytes) => bytes,
-                    Err(_) => {
-                        return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()))
-                    }
+                let Ok(name_bytes) = calculate_name(public) else {
+                    return Err((TpmRc::from(TpmRcBase::Hash), TpmAuthResponses::default()));
                 };
-                let name = match Tpm2bName::try_from(name_bytes.as_slice()) {
-                    Ok(n) => n,
-                    Err(_) => {
-                        return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()))
-                    }
+                let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
+                    return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
                 };
                 let resp = TpmReadPublicResponse {
                     out_public: Tpm2bPublic::from(public.clone()),
@@ -191,6 +206,28 @@ impl MockTpmState {
     }
 }
 
+fn build_response_vec(response_result: TpmResponse) -> Result<Vec<u8>, TpmError> {
+    let mut response_buf = [0u8; TPM_MAX_COMMAND_SIZE];
+    let len = {
+        let mut writer = TpmWriter::new(&mut response_buf);
+        match response_result {
+            Ok((rc, response_body, auth_responses)) => {
+                response_body.build(&mut writer, rc, &auth_responses)?;
+            }
+            Err((rc, auth_responses)) => {
+                tpm_build_response(
+                    &TpmFlushContextResponse {},
+                    &auth_responses,
+                    rc,
+                    &mut writer,
+                )?;
+            }
+        }
+        writer.len()
+    };
+    Ok(response_buf[..len].to_vec())
+}
+
 fn handle_client(mut stream: UnixStream) {
     let mut state = MockTpmState::new();
 
@@ -200,12 +237,9 @@ fn handle_client(mut stream: UnixStream) {
             break;
         }
 
-        let size_bytes: [u8; 4] = match header[2..6].try_into() {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                error!("Malformed header size");
-                break;
-            }
+        let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
+            error!("Malformed header size");
+            break;
         };
         let size = u32::from_be_bytes(size_bytes) as usize;
 
@@ -222,46 +256,13 @@ fn handle_client(mut stream: UnixStream) {
             break;
         }
 
-        let response = {
-            let mut response_buf = [0u8; TPM_MAX_COMMAND_SIZE];
-            let len = {
-                let mut writer = TpmWriter::new(&mut response_buf);
-                let response_result = state.handle_command(&command_buf);
-                match response_result {
-                    Ok((rc, response_body, auth_responses)) => match response_body {
-                        TpmResponseBody::CreatePrimary(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        TpmResponseBody::ReadPublic(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        TpmResponseBody::Import(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        TpmResponseBody::ContextSave(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        TpmResponseBody::ContextLoad(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        TpmResponseBody::FlushContext(ref resp) => {
-                            tpm_build_response(resp, &auth_responses, rc, &mut writer).unwrap()
-                        }
-                        _ => (),
-                    },
-                    Err((rc, auth_responses)) => {
-                        tpm_build_response(
-                            &TpmFlushContextResponse {},
-                            &auth_responses,
-                            rc,
-                            &mut writer,
-                        )
-                        .unwrap();
-                    }
-                }
-                writer.len()
-            };
-            response_buf[..len].to_vec()
+        let response_result = state.handle_command(&command_buf);
+        let response = match build_response_vec(response_result) {
+            Ok(vec) => vec,
+            Err(e) => {
+                error!("Failed to build response: {}", e);
+                break;
+            }
         };
 
         if stream.write_all(&response).is_err() || stream.flush().is_err() {
