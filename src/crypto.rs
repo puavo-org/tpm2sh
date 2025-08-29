@@ -29,6 +29,23 @@ pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.
 
 pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 
+#[derive(Debug)]
+pub enum CryptoErrorKind {
+    InvalidHmac,
+    UnsupportedNameAlgorithm,
+}
+
+impl core::error::Error for CryptoErrorKind {}
+
+impl core::fmt::Display for CryptoErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            CryptoErrorKind::InvalidHmac => write!(f, "invalid hmac"),
+            CryptoErrorKind::UnsupportedNameAlgorithm => write!(f, "unsupported name algorithm"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TpmKeyAsn1 {
     pub oid: ObjectIdentifier,
@@ -399,14 +416,14 @@ pub fn create_auth(
 /// # Errors
 ///
 /// Returns `TpmError` on parsing failure.
-pub fn kdfa(
+pub fn crypto_kdfa(
     auth_hash: TpmAlgId,
     hmac_key: &[u8],
     label: &str,
     context_a: &[u8],
     context_b: &[u8],
     key_bits: u16,
-) -> Result<Vec<u8>, TpmError> {
+) -> Result<Vec<u8>, CryptoErrorKind> {
     let mut key_stream = Vec::new();
     let key_bytes = (key_bits as usize).div_ceil(8);
     let label_bytes = {
@@ -420,7 +437,7 @@ pub fn kdfa(
             let mut counter: u32 = 1;
             while key_stream.len() < key_bytes {
                 let mut hmac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                    .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
+                    .map_err(|_| CryptoErrorKind::InvalidHmac)?;
 
                 hmac.update(&counter.to_be_bytes());
                 hmac.update(&label_bytes);
@@ -442,11 +459,7 @@ pub fn kdfa(
         TpmAlgId::Sha256 => hmac!(Sha256),
         TpmAlgId::Sha384 => hmac!(Sha384),
         TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => {
-            return Err(TpmError::Execution(format!(
-                "unsupported hash algorithm for KDFa: {auth_hash}"
-            )))
-        }
+        _ => return Err(CryptoErrorKind::UnsupportedNameAlgorithm),
     }
 
     Ok(key_stream)

@@ -4,7 +4,7 @@
 #![allow(clippy::all)]
 #![allow(clippy::pedantic)]
 
-use cli::{kdfa, tpm_make_name, TpmError};
+use cli::{crypto_kdfa, tpm_make_name, TpmError};
 
 use std::{
     collections::HashMap,
@@ -396,7 +396,7 @@ impl MockTpm {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
 
-        let Ok(hmac_key) = kdfa(
+        let Ok(hmac_key) = crypto_kdfa(
             parent_name_alg,
             &seed,
             KDF_INTEGRITY,

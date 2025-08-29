@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
+use crate::CryptoErrorKind;
 use std::{io::Error as IoError, num::ParseIntError, str::Utf8Error};
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
@@ -10,14 +11,17 @@ pub enum TpmError {
     #[error("TPM protocol: {0}")]
     Build(TpmErrorKind),
 
-    #[error("")]
-    Help,
+    #[error("Crypto: {0}")]
+    CryptoErrorKind(#[from] CryptoErrorKind),
 
     #[error("Execution: {0}")]
     Execution(String),
 
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
+
+    #[error("")]
+    Help,
 
     #[error("Handle: {0}")]
     InvalidHandle(String),

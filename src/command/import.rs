@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    get_auth_sessions, kdfa, parse_args, resolve_uri_to_bytes, tpm_make_name,
+    crypto_kdfa, get_auth_sessions, parse_args, resolve_uri_to_bytes, tpm_make_name,
     util::build_to_vec,
     Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice, TpmError,
 };
@@ -101,7 +101,7 @@ macro_rules! ecdh {
 
             let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
             let z = shared_secret.raw_secret_bytes();
-            let sym_material = kdfa(name_alg, z, KDF_STORAGE, context_a, &context_b, 256)?;
+            let sym_material = crypto_kdfa(name_alg, z, KDF_STORAGE, context_a, &context_b, 256)?;
             let (aes_key, iv) = sym_material.split_at(16);
             let mut encrypted_seed_buf = *seed;
             let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
@@ -303,7 +303,7 @@ fn create_import_blob(
 
     let object_name = tpm_make_name(object_public)?;
 
-    let sym_key = kdfa(
+    let sym_key = crypto_kdfa(
         parent_name_alg,
         &seed,
         KDF_STORAGE,
@@ -319,7 +319,7 @@ fn create_import_blob(
     )
     .map_err(|_| TpmError::Execution("hash size conversion error".to_string()))?;
 
-    let hmac_key = kdfa(
+    let hmac_key = crypto_kdfa(
         parent_name_alg,
         &seed,
         KDF_INTEGRITY,
