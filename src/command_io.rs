@@ -254,7 +254,7 @@ macro_rules! command_pop {
                 let pos = self
                     .input_objects
                     .iter()
-                    .position(|obj| matches!(obj, $variant(_)))
+                    .rposition(|obj| matches!(obj, $variant(_)))
                     .ok_or_else(|| {
                         TpmError::Execution(format!(
                             "Pipeline missing required '{}' object",
