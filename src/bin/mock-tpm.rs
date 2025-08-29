@@ -12,6 +12,7 @@ use std::{
     os::unix::fs::PermissionsExt,
     os::unix::net::{UnixListener, UnixStream},
     path::{Path, PathBuf},
+    process::exit,
 };
 
 use lexopt::prelude::*;
@@ -174,9 +175,20 @@ impl MockTpmState {
                     TpmAuthResponses::default(),
                 ))
             }
-            TpmCommandBody::Import(_cmd) => {
+            TpmCommandBody::Import(cmd) => {
+                if !self.transient_objects.contains_key(&cmd.parent_handle.0) {
+                    return Err((TpmRc::from(TpmRcBase::Handle), TpmAuthResponses::default()));
+                }
+
+                match cmd.object_public.inner.object_type {
+                    TpmAlgId::Rsa | TpmAlgId::Ecc => {}
+                    _ => {
+                        return Err((TpmRc::from(TpmRcBase::Value), TpmAuthResponses::default()));
+                    }
+                }
+
                 let resp = TpmImportResponse {
-                    out_private: Tpm2bPrivate::try_from(&[0u8; 64][..]).unwrap(),
+                    out_private: Tpm2bPrivate::default(),
                 };
                 Ok((
                     rc,
@@ -271,7 +283,7 @@ fn handle_client(mut stream: UnixStream) {
         command_buf.resize(size, 0);
 
         if let Err(e) = stream.read_exact(&mut command_buf[TPM_HEADER_SIZE..]) {
-            error!("{}", e);
+            error!("{e}");
             break;
         }
 
@@ -279,7 +291,7 @@ fn handle_client(mut stream: UnixStream) {
         let response = match build_response_vec(response_result) {
             Ok(vec) => vec,
             Err(e) => {
-                error!("Failed to build response: {}", e);
+                error!("Failed to build response: {e}");
                 break;
             }
         };
@@ -291,7 +303,7 @@ fn handle_client(mut stream: UnixStream) {
     }
 }
 
-fn main() {
+fn run() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_micros()
         .init();
@@ -299,38 +311,26 @@ fn main() {
     let mut parser = lexopt::Parser::from_env();
     let mut cache_path: Option<PathBuf> = None;
 
-    while let Some(arg) = match parser.next() {
-        Ok(arg) => arg,
-        Err(e) => {
-            error!("Argument parsing error: {e}");
-            std::process::exit(1);
-        }
-    } {
+    while let Some(arg) = parser
+        .next()
+        .map_err(|e| format!("Argument parsing error: {e}"))?
+    {
         match arg {
             Long("cache-path") => {
-                let value = match parser.value() {
-                    Ok(val) => val,
-                    Err(e) => {
-                        error!("Missing value for --cache-path: {e}");
-                        std::process::exit(1);
-                    }
-                };
-                let path_str = match value.string() {
-                    Ok(s) => s,
-                    Err(_) => {
-                        error!("Value for --cache-path is not valid UTF-8");
-                        std::process::exit(1);
-                    }
-                };
+                let value = parser
+                    .value()
+                    .map_err(|e| format!("Missing value for --cache-path: {e}"))?;
+                let path_str = value
+                    .string()
+                    .map_err(|_| "Value for --cache-path is not valid UTF-8".to_string())?;
                 cache_path = Some(PathBuf::from(path_str));
             }
             Long("help") => {
                 info!("Usage: mock-tpm [--cache-path <PATH>]");
-                return;
+                return Ok(());
             }
             _ => {
-                error!("Unexpected argument: {}", arg.unexpected());
-                std::process::exit(1);
+                return Err(format!("Unexpected argument: {}", arg.unexpected()));
             }
         }
     }
@@ -341,31 +341,21 @@ fn main() {
             .unwrap_or_else(|| PathBuf::from("/tmp/tpm2sh"))
     });
 
-    if let Err(e) = std::fs::create_dir_all(&cache_path) {
-        error!("{}: {}", cache_path.display(), e);
-        std::process::exit(1);
-    }
+    std::fs::create_dir_all(&cache_path).map_err(|e| format!("{}: {e}", cache_path.display()))?;
 
     let socket_path = cache_path.join(SOCKET_NAME);
     let path = Path::new(&socket_path);
 
     if let Err(e) = std::fs::remove_file(path) {
         if e.kind() != io::ErrorKind::NotFound {
-            error!("{}: {}", path.display(), e);
-            std::process::exit(1);
+            return Err(format!("{}: {e}", path.display()));
         }
     }
 
-    let listener = match UnixListener::bind(path) {
-        Ok(l) => l,
-        Err(e) => {
-            error!("{}: {}", path.display(), e);
-            std::process::exit(1);
-        }
-    };
+    let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
 
     if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)) {
-        warn!("{}: {}", path.display(), e);
+        warn!("{}: {e}", path.display());
     }
 
     info!("Listening on {}", path.display());
@@ -378,8 +368,16 @@ fn main() {
                 info!("Client disconnected");
             }
             Err(e) => {
-                error!("Accepting connection failed: {}", e);
+                error!("Accepting connection failed: {e}");
             }
         }
+    }
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = run() {
+        error!("{e}");
+        exit(1);
     }
 }
