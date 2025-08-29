@@ -85,76 +85,112 @@ pub fn format_subcommand_help(
 struct Subcommand {
     name: &'static str,
     about: &'static str,
+    help: fn(),
+    parse: fn(&mut lexopt::Parser) -> Result<Commands, TpmError>,
 }
 
 const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand {
         name: "algorithms",
         about: "Lists available algorithms",
+        help: Algorithms::help,
+        parse: Algorithms::parse,
     },
     Subcommand {
         name: "convert",
         about: "Converts keys between ASN.1 and JSON format",
+        help: Convert::help,
+        parse: Convert::parse,
     },
     Subcommand {
         name: "create-primary",
         about: "Creates a primary key",
+        help: CreatePrimary::help,
+        parse: CreatePrimary::parse,
     },
     Subcommand {
         name: "delete",
         about: "Deletes a transient or persistent object",
+        help: Delete::help,
+        parse: Delete::parse,
     },
     Subcommand {
         name: "import",
         about: "Imports an external key",
+        help: Import::help,
+        parse: Import::parse,
     },
     Subcommand {
         name: "load",
         about: "Loads a TPM key",
+        help: Load::help,
+        parse: Load::parse,
     },
     Subcommand {
         name: "objects",
         about: "Lists objects in volatile and non-volatile memory",
+        help: Objects::help,
+        parse: Objects::parse,
     },
     Subcommand {
         name: "pcr-event",
         about: "Extends a PCR with an event",
+        help: PcrEvent::help,
+        parse: PcrEvent::parse,
     },
     Subcommand {
         name: "pcr-read",
         about: "Reads PCRs",
+        help: PcrRead::help,
+        parse: PcrRead::parse,
     },
     Subcommand {
         name: "policy",
         about: "Builds a policy using a policy expression",
+        help: Policy::help,
+        parse: Policy::parse,
     },
     Subcommand {
         name: "print-error",
         about: "Encodes and print a TPM error code",
+        help: PrintError::help,
+        parse: PrintError::parse,
     },
     Subcommand {
         name: "print-stack",
         about: "Prints a human-readable summary of the object stack to stderr",
+        help: PrintStack::help,
+        parse: PrintStack::parse,
     },
     Subcommand {
         name: "reset-lock",
         about: "Resets the dictionary attack lockout timer",
+        help: ResetLock::help,
+        parse: ResetLock::parse,
     },
     Subcommand {
         name: "save",
         about: "Saves to non-volatile memory",
+        help: Save::help,
+        parse: Save::parse,
     },
     Subcommand {
         name: "seal",
         about: "Seals a keyedhash object",
+        help: Seal::help,
+        parse: Seal::parse,
     },
     Subcommand {
         name: "start-session",
         about: "Starts an authorization session",
+        help: StartSession::help,
+        parse: StartSession::parse,
     },
     Subcommand {
         name: "unseal",
         about: "Unseals a keyedhash object",
+        help: Unseal::help,
+        parse: Unseal::parse,
     },
 ];
 const GLOBAL_OPTIONS: &[CommandLineOption] = &[
@@ -194,64 +230,24 @@ fn print_version() {
     println!("tpm2sh {VERSION}");
 }
 
-fn dispatch_help(name: &str) {
-    match name {
-        "algorithms" => Algorithms::help(),
-        "convert" => Convert::help(),
-        "create-primary" => CreatePrimary::help(),
-        "delete" => Delete::help(),
-        "import" => Import::help(),
-        "load" => Load::help(),
-        "objects" => Objects::help(),
-        "pcr-event" => PcrEvent::help(),
-        "pcr-read" => PcrRead::help(),
-        "policy" => Policy::help(),
-        "print-error" => PrintError::help(),
-        "print-stack" => PrintStack::help(),
-        "reset-lock" => ResetLock::help(),
-        "save" => Save::help(),
-        "seal" => Seal::help(),
-        "start-session" => StartSession::help(),
-        "unseal" => Unseal::help(),
-        _ => unreachable!(),
-    }
-}
-
 /// Dispatch parsing to the correct subcommand implementation.
 fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
-    let Some(name) = name.to_str() else {
-        return Err(TpmError::Usage("Invalid non-UTF8 command".to_string()));
+    let name_str = name
+        .to_str()
+        .ok_or_else(|| TpmError::Usage("Invalid non-UTF8 command".to_string()))?;
+
+    let Some(cmd) = SUBCOMMANDS.iter().find(|c| c.name == name_str) else {
+        return Err(TpmError::Usage(format!("Unknown command: '{name_str}'")));
     };
 
-    let result = match name {
-        "algorithms" => Algorithms::parse(parser),
-        "convert" => Convert::parse(parser),
-        "create-primary" => CreatePrimary::parse(parser),
-        "delete" => Delete::parse(parser),
-        "import" => Import::parse(parser),
-        "load" => Load::parse(parser),
-        "objects" => Objects::parse(parser),
-        "pcr-event" => PcrEvent::parse(parser),
-        "pcr-read" => PcrRead::parse(parser),
-        "policy" => Policy::parse(parser),
-        "print-error" => PrintError::parse(parser),
-        "print-stack" => PrintStack::parse(parser),
-        "reset-lock" => ResetLock::parse(parser),
-        "save" => Save::parse(parser),
-        "seal" => Seal::parse(parser),
-        "start-session" => StartSession::parse(parser),
-        "unseal" => Unseal::parse(parser),
-        cmd => return Err(TpmError::Usage(format!("Unknown command: '{cmd}'"))),
-    };
-
-    match result {
+    match (cmd.parse)(parser) {
         Err(TpmError::Usage(msg)) => {
             eprintln!("{msg}\n");
-            dispatch_help(name);
+            (cmd.help)();
             Err(TpmError::UsageHandled)
         }
         Err(TpmError::Help) => {
-            dispatch_help(name);
+            (cmd.help)();
             Err(TpmError::Help)
         }
         res => res,
