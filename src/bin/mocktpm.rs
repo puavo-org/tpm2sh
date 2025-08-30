@@ -523,7 +523,7 @@ fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmErrorKi
     Ok(buf[..len].to_vec())
 }
 
-fn mocktpm_client(mut stream: UnixStream) {
+fn mocktpm_run(mut stream: UnixStream) {
     let mut state = MockTpm::new();
 
     loop {
@@ -627,7 +627,7 @@ fn run() -> Result<(), String> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                mocktpm_client(stream);
+                mocktpm_run(stream);
             }
             Err(e) => {
                 error!("{e}");
