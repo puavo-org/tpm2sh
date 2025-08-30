@@ -2,7 +2,12 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device, key::tpm_alg_id_to_str, pipeline, CliError, TpmDevice};
+use crate::{
+    device,
+    error::ParseError,
+    key::{self, tpm_alg_id_to_str},
+    pipeline, CliError, TpmDevice,
+};
 use pest::Parser as PestParser;
 use pest_derive::Parser;
 use std::collections::BTreeMap;
@@ -59,7 +64,7 @@ pub(crate) fn pcr_response_to_output(
                 if (byte & (1 << bit_idx)) != 0 {
                     let pcr_index = byte_idx * 8 + bit_idx;
                     let digest = digest_iter.next().ok_or_else(|| {
-                        CliError::Parse(
+                        ParseError::Custom(
                             "TPM response had fewer digests than selected PCRs".to_string(),
                         )
                     })?;
@@ -86,7 +91,7 @@ pub(crate) fn pcr_values_to_selection(
     }
 
     for (bank_name, pcr_map) in &pcr_values.banks {
-        let alg = crate::key::tpm_alg_id_from_str(bank_name).map_err(CliError::Parse)?;
+        let alg = key::tpm_alg_id_from_str(bank_name).map_err(ParseError::Custom)?;
         let mut pcr_select_bytes = vec![0u8; pcr_select_size];
         for pcr_str in pcr_map.keys() {
             let pcr_index: usize = pcr_str.parse()?;

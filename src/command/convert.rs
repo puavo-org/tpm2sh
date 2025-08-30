@@ -6,6 +6,7 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
+    error::ParseError,
     key::TpmKey,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
     resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
@@ -99,7 +100,7 @@ impl Command for Convert {
 
                 let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
                 let oid = ObjectIdentifier::from_arcs([2, 23, 133, 10, 1, 3])
-                    .map_err(|e| CliError::Parse(format!("OID creation error: {e:?}")))?;
+                    .map_err(|e| ParseError::Custom(format!("OID creation error: {e:?}")))?;
                 let parent_handle = crate::parse_tpm_handle_from_uri("tpm://0x40000001")?;
 
                 TpmKey {

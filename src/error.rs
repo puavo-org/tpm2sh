@@ -6,6 +6,28 @@ use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 
 #[derive(Debug, Error)]
+pub enum ParseError {
+    #[error("base64 decoding failed: {0}")]
+    Base64(#[from] base64::DecodeError),
+    #[error("{0}")]
+    Custom(String),
+    #[error("DER parsing failed: {0}")]
+    Der(#[from] pkcs8::der::Error),
+    #[error("hex decoding failed: {0}")]
+    Hex(#[from] hex::FromHexError),
+    #[error("integer parsing failed: {0}")]
+    Int(#[from] ParseIntError),
+    #[error("invalid PEM data: {0}")]
+    Pem(#[from] pem::PemError),
+    #[error("PKCS#8 parsing failed: {0}")]
+    Pkcs8(#[from] pkcs8::Error),
+    #[error("invalid URI: {0}")]
+    Uri(#[from] url::ParseError),
+    #[error("UTF-8 decoding failed: {0}")]
+    Utf8(#[from] Utf8Error),
+}
+
+#[derive(Debug, Error)]
 pub enum CliError {
     #[error("TPM protocol: {0}")]
     Build(TpmErrorKind),
@@ -32,7 +54,7 @@ pub enum CliError {
     Lexopt(#[from] lexopt::Error),
 
     #[error("Parser: {0}")]
-    Parse(String),
+    Parse(#[from] ParseError),
 
     #[error("PCR: {0}")]
     PcrSelection(String),
@@ -52,37 +74,37 @@ pub enum CliError {
 
 impl From<base64::DecodeError> for CliError {
     fn from(err: base64::DecodeError) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<hex::FromHexError> for CliError {
     fn from(err: hex::FromHexError) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<ParseIntError> for CliError {
     fn from(err: ParseIntError) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<pkcs8::der::Error> for CliError {
     fn from(err: pkcs8::der::Error) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<pkcs8::Error> for CliError {
     fn from(err: pkcs8::Error) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<pem::PemError> for CliError {
     fn from(err: pem::PemError) -> Self {
-        CliError::Parse(format!("invalid PEM data: {err}"))
+        ParseError::from(err).into()
     }
 }
 
@@ -94,12 +116,12 @@ impl From<TpmErrorKind> for CliError {
 
 impl From<Utf8Error> for CliError {
     fn from(err: Utf8Error) -> Self {
-        CliError::Parse(err.to_string())
+        ParseError::from(err).into()
     }
 }
 
 impl From<url::ParseError> for CliError {
     fn from(err: url::ParseError) -> Self {
-        CliError::Parse(format!("Invalid URI: {err}"))
+        ParseError::from(err).into()
     }
 }

@@ -2,7 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{crypto::PrivateKey, crypto_hmac, CliError};
+use crate::{
+    crypto::PrivateKey,
+    crypto_hmac,
+    error::{CliError, ParseError},
+};
 
 use std::{cmp::Ordering, fs, path::Path, str::FromStr};
 
@@ -269,7 +273,8 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
     pub fn to_der(&self) -> Result<Vec<u8>, CliError> {
-        Encode::to_der(self).map_err(|e| CliError::Parse(format!("DER encode error: {e}")))
+        Encode::to_der(self)
+            .map_err(|e| ParseError::Custom(format!("DER encode error: {e}")).into())
     }
 
     /// Parse TPM key from PEM bytes.
@@ -280,7 +285,7 @@ impl TpmKey {
     pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, CliError> {
         let pem = pem::parse(pem_bytes)?;
         if pem.tag() != "TSS2 PRIVATE KEY" {
-            return Err(CliError::Parse("invalid PEM tag".to_string()));
+            return Err(ParseError::Custom("invalid PEM tag".to_string()).into());
         }
         Self::from_der(pem.contents())
     }
@@ -301,14 +306,11 @@ impl TpmKey {
 ///
 /// Returns `CliError` on parsing failure.
 pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliError> {
-    let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| CliError::Parse(e.to_string()))?;
+    let pem_str = std::str::from_utf8(pem_bytes)?;
     let pem_block = pem::parse(pem_str)?;
 
     if pem_block.tag() != "PRIVATE KEY" {
-        return Err(CliError::Parse(format!(
-            "invalid PEM tag: {}",
-            pem_block.tag()
-        )));
+        return Err(ParseError::Custom(format!("invalid PEM tag: {}", pem_block.tag())).into());
     }
 
     let contents = pem_block.contents();
@@ -323,9 +325,9 @@ pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliErr
             PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
         }
         _ => {
-            return Err(CliError::Parse(
-                "unsupported key algorithm in PEM file".to_string(),
-            ))
+            return Err(
+                ParseError::Custom("unsupported key algorithm in PEM file".to_string()).into(),
+            )
         }
     };
 

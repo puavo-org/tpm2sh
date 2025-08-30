@@ -5,6 +5,7 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
+    error::ParseError,
     get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
     CliError, Command, CommandType, TpmDevice,
@@ -48,7 +49,7 @@ const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help i
 
 fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, CliError> {
     if pair.as_rule() != Rule::quoted_string {
-        return Err(CliError::Parse("expected a quoted string".to_string()));
+        return Err(ParseError::Custom("expected a quoted string".to_string()).into());
     }
     let s = pair.as_str();
     Ok(s[1..s.len() - 1].to_string())
@@ -57,7 +58,7 @@ fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, CliError> {
 fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliError> {
     let pair = pairs
         .next()
-        .ok_or_else(|| CliError::Parse("expected a policy expression".to_string()))?;
+        .ok_or_else(|| ParseError::Custom("expected a policy expression".to_string()))?;
     let ast = match pair.as_rule() {
         Rule::pcr_expression => {
             let mut inner_pairs = pair.into_inner();
@@ -74,8 +75,7 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
                         .unwrap_or("")
                         .parse::<u32>()
                 })
-                .transpose()
-                .map_err(|e| CliError::Parse(e.to_string()))?;
+                .transpose()?;
             PolicyAst::Pcr {
                 selection,
                 digest,
@@ -95,14 +95,15 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
             PolicyAst::Or(branches)
         }
         _ => {
-            return Err(CliError::Parse(format!(
+            return Err(ParseError::Custom(format!(
                 "unexpected policy expression part: {:?}",
                 pair.as_rule()
-            )))
+            ))
+            .into())
         }
     };
     if pairs.next().is_some() {
-        return Err(CliError::Parse("unexpected trailing input".to_string()));
+        return Err(ParseError::Custom("unexpected trailing input".to_string()).into());
     }
 
     Ok(ast)
@@ -110,7 +111,7 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
 
 fn parse_policy_expression(input: &str) -> Result<PolicyAst, CliError> {
     let pairs = PolicyParser::parse(Rule::policy_expression, input)
-        .map_err(|e| CliError::Parse(e.to_string()))?;
+        .map_err(|e| ParseError::Custom(e.to_string()))?;
     let mut root_pairs = pairs.clone();
     parse_policy_internal(root_pairs.next().unwrap().into_inner())
 }

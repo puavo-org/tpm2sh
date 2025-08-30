@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{get_log_format, print::TpmPrint, CliError, POOL};
+use crate::{error::ParseError, get_log_format, print::TpmPrint, CliError, POOL};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -122,9 +122,9 @@ impl TpmDevice {
 
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
             drop(tx);
-            return Err(CliError::Parse(format!(
-                "Invalid response size in header: {size}"
-            )));
+            return Err(
+                ParseError::Custom(format!("Invalid response size in header: {size}")).into(),
+            );
         }
 
         let mut resp_buf = header.to_vec();

@@ -3,6 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
+    error::ParseError,
     parse_tpm_handle_from_uri,
     pipeline::{
         Data, Entry as PipelineEntry, HmacSession, Key, PcrValues, Pipeline, PolicySession, Tpm,
@@ -228,9 +229,10 @@ impl<R: Read, W: Write> CommandIo<R, W> {
             let context_blob = resolve_uri_to_bytes(uri, &self.input_objects)?;
             let (context, remainder) = TpmsContext::parse(&context_blob)?;
             if !remainder.is_empty() {
-                return Err(CliError::Parse(
+                return Err(ParseError::Custom(
                     "Context object contains trailing data".to_string(),
-                ));
+                )
+                .into());
             }
 
             let mut device = device_arc
@@ -246,9 +248,10 @@ impl<R: Read, W: Write> CommandIo<R, W> {
                 device_arc.clone(),
             ))
         } else {
-            Err(CliError::Parse(format!(
-                "Unsupported URI scheme for a tpm context: '{uri}'"
-            )))
+            Err(
+                ParseError::Custom(format!("Unsupported URI scheme for a tpm context: '{uri}'"))
+                    .into(),
+            )
         }
     }
 }
