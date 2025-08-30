@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{create_auth, util, TpmError};
+use crate::{create_auth, util, CliError};
 use log::debug;
 use rand::RngCore;
 use tpm2_protocol::{
@@ -25,10 +25,10 @@ pub struct AuthSession {
 ///
 /// # Errors
 ///
-/// Returns `TpmError` on failure.
+/// Returns `CliError` on failure.
 pub fn build_password_session(
     password: Option<&str>,
-) -> Result<Vec<data::TpmsAuthCommand>, TpmError> {
+) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
     match password {
         Some(password) => {
             debug!(target: "cli::session", "building password session: password_len = {}", password.len());
@@ -48,14 +48,14 @@ pub fn build_password_session(
 ///
 /// # Errors
 ///
-/// Returns a `TpmError` if building the command parameters or creating the
+/// Returns a `CliError` if building the command parameters or creating the
 /// authorization HMAC fails.
 pub fn get_auth_sessions<C>(
     command: &C,
     handles: &[u32],
     session: Option<&AuthSession>,
     password: Option<&str>,
-) -> Result<Vec<data::TpmsAuthCommand>, TpmError>
+) -> Result<Vec<data::TpmsAuthCommand>, CliError>
 where
     C: TpmHeader,
 {
@@ -63,7 +63,7 @@ where
         let params = util::build_to_vec(command)?;
 
         let nonce_size = tpm2_protocol::tpm_hash_size(&session.auth_hash).ok_or_else(|| {
-            TpmError::Execution(format!(
+            CliError::Execution(format!(
                 "session has an invalid hash algorithm: {}",
                 session.auth_hash
             ))

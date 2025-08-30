@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Save},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, Command, CommandIo, CommandType,
-    PipelineObject, Tpm, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, CliError, Command, CommandIo,
+    CommandType, PipelineObject, Tpm, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -44,7 +44,7 @@ impl Command for Save {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Save::default();
         parse_args!(parser, arg, Self::help, {
             Long("to") => {
@@ -54,12 +54,12 @@ impl Command for Save {
                 args.password.password = Some(parser.value()?.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
 
         if args.to_uri.is_none() {
-            return Err(TpmError::Usage(
+            return Err(CliError::Usage(
                 "Missing required argument: --to <HANDLE_URI>".to_string(),
             ));
         }
@@ -71,14 +71,14 @@ impl Command for Save {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
         let object_to_save = io.pop_tpm()?;
         let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &object_to_save)?;
@@ -103,11 +103,11 @@ impl Command for Save {
         let (resp, _) = {
             let mut chip = device_arc
                 .lock()
-                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
             chip.execute(&evict_cmd, &sessions)?
         };
         resp.EvictControl()
-            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         let persistent_tpm_object = Tpm {
             context: format!("tpm://{persistent_handle:#010x}"),

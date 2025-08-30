@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo, Command,
-    CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo, CliError,
+    Command, CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -122,7 +122,7 @@ impl Command for CreatePrimary {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = CreatePrimary::default();
         let mut alg_set = false;
         parse_args!(parser, arg, Self::help, {
@@ -140,12 +140,12 @@ impl Command for CreatePrimary {
                 args.password.password = Some(parser.value()?.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
 
         if !alg_set {
-            return Err(TpmError::Usage(
+            return Err(CliError::Usage(
                 "Missing required argument: --algorithm <ALGORITHM>".to_string(),
             ));
         }
@@ -156,18 +156,18 @@ impl Command for CreatePrimary {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         io.clear_input()?;
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
@@ -192,7 +192,7 @@ impl Command for CreatePrimary {
 
         let create_primary_resp = resp
             .CreatePrimary()
-            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let object_handle = create_primary_resp.object_handle;
 
         let final_object = if let Some(uri) = &self.handle_uri {
@@ -206,7 +206,7 @@ impl Command for CreatePrimary {
             let evict_sessions = get_auth_sessions(&evict_cmd, &evict_handles, None, None)?;
             let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
             Tpm {
                 context: format!("tpm://{persistent_handle:#010x}"),
@@ -220,7 +220,7 @@ impl Command for CreatePrimary {
             let (resp, _) = chip.execute(&save_command, &[])?;
             let save_resp = resp
                 .ContextSave()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             let context_bytes = util::build_to_vec(&save_resp.context)?;
 
             Tpm {

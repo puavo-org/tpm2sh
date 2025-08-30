@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::TpmError;
+use crate::CliError;
 use std::{cmp::Ordering, str::FromStr};
 use tpm2_protocol::data::{TpmAlgId, TpmEccCurve};
 
@@ -33,17 +33,17 @@ impl Default for Alg {
 }
 
 impl FromStr for Alg {
-    type Err = TpmError;
+    type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
         match parts.as_slice() {
             ["rsa", key_bits_str, name_alg_str] => {
                 let key_bits: u16 = key_bits_str.parse().map_err(|_| {
-                    TpmError::Usage(format!("Invalid RSA key bits value: '{key_bits_str}'"))
+                    CliError::Usage(format!("Invalid RSA key bits value: '{key_bits_str}'"))
                 })?;
                 let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(TpmError::Usage)?;
+                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Rsa,
@@ -53,9 +53,9 @@ impl FromStr for Alg {
             }
             ["ecc", curve_id_str, name_alg_str] => {
                 let curve_id =
-                    crate::key::tpm_ecc_curve_from_str(curve_id_str).map_err(TpmError::Usage)?;
+                    crate::key::tpm_ecc_curve_from_str(curve_id_str).map_err(CliError::Usage)?;
                 let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(TpmError::Usage)?;
+                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Ecc,
@@ -65,7 +65,7 @@ impl FromStr for Alg {
             }
             ["keyedhash", name_alg_str] => {
                 let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(TpmError::Usage)?;
+                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::KeyedHash,
@@ -73,7 +73,7 @@ impl FromStr for Alg {
                     params: AlgInfo::KeyedHash,
                 })
             }
-            _ => Err(TpmError::Usage(format!("Invalid algorithm format: '{s}'"))),
+            _ => Err(CliError::Usage(format!("Invalid algorithm format: '{s}'"))),
         }
     }
 }

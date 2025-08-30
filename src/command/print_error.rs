@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PrintError},
-    parse_args, parse_tpm_rc, Command, CommandIo, CommandType, TpmDevice, TpmError,
+    parse_args, parse_tpm_rc, CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -28,13 +28,13 @@ impl Command for PrintError {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut rc_str: Option<String> = None;
         parse_args!(parser, arg, Self::help, {
             Value(val) if rc_str.is_none() => {
                 rc_str = Some(val.string()?);
             }
-            _ => return Err(TpmError::from(arg.unexpected())),
+            _ => return Err(CliError::from(arg.unexpected())),
         });
 
         if let Some(s) = rc_str {
@@ -42,7 +42,7 @@ impl Command for PrintError {
                 rc: parse_tpm_rc(&s)?,
             }))
         } else {
-            Err(TpmError::Usage(
+            Err(CliError::Usage(
                 "Missing required argument: <RC>".to_string(),
             ))
         }
@@ -56,7 +56,7 @@ impl Command for PrintError {
         &self,
         io: &mut CommandIo<R, W>,
         _device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         writeln!(io.writer(), "{}", self.rc)?;
         Ok(())
     }

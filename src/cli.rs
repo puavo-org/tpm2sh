@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{Command, CommandIo, CommandType, TpmDevice, TpmError};
+use crate::{CliError, Command, CommandIo, CommandType, TpmDevice};
 use std::{
     io::{Read, Write},
     str::FromStr,
@@ -18,13 +18,13 @@ pub enum LogFormat {
 }
 
 impl FromStr for LogFormat {
-    type Err = TpmError;
+    type Err = CliError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "plain" => Ok(Self::Plain),
             "pretty" => Ok(Self::Pretty),
-            _ => Err(TpmError::Usage(format!("Invalid log format: '{s}'"))),
+            _ => Err(CliError::Usage(format!("Invalid log format: '{s}'"))),
         }
     }
 }
@@ -45,13 +45,13 @@ pub enum Hierarchy {
 }
 
 impl FromStr for Hierarchy {
-    type Err = TpmError;
+    type Err = CliError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "owner" => Ok(Hierarchy::Owner),
             "platform" => Ok(Hierarchy::Platform),
             "endorsement" => Ok(Hierarchy::Endorsement),
-            _ => Err(TpmError::Usage(format!("Invalid hierarchy: '{s}'"))),
+            _ => Err(CliError::Usage(format!("Invalid hierarchy: '{s}'"))),
         }
     }
 }
@@ -75,13 +75,13 @@ pub enum SessionType {
 }
 
 impl FromStr for SessionType {
-    type Err = TpmError;
+    type Err = CliError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "hmac" => Ok(SessionType::Hmac),
             "policy" => Ok(SessionType::Policy),
             "trial" => Ok(SessionType::Trial),
-            _ => Err(TpmError::Usage(format!("Invalid session type: '{s}'"))),
+            _ => Err(CliError::Usage(format!("Invalid session type: '{s}'"))),
         }
     }
 }
@@ -105,13 +105,13 @@ pub enum SessionHashAlg {
 }
 
 impl FromStr for SessionHashAlg {
-    type Err = TpmError;
+    type Err = CliError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "sha256" => Ok(SessionHashAlg::Sha256),
             "sha384" => Ok(SessionHashAlg::Sha384),
             "sha512" => Ok(SessionHashAlg::Sha512),
-            _ => Err(TpmError::Usage(format!(
+            _ => Err(CliError::Usage(format!(
                 "Invalid session hash algorithm: '{s}'"
             ))),
         }
@@ -137,13 +137,13 @@ pub enum KeyFormat {
 }
 
 impl FromStr for KeyFormat {
-    type Err = TpmError;
+    type Err = CliError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "json" => Ok(KeyFormat::Json),
             "pem" => Ok(KeyFormat::Pem),
             "der" => Ok(KeyFormat::Der),
-            _ => Err(TpmError::Usage(format!("Invalid key format: '{s}'"))),
+            _ => Err(CliError::Usage(format!("Invalid key format: '{s}'"))),
         }
     }
 }
@@ -199,7 +199,7 @@ impl Command for Commands {
         unimplemented!();
     }
 
-    fn parse(_parser: &mut lexopt::Parser) -> Result<Self, TpmError>
+    fn parse(_parser: &mut lexopt::Parser) -> Result<Self, CliError>
     where
         Self: Sized,
     {
@@ -232,7 +232,7 @@ impl Command for Commands {
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), crate::TpmError> {
+    ) -> Result<(), crate::CliError> {
         match self {
             Self::Algorithms(args) => args.run(io, device),
             Self::Convert(args) => args.run(io, device),

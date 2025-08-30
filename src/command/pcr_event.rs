@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrEvent},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes, Command,
-    CommandIo, CommandType, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes, CliError,
+    Command, CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -42,7 +42,7 @@ impl Command for PcrEvent {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = PcrEvent::default();
         let mut handle_uri_arg = None;
         let mut data_uri_arg = None;
@@ -57,7 +57,7 @@ impl Command for PcrEvent {
                 data_uri_arg = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
 
@@ -66,7 +66,7 @@ impl Command for PcrEvent {
             args.data_uri = data_uri;
             Ok(Commands::PcrEvent(args))
         } else {
-            Err(TpmError::Usage(
+            Err(CliError::Usage(
                 "Missing required arguments: <PCR_HANDLE_URI> <DATA_URI>".to_string(),
             ))
         }
@@ -76,17 +76,17 @@ impl Command for PcrEvent {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let pcr_handle = parse_tpm_handle_from_uri(&self.handle_uri)?;
         let handles = [pcr_handle];
@@ -102,7 +102,7 @@ impl Command for PcrEvent {
             get_auth_sessions(&command, &handles, None, self.password.password.as_deref())?;
         let (resp, _) = chip.execute(&command, &sessions)?;
         resp.PcrEvent()
-            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         writeln!(io.writer(), "Extended PCR {pcr_handle:#0x}")?;
 

@@ -24,7 +24,7 @@ pub use self::arg_parser::parse_cli;
 pub use self::command_io::{CommandIo, ScopedHandle};
 pub use self::crypto::*;
 pub use self::device::*;
-pub use self::error::TpmError;
+pub use self::error::CliError;
 pub use self::key::*;
 pub use self::pcr::*;
 pub use self::pretty_printer::PrettyTrace;
@@ -74,8 +74,8 @@ pub trait Command {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` on parsing failure.
-    fn parse(parser: &mut lexopt::Parser) -> Result<cli::Commands, TpmError>
+    /// Returns a `CliError` on parsing failure.
+    fn parse(parser: &mut lexopt::Parser) -> Result<cli::Commands, CliError>
     where
         Self: Sized;
 
@@ -88,20 +88,20 @@ pub trait Command {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError>;
+    ) -> Result<(), CliError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
 ///
 /// # Errors
 ///
-/// Returns a `TpmError` if opening the device, or executing the command fails.
-pub fn execute_cli() -> Result<(), TpmError> {
+/// Returns a `CliError` if opening the device, or executing the command fails.
+pub fn execute_cli() -> Result<(), CliError> {
     let Some(cli) = parse_cli()? else {
         return Ok(());
     };
@@ -116,7 +116,7 @@ pub fn execute_cli() -> Result<(), TpmError> {
                 .read(true)
                 .write(true)
                 .open(&cli.device)
-                .map_err(|e| TpmError::File(cli.device.to_string(), e))?;
+                .map_err(|e| CliError::File(cli.device.to_string(), e))?;
             Some(Arc::new(Mutex::new(TpmDevice::new(file))))
         };
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{util, TpmError};
+use crate::{util, CliError};
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use hmac::{Hmac, Mac};
 use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
@@ -109,14 +109,14 @@ impl PrivateKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` on parsing failure.
-    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Self, TpmError> {
-        let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| TpmError::Parse(e.to_string()))?;
+    /// Returns `CliError` on parsing failure.
+    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Self, CliError> {
+        let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| CliError::Parse(e.to_string()))?;
 
         let pem_block = pem::parse(pem_str)?;
 
         if pem_block.tag() != "PRIVATE KEY" {
-            return Err(TpmError::Parse(format!(
+            return Err(CliError::Parse(format!(
                 "invalid PEM tag: {}",
                 pem_block.tag()
             )));
@@ -134,7 +134,7 @@ impl PrivateKey {
                 ParsedKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
             }
             _ => {
-                return Err(TpmError::Parse(
+                return Err(CliError::Parse(
                     "unsupported key algorithm in PEM file".to_string(),
                 ))
             }
@@ -147,10 +147,10 @@ impl PrivateKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` on file I/O or parsing failure.
-    pub fn from_pem_file(path: &std::path::Path) -> Result<Self, TpmError> {
+    /// Returns `CliError` on file I/O or parsing failure.
+    pub fn from_pem_file(path: &std::path::Path) -> Result<Self, CliError> {
         let pem_bytes =
-            std::fs::read(path).map_err(|e| TpmError::File(path.display().to_string(), e))?;
+            std::fs::read(path).map_err(|e| CliError::File(path.display().to_string(), e))?;
         Self::from_pem_bytes(&pem_bytes)
     }
 
@@ -162,18 +162,18 @@ impl PrivateKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError`.
-    pub fn to_tpmt_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, TpmError> {
+    /// Returns `CliError`.
+    pub fn to_tpmt_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, CliError> {
         match &self.key {
             ParsedKey::Rsa(rsa_key) => {
                 let modulus_bytes = rsa_key.n().to_bytes_be();
                 let key_bits = u16::try_from(modulus_bytes.len() * 8)
-                    .map_err(|_| TpmError::Parse("RSA key is too large".to_string()))?;
+                    .map_err(|_| CliError::Parse("RSA key is too large".to_string()))?;
 
                 let exponent = {
                     let e_bytes = rsa_key.e().to_bytes_be();
                     if e_bytes.len() > 4 {
-                        return Err(TpmError::Parse("RSA exponent is too large".to_string()));
+                        return Err(CliError::Parse("RSA exponent is too large".to_string()));
                     }
                     let mut buf = [0u8; 4];
                     buf[4 - e_bytes.len()..].copy_from_slice(&e_bytes);
@@ -183,7 +183,7 @@ impl PrivateKey {
                 let exponent = if exponent == 65537 {
                     0
                 } else {
-                    return Err(TpmError::Parse("RSA exponent is unsupported".to_string()));
+                    return Err(CliError::Parse("RSA exponent is unsupported".to_string()));
                 };
 
                 Ok(TpmtPublic {
@@ -209,7 +209,7 @@ impl PrivateKey {
                 let pub_bytes = encoded_point.as_bytes();
 
                 if pub_bytes.is_empty() || pub_bytes[0] != UNCOMPRESSED_POINT_TAG {
-                    return Err(TpmError::Parse("invalid ECC public key format".to_string()));
+                    return Err(CliError::Parse("invalid ECC public key format".to_string()));
                 }
 
                 let coord_len = (pub_bytes.len() - 1) / 2;
@@ -220,7 +220,7 @@ impl PrivateKey {
                 let pki = PrivateKeyInfo::from_der(der_bytes.as_bytes())?;
                 let params =
                     pki.algorithm.parameters.as_ref().ok_or_else(|| {
-                        TpmError::Parse("missing ECC curve parameters".to_string())
+                        CliError::Parse("missing ECC curve parameters".to_string())
                     })?;
 
                 let curve_id = ec_oid_to_tpm_curve(params)?;
@@ -251,8 +251,8 @@ impl PrivateKey {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::Parse` if the key cannot be processed.
-    pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, TpmError> {
+    /// Returns a `CliError::Parse` if the key cannot be processed.
+    pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, CliError> {
         match &self.key {
             ParsedKey::Rsa(rsa_key) => Ok(rsa_key.primes()[0].to_bytes_be()),
             ParsedKey::Ecc(secret_key) => Ok(secret_key.to_bytes().to_vec()),
@@ -261,17 +261,17 @@ impl PrivateKey {
 }
 
 /// Convert ECC curve OID from DER `AnyRef` to TPM curve enum.
-fn ec_oid_to_tpm_curve(any: &AnyRef) -> Result<TpmEccCurve, TpmError> {
+fn ec_oid_to_tpm_curve(any: &AnyRef) -> Result<TpmEccCurve, CliError> {
     let der_bytes = any.to_der()?;
     let mut reader = der::SliceReader::new(&der_bytes)?;
     let oid = ObjectIdentifier::decode(&mut reader)
-        .map_err(|_| TpmError::Parse("Invalid DER in ECC curve parameters".to_string()))?;
+        .map_err(|_| CliError::Parse("Invalid DER in ECC curve parameters".to_string()))?;
 
     match oid {
         SECP_256_R_1 => Ok(TpmEccCurve::NistP256),
         SECP_384_R_1 => Ok(TpmEccCurve::NistP384),
         SECP_521_R_1 => Ok(TpmEccCurve::NistP521),
-        _ => Err(TpmError::Parse(format!("unsupported ECC curve OID: {oid}"))),
+        _ => Err(CliError::Parse(format!("unsupported ECC curve OID: {oid}"))),
     }
 }
 
@@ -288,8 +288,8 @@ impl TpmKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` if the key's OID or other fields cannot be encoded to DER.
-    pub fn to_pem(&self) -> Result<String, TpmError> {
+    /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
+    pub fn to_pem(&self) -> Result<String, CliError> {
         let der = self.to_der()?;
         Ok(pem::encode(&pem::Pem::new("TSS2 PRIVATE KEY", der)))
     }
@@ -298,29 +298,29 @@ impl TpmKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` if the key's OID or other fields cannot be encoded to DER.
-    pub fn to_der(&self) -> Result<Vec<u8>, TpmError> {
+    /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
+    pub fn to_der(&self) -> Result<Vec<u8>, CliError> {
         let asn1 = TpmKeyAsn1 {
             oid: ObjectIdentifier::from_arcs(self.oid.iter().copied())
-                .map_err(|e| TpmError::Parse(format!("OID encode error: {e:?}")))?,
+                .map_err(|e| CliError::Parse(format!("OID encode error: {e:?}")))?,
             parent: u32::from_str_radix(self.parent.trim_start_matches("0x"), 16)?,
             pub_key: OctetString::new(self.pub_key.clone())?,
             priv_key: OctetString::new(self.priv_key.clone())?,
         };
 
         asn1.to_der()
-            .map_err(|e| TpmError::Parse(format!("DER encode error: {e}")))
+            .map_err(|e| CliError::Parse(format!("DER encode error: {e}")))
     }
 
     /// Parse TPM key from PEM bytes.
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` if the PEM bytes cannot be parsed.
-    pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, TpmError> {
+    /// Returns `CliError` if the PEM bytes cannot be parsed.
+    pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, CliError> {
         let pem = pem::parse(pem_bytes)?;
         if pem.tag() != "TSS2 PRIVATE KEY" {
-            return Err(TpmError::Parse("invalid PEM tag".to_string()));
+            return Err(CliError::Parse("invalid PEM tag".to_string()));
         }
         Self::from_der(pem.contents())
     }
@@ -329,8 +329,8 @@ impl TpmKey {
     ///
     /// # Errors
     ///
-    /// Returns `TpmError` if the DER bytes cannot be parsed into a valid `TpmKeyAsn1` data.
-    pub fn from_der(der_bytes: &[u8]) -> Result<Self, TpmError> {
+    /// Returns `CliError` if the DER bytes cannot be parsed into a valid `TpmKeyAsn1` data.
+    pub fn from_der(der_bytes: &[u8]) -> Result<Self, CliError> {
         let asn1 = TpmKeyAsn1::from_der(der_bytes)?;
 
         Ok(TpmKey {
@@ -349,12 +349,12 @@ fn compute_hmac(
     nonce_tpm: &[u8],
     nonce_caller: &[u8],
     cp_hash_payload: &[u8],
-) -> Result<Vec<u8>, TpmError> {
+) -> Result<Vec<u8>, CliError> {
     macro_rules! hmac {
         ($digest:ty) => {{
             let cp_hash = <$digest as Digest>::digest(cp_hash_payload);
             let mut mac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                .map_err(|e| TpmError::Execution(format!("HMAC init error: {e}")))?;
+                .map_err(|e| CliError::Execution(format!("HMAC init error: {e}")))?;
             mac.update(&cp_hash);
             mac.update(nonce_tpm);
             mac.update(nonce_caller);
@@ -367,7 +367,7 @@ fn compute_hmac(
         TpmAlgId::Sha256 => hmac!(Sha256),
         TpmAlgId::Sha384 => hmac!(Sha384),
         TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => Err(TpmError::Execution(format!(
+        _ => Err(CliError::Execution(format!(
             "unsupported session hash algorithm: {auth_hash}"
         ))),
     }
@@ -377,7 +377,7 @@ fn compute_hmac(
 ///
 /// # Errors
 ///
-/// Returns a `TpmError::Execution` if the session's hash algorithm is not
+/// Returns a `CliError::Execution` if the session's hash algorithm is not
 /// supported, or if an HMAC operation fails.
 pub fn create_auth(
     session: &super::AuthSession,
@@ -385,7 +385,7 @@ pub fn create_auth(
     command_code: TpmCc,
     handles: &[u32],
     parameters: &[u8],
-) -> Result<TpmsAuthCommand, TpmError> {
+) -> Result<TpmsAuthCommand, CliError> {
     let cp_hash_payload = {
         let mut payload = Vec::new();
         payload.extend_from_slice(&(command_code as u32).to_be_bytes());
@@ -417,7 +417,7 @@ pub fn create_auth(
 ///
 /// # Errors
 ///
-/// Returns `TpmError` on parsing failure.
+/// Returns `CliError` on parsing failure.
 pub fn crypto_kdfa(
     auth_hash: TpmAlgId,
     hmac_key: &[u8],
@@ -471,7 +471,7 @@ pub fn crypto_kdfa(
 ///
 /// # Errors
 ///
-/// Returns `TpmError` on parsing failure.
+/// Returns `CliError` on parsing failure.
 pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, CryptoErrorKind> {
     let mut name_buf = Vec::new();
     let name_alg = public.name_alg;

@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
-    get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, Command, CommandIo,
-    CommandType, PipelineObject, TpmDevice, TpmError,
+    get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, CliError, Command,
+    CommandIo, CommandType, PipelineObject, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -30,21 +30,21 @@ impl Command for PcrRead {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut selection = None;
         parse_args!(parser, arg, Self::help, {
             Value(val) if selection.is_none() => {
                 selection = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
 
         if let Some(selection) = selection {
             Ok(Commands::PcrRead(PcrRead { selection }))
         } else {
-            Err(TpmError::Usage(
+            Err(CliError::Usage(
                 "Missing required argument: <SELECTION>".to_string(),
             ))
         }
@@ -54,18 +54,18 @@ impl Command for PcrRead {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         io.clear_input()?;
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let pcr_count = get_pcr_count(&mut chip)?;
         let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
@@ -74,7 +74,7 @@ impl Command for PcrRead {
         let (resp, _) = chip.execute(&cmd, &[])?;
         let pcr_read_resp = resp
             .PcrRead()
-            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
 
         io.push_object(PipelineObject::PcrValues(pcr_output));

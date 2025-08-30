@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::TpmError;
+use crate::CliError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tpm2_protocol::data::{TpmtPublic, TpmuPublicParms};
@@ -90,7 +90,7 @@ pub struct PublicArea {
 }
 
 impl TryFrom<&TpmtPublic> for PublicArea {
-    type Error = TpmError;
+    type Error = CliError;
 
     fn try_from(public: &TpmtPublic) -> Result<Self, Self::Error> {
         let object_type = crate::key::tpm_alg_id_to_str(public.object_type).to_string();

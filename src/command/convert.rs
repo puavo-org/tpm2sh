@@ -5,8 +5,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
-    parse_args, resolve_uri_to_bytes, util, Command, CommandIo, CommandType, Key, PipelineObject,
-    TpmDevice, TpmError, TpmKey,
+    parse_args, resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType, Key,
+    PipelineObject, TpmDevice, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -48,7 +48,7 @@ impl Command for Convert {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Convert::default();
         parse_args!(parser, arg, Self::help, {
             Long("from") => {
@@ -61,11 +61,11 @@ impl Command for Convert {
                 args.input_uri = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         if args.input_uri.is_none() {
-            return Err(TpmError::Usage(
+            return Err(CliError::Usage(
                 "Missing required argument <INPUT_URI>".to_string(),
             ));
         }
@@ -80,12 +80,12 @@ impl Command for Convert {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         _device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let input_bytes = resolve_uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
 
         let tpm_key = match self.from {

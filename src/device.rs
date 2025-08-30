@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{get_log_format, pretty_printer::PrettyTrace, TpmError, POOL};
+use crate::{get_log_format, pretty_printer::PrettyTrace, CliError, POOL};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -49,7 +49,7 @@ impl TpmDevice {
         &mut self,
         command: &C,
         sessions: &[tpm2_protocol::data::TpmsAuthCommand],
-    ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), TpmError>
+    ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), CliError>
     where
         C: tpm2_protocol::message::TpmHeaderCommand + PrettyTrace,
     {
@@ -111,7 +111,7 @@ impl TpmDevice {
         self.transport.read_exact(&mut header)?;
 
         let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            return Err(TpmError::Execution(
+            return Err(CliError::Execution(
                 "Could not read response size".to_string(),
             ));
         };
@@ -119,7 +119,7 @@ impl TpmDevice {
 
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
             drop(tx);
-            return Err(TpmError::Parse(format!(
+            return Err(CliError::Parse(format!(
                 "Invalid response size in header: {size}"
             )));
         }
@@ -155,7 +155,7 @@ impl TpmDevice {
                 }
                 Ok((response, auth))
             }
-            Err((rc, _)) => Err(TpmError::TpmRc(rc)),
+            Err((rc, _)) => Err(CliError::TpmRc(rc)),
         }
     }
 
@@ -163,8 +163,8 @@ impl TpmDevice {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(&mut self, handle_type: data::TpmRh) -> Result<Vec<u32>, TpmError> {
+    /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
+    pub fn get_all_handles(&mut self, handle_type: data::TpmRh) -> Result<Vec<u32>, CliError> {
         let cap_data_vec = self.get_capability(
             data::TpmCap::Handles,
             handle_type as u32,
@@ -194,7 +194,7 @@ impl TpmDevice {
         cap: data::TpmCap,
         mut property: u32,
         count: u32,
-    ) -> Result<Vec<data::TpmsCapabilityData>, TpmError> {
+    ) -> Result<Vec<data::TpmsCapabilityData>, CliError> {
         let mut all_caps = Vec::new();
         loop {
             let cmd = TpmGetCapabilityCommand {
@@ -209,7 +209,7 @@ impl TpmDevice {
                 capability_data,
             } = resp
                 .GetCapability()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
             let next_prop = if more_data.into() {
                 match &capability_data.data {

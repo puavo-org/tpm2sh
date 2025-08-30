@@ -4,8 +4,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Delete},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, Command, CommandIo, CommandType,
-    TpmDevice, TpmError,
+    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, CliError, Command, CommandIo,
+    CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -39,7 +39,7 @@ impl Command for Delete {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Delete::default();
         parse_args!(parser, arg, Self::help, {
             Long("password") => {
@@ -49,7 +49,7 @@ impl Command for Delete {
                 args.handle_uri = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         Ok(Commands::Delete(args))
@@ -59,17 +59,17 @@ impl Command for Delete {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let handle = if let Some(uri) = &self.handle_uri {
             parse_tpm_handle_from_uri(uri)?
@@ -95,7 +95,7 @@ impl Command for Delete {
             )?;
             let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             println!("Deleted persistent handle {persistent_handle:#010x}");
         } else if handle >= TpmRh::TransientFirst as u32 {
             let flush_handle = TpmTransient(handle);
@@ -104,10 +104,10 @@ impl Command for Delete {
             };
             let (resp, _) = chip.execute(&flush_cmd, &[])?;
             resp.FlushContext()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             println!("Flushed transient handle {flush_handle:#010x}");
         } else {
-            return Err(TpmError::InvalidHandle(format!(
+            return Err(CliError::InvalidHandle(format!(
                 "'{handle:#010x}' is not a transient or persistent handle"
             )));
         }

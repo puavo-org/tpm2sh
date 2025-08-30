@@ -7,7 +7,7 @@ use crate::{
         Algorithms, Cli, Commands, Convert, CreatePrimary, Delete, Import, Load, Objects, PcrEvent,
         PcrRead, Policy, PrintError, PrintStack, ResetLock, Save, Seal, StartSession, Unseal,
     },
-    Command, TpmError,
+    CliError, Command,
 };
 use std::{ffi::OsString, fmt::Write};
 
@@ -22,7 +22,7 @@ macro_rules! parse_args {
         while let Some($arg) = $parser.next()? {
             match $arg {
                 lexopt::Arg::Short('h') | lexopt::Arg::Long("help") => {
-                    return Err($crate::TpmError::Help);
+                    return Err($crate::CliError::Help);
                 }
                 $($matcher)*
             }
@@ -86,7 +86,7 @@ struct Subcommand {
     name: &'static str,
     about: &'static str,
     help: fn(),
-    parse: fn(&mut lexopt::Parser) -> Result<Commands, TpmError>,
+    parse: fn(&mut lexopt::Parser) -> Result<Commands, CliError>,
 }
 
 const SUBCOMMANDS: &[Subcommand] = &[
@@ -231,24 +231,24 @@ fn print_version() {
 }
 
 /// Dispatch parsing to the correct subcommand implementation.
-fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
     let name_str = name
         .to_str()
-        .ok_or_else(|| TpmError::Usage("Invalid non-UTF8 command".to_string()))?;
+        .ok_or_else(|| CliError::Usage("Invalid non-UTF8 command".to_string()))?;
 
     let Some(cmd) = SUBCOMMANDS.iter().find(|c| c.name == name_str) else {
-        return Err(TpmError::Usage(format!("Unknown command: '{name_str}'")));
+        return Err(CliError::Usage(format!("Unknown command: '{name_str}'")));
     };
 
     match (cmd.parse)(parser) {
-        Err(TpmError::Usage(msg)) => {
+        Err(CliError::Usage(msg)) => {
             eprintln!("{msg}\n");
             (cmd.help)();
-            Err(TpmError::UsageHandled)
+            Err(CliError::UsageHandled)
         }
-        Err(TpmError::Help) => {
+        Err(CliError::Help) => {
             (cmd.help)();
-            Err(TpmError::Help)
+            Err(CliError::Help)
         }
         res => res,
     }
@@ -258,8 +258,8 @@ fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<C
 ///
 /// # Errors
 ///
-/// Returns a `TpmError::Execute` on a failure.
-pub fn parse_cli() -> Result<Option<Cli>, TpmError> {
+/// Returns a `CliError::Execute` on a failure.
+pub fn parse_cli() -> Result<Option<Cli>, CliError> {
     use lexopt::prelude::*;
     let mut cli = Cli {
         device: "/dev/tpmrm0".to_string(),
@@ -287,13 +287,13 @@ pub fn parse_cli() -> Result<Option<Cli>, TpmError> {
                 cli.command = Some(dispatch_subcommand(&val, &mut parser)?);
                 break;
             }
-            _ => return Err(TpmError::from(arg.unexpected())),
+            _ => return Err(CliError::from(arg.unexpected())),
         }
     }
 
     if cli.command.is_none() {
         print_usage();
-        return Err(TpmError::UsageHandled);
+        return Err(CliError::UsageHandled);
     }
 
     Ok(Some(cli))

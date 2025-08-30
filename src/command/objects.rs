@@ -4,7 +4,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Objects},
-    parse_args, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmDevice, TpmError,
+    parse_args, CliError, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -26,10 +26,10 @@ impl Command for Objects {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         parse_args!(parser, arg, Self::help, {
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         Ok(Commands::Objects(Objects {}))
@@ -39,18 +39,18 @@ impl Command for Objects {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         io.clear_input()?;
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut locked_device = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let transient_handles = locked_device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {

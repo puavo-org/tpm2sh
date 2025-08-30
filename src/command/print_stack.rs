@@ -6,7 +6,7 @@ use crate::{
     cli::{Commands, PrintStack},
     parse_args,
     schema::{Key, PipelineObject, PublicArea},
-    Command, CommandIo, CommandType, TpmDevice, TpmError,
+    CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -28,10 +28,10 @@ impl Command for PrintStack {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         parse_args!(parser, arg, Self::help, {
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         Ok(Commands::PrintStack(PrintStack))
@@ -45,12 +45,12 @@ impl Command for PrintStack {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails.
+    /// Returns a `CliError` if the execution fails.
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         _device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let mut objects = Vec::new();
 
         while let Ok(obj) = io.pop_active_object() {
@@ -72,7 +72,7 @@ impl Command for PrintStack {
 }
 
 /// Helper function to print a detailed summary of a pipeline object.
-fn pretty_print_object<W: Write>(obj: &PipelineObject, writer: &mut W) -> Result<(), TpmError> {
+fn pretty_print_object<W: Write>(obj: &PipelineObject, writer: &mut W) -> Result<(), CliError> {
     let json_val = serde_json::to_value(obj)?;
     let pretty_json = serde_json::to_string_pretty(&json_val)?;
     writeln!(writer, "{pretty_json}")?;
@@ -86,7 +86,7 @@ fn pretty_print_object<W: Write>(obj: &PipelineObject, writer: &mut W) -> Result
 }
 
 /// Decodes and prints the public area of a key object.
-fn print_decoded_public_area<W: Write>(key: &Key, writer: &mut W) -> Result<(), TpmError> {
+fn print_decoded_public_area<W: Write>(key: &Key, writer: &mut W) -> Result<(), CliError> {
     let pub_bytes = crate::resolve_uri_to_bytes(&key.public, &[])?;
     let (tpm_pub, _) = tpm2_protocol::data::Tpm2bPublic::parse(&pub_bytes)?;
 

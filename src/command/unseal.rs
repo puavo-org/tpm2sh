@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Unseal},
-    get_auth_sessions, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
+    get_auth_sessions, parse_args, CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -33,14 +33,14 @@ impl Command for Unseal {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Unseal::default();
         parse_args!(parser, arg, Self::help, {
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         Ok(Commands::Unseal(args))
@@ -50,14 +50,14 @@ impl Command for Unseal {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
         let sealed_tpm_obj = io.pop_tpm()?;
         let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &sealed_tpm_obj)?;
@@ -77,12 +77,12 @@ impl Command for Unseal {
         let (unseal_resp, _) = {
             let mut chip = device_arc
                 .lock()
-                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
             chip.execute(&unseal_cmd, &unseal_sessions)?
         };
         let unseal_resp = unseal_resp
             .Unseal()
-            .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         io.writer().write_all(&unseal_resp.out_data)?;
         Ok(())

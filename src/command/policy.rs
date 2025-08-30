@@ -4,8 +4,8 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
-    get_pcr_count, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri, Command,
-    CommandIo, CommandType, PipelineObject, PolicySession, TpmDevice, TpmError,
+    get_pcr_count, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri, CliError,
+    Command, CommandIo, CommandType, PipelineObject, PolicySession, TpmDevice,
 };
 use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
@@ -44,18 +44,18 @@ const USAGE: &str = "tpm2sh policy <EXPRESSION>";
 const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g., 'pcr(\"sha256:0\",\"...\")'")];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
-fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, TpmError> {
+fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, CliError> {
     if pair.as_rule() != Rule::quoted_string {
-        return Err(TpmError::Parse("expected a quoted string".to_string()));
+        return Err(CliError::Parse("expected a quoted string".to_string()));
     }
     let s = pair.as_str();
     Ok(s[1..s.len() - 1].to_string())
 }
 
-fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, TpmError> {
+fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliError> {
     let pair = pairs
         .next()
-        .ok_or_else(|| TpmError::Parse("expected a policy expression".to_string()))?;
+        .ok_or_else(|| CliError::Parse("expected a policy expression".to_string()))?;
     let ast = match pair.as_rule() {
         Rule::pcr_expression => {
             let mut inner_pairs = pair.into_inner();
@@ -73,7 +73,7 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, TpmErr
                         .parse::<u32>()
                 })
                 .transpose()
-                .map_err(|e| TpmError::Parse(e.to_string()))?;
+                .map_err(|e| CliError::Parse(e.to_string()))?;
             PolicyAst::Pcr {
                 selection,
                 digest,
@@ -93,22 +93,22 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, TpmErr
             PolicyAst::Or(branches)
         }
         _ => {
-            return Err(TpmError::Parse(format!(
+            return Err(CliError::Parse(format!(
                 "unexpected policy expression part: {:?}",
                 pair.as_rule()
             )))
         }
     };
     if pairs.next().is_some() {
-        return Err(TpmError::Parse("unexpected trailing input".to_string()));
+        return Err(CliError::Parse("unexpected trailing input".to_string()));
     }
 
     Ok(ast)
 }
 
-fn parse_policy_expression(input: &str) -> Result<PolicyAst, TpmError> {
+fn parse_policy_expression(input: &str) -> Result<PolicyAst, CliError> {
     let pairs = PolicyParser::parse(Rule::policy_expression, input)
-        .map_err(|e| TpmError::Parse(e.to_string()))?;
+        .map_err(|e| CliError::Parse(e.to_string()))?;
     let mut root_pairs = pairs.clone();
     parse_policy_internal(root_pairs.next().unwrap().into_inner())
 }
@@ -126,9 +126,9 @@ impl PolicyExecutor<'_> {
         selection_str: &str,
         digest: Option<&String>,
         _count: Option<&u32>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let pcr_digest_bytes = hex::decode(digest.ok_or_else(|| {
-            TpmError::Usage("PCR digest must be provided as an argument".to_string())
+            CliError::Usage("PCR digest must be provided as an argument".to_string())
         })?)?;
 
         let pcr_selection = if selection_str.is_empty() {
@@ -155,7 +155,7 @@ impl PolicyExecutor<'_> {
         &mut self,
         session_handle: TpmSession,
         auth_handle_uri: &str,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let auth_handle = parse_tpm_handle_from_uri(auth_handle_uri)?;
         let cmd = TpmPolicySecretCommand {
             auth_handle: auth_handle.into(),
@@ -176,7 +176,7 @@ impl PolicyExecutor<'_> {
         io: &mut CommandIo<R, W>,
         session_handle: TpmSession,
         branches: &[PolicyAst],
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
@@ -204,7 +204,7 @@ impl PolicyExecutor<'_> {
         io: &mut CommandIo<R, W>,
         session_handle: TpmSession,
         ast: &PolicyAst,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         match ast {
             PolicyAst::Pcr {
                 selection,
@@ -229,7 +229,7 @@ fn start_trial_session(
     chip: &mut TpmDevice,
     session_type: cli::SessionType,
     hash_alg: TpmAlgId,
-) -> Result<TpmSession, TpmError> {
+) -> Result<TpmSession, CliError> {
     let cmd = TpmStartAuthSessionCommand {
         tpm_key: (TpmRh::Null as u32).into(),
         bind: (TpmRh::Null as u32).into(),
@@ -242,11 +242,11 @@ fn start_trial_session(
     let (resp, _) = chip.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
-        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+        .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
     Ok(start_resp.session_handle)
 }
 
-fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmError> {
+fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), CliError> {
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
@@ -257,14 +257,14 @@ fn flush_session(chip: &mut TpmDevice, handle: TpmSession) -> Result<(), TpmErro
 fn get_policy_digest(
     chip: &mut TpmDevice,
     session_handle: TpmSession,
-) -> Result<Tpm2bDigest, TpmError> {
+) -> Result<Tpm2bDigest, CliError> {
     let cmd = TpmPolicyGetDigestCommand {
         policy_session: session_handle.0.into(),
     };
     let (resp, _) = chip.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
-        .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+        .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
     Ok(digest_resp.policy_digest)
 }
 
@@ -280,7 +280,7 @@ impl Command for Policy {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Policy::default();
         let mut expression_arg: Option<String> = None;
 
@@ -289,7 +289,7 @@ impl Command for Policy {
                 expression_arg = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
 
@@ -297,7 +297,7 @@ impl Command for Policy {
             args.expression = expression;
             Ok(Commands::Policy(args))
         } else {
-            Err(TpmError::Usage(
+            Err(CliError::Usage(
                 "Missing required argument: <EXPRESSION>".to_string(),
             ))
         }
@@ -307,27 +307,27 @@ impl Command for Policy {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` on failure.
+    /// Returns a `CliError` on failure.
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let (mut session_obj, is_new_trial) =
             io.pop_policy_session()
                 .map(|s| (s, false))
-                .or_else(|_: TpmError| {
+                .or_else(|_: CliError| {
                     let hash_alg = TpmAlgId::Sha256;
                     let trial_handle =
                         start_trial_session(&mut chip, cli::SessionType::Trial, hash_alg)?;
                     let handle_uri = format!("tpm://{trial_handle:#010x}");
-                    Ok::<_, TpmError>((
+                    Ok::<_, CliError>((
                         PolicySession {
                             context: handle_uri,
                             algorithm: key::tpm_alg_id_to_str(hash_alg).to_string(),
@@ -348,7 +348,7 @@ impl Command for Policy {
 
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let final_digest = get_policy_digest(&mut chip, session_handle)?;
         session_obj.digest = hex::encode(&*final_digest);

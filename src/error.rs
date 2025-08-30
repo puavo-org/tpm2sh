@@ -7,7 +7,7 @@ use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 
 #[derive(Debug, Error)]
-pub enum TpmError {
+pub enum CliError {
     #[error("TPM protocol: {0}")]
     Build(TpmErrorKind),
 
@@ -54,56 +54,56 @@ pub enum TpmError {
     UsageHandled,
 }
 
-impl From<base64::DecodeError> for TpmError {
+impl From<base64::DecodeError> for CliError {
     fn from(err: base64::DecodeError) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<hex::FromHexError> for TpmError {
+impl From<hex::FromHexError> for CliError {
     fn from(err: hex::FromHexError) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<ParseIntError> for TpmError {
+impl From<ParseIntError> for CliError {
     fn from(err: ParseIntError) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<pkcs8::der::Error> for TpmError {
+impl From<pkcs8::der::Error> for CliError {
     fn from(err: pkcs8::der::Error) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<pkcs8::Error> for TpmError {
+impl From<pkcs8::Error> for CliError {
     fn from(err: pkcs8::Error) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<pem::PemError> for TpmError {
+impl From<pem::PemError> for CliError {
     fn from(err: pem::PemError) -> Self {
-        TpmError::Parse(format!("invalid PEM data: {err}"))
+        CliError::Parse(format!("invalid PEM data: {err}"))
     }
 }
 
-impl From<TpmErrorKind> for TpmError {
+impl From<TpmErrorKind> for CliError {
     fn from(err: TpmErrorKind) -> Self {
-        TpmError::Build(err)
+        CliError::Build(err)
     }
 }
 
-impl From<Utf8Error> for TpmError {
+impl From<Utf8Error> for CliError {
     fn from(err: Utf8Error) -> Self {
-        TpmError::Parse(err.to_string())
+        CliError::Parse(err.to_string())
     }
 }
 
-impl From<url::ParseError> for TpmError {
+impl From<url::ParseError> for CliError {
     fn from(err: url::ParseError) -> Self {
-        TpmError::Parse(format!("Invalid URI: {err}"))
+        CliError::Parse(format!("Invalid URI: {err}"))
     }
 }

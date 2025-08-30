@@ -7,7 +7,7 @@ use crate::{
     cli::{Commands, Seal},
     get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
-    Command, CommandIo, CommandType, Key, PipelineObject, TpmDevice, TpmError,
+    CliError, Command, CommandIo, CommandType, Key, PipelineObject, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -58,7 +58,7 @@ impl Command for Seal {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Seal::default();
         parse_args!(parser, arg, Self::help, {
             Long("data") => {
@@ -71,11 +71,11 @@ impl Command for Seal {
                 args.object_password.password = Some(parser.value()?.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         if args.data_uri.is_none() {
-            return Err(TpmError::Usage(
+            return Err(CliError::Usage(
                 "Missing required argument: --data <URI>".to_string(),
             ));
         }
@@ -86,22 +86,22 @@ impl Command for Seal {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let device_arc =
-            device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
-            .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let parent_obj = io
             .get_active_object()?
             .as_tpm()
-            .ok_or(TpmError::Execution(
+            .ok_or(CliError::Execution(
                 "Pipeline missing parent 'tpm' object".to_string(),
             ))?
             .clone();
@@ -158,7 +158,7 @@ impl Command for Seal {
         let (resp, _) = chip.execute(&cmd, &sessions)?;
 
         let create_resp = resp.Create().map_err(|e| {
-            TpmError::Execution(format!("unexpected response type for Create: {e:?}"))
+            CliError::Execution(format!("unexpected response type for Create: {e:?}"))
         })?;
 
         let pub_bytes = build_to_vec(&create_resp.out_public)?;

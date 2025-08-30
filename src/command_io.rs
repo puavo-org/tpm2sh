@@ -5,7 +5,7 @@
 use crate::{
     parse_tpm_handle_from_uri, resolve_uri_to_bytes,
     schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineObject, PolicySession, Tpm},
-    TpmDevice, TpmError, POOL,
+    CliError, TpmDevice, POOL,
 };
 use log::warn;
 use polling::{Event, Events, Poller};
@@ -72,7 +72,7 @@ impl Drop for ScopedHandle {
 /// This function contains an `unsafe` block that calls `poller.add()`. This is
 /// considered safe because the file descriptor or handle for `stdin` is
 /// guaranteed to be a valid, open resource for the duration of the process.
-fn stdin_ready() -> Result<bool, TpmError> {
+fn stdin_ready() -> Result<bool, CliError> {
     #[cfg(any(unix, windows))]
     {
         let poller = Poller::new()?;
@@ -132,15 +132,15 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::Execution` if the pipeline is empty.
-    pub fn clear_input(&mut self) -> Result<(), TpmError> {
+    /// Returns a `CliError::Execution` if the pipeline is empty.
+    pub fn clear_input(&mut self) -> Result<(), CliError> {
         self.hydrate()?;
         self.input_objects.clear();
         Ok(())
     }
 
     /// Reads from the reader on the first call, populating the input objects.
-    fn hydrate(&mut self) -> Result<(), TpmError> {
+    fn hydrate(&mut self) -> Result<(), CliError> {
         if self.hydrated {
             return Ok(());
         }
@@ -163,11 +163,11 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::Execution` if the pipeline is empty.
-    pub fn get_active_object(&mut self) -> Result<&PipelineObject, TpmError> {
+    /// Returns a `CliError::Execution` if the pipeline is empty.
+    pub fn get_active_object(&mut self) -> Result<&PipelineObject, CliError> {
         self.hydrate()?;
         self.input_objects.last().ok_or_else(|| {
-            TpmError::Execution("Required object not found in input pipeline".to_string())
+            CliError::Execution("Required object not found in input pipeline".to_string())
         })
     }
 
@@ -175,11 +175,11 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError::Execution` if the pipeline is empty.
-    pub fn pop_active_object(&mut self) -> Result<PipelineObject, TpmError> {
+    /// Returns a `CliError::Execution` if the pipeline is empty.
+    pub fn pop_active_object(&mut self) -> Result<PipelineObject, CliError> {
         self.hydrate()?;
         self.input_objects.pop().ok_or_else(|| {
-            TpmError::Execution("Required object not found in input pipeline".to_string())
+            CliError::Execution("Required object not found in input pipeline".to_string())
         })
     }
 
@@ -187,8 +187,8 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if JSON serialization or I/O fails.
-    pub fn finalize(mut self) -> Result<(), TpmError> {
+    /// Returns a `CliError` if JSON serialization or I/O fails.
+    pub fn finalize(mut self) -> Result<(), CliError> {
         self.hydrate()?;
         let mut final_objects = self.input_objects;
         final_objects.append(&mut self.output_objects);
@@ -212,12 +212,12 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the context URI is invalid or the context cannot be loaded.
+    /// Returns a `CliError` if the context URI is invalid or the context cannot be loaded.
     pub fn resolve_tpm_context(
         &mut self,
         device_arc: Arc<Mutex<TpmDevice>>,
         tpm_obj: &Tpm,
-    ) -> Result<ScopedHandle, TpmError> {
+    ) -> Result<ScopedHandle, CliError> {
         let uri = &tpm_obj.context;
         if uri.starts_with("tpm://") {
             let handle = parse_tpm_handle_from_uri(uri)?;
@@ -226,25 +226,25 @@ impl<R: Read, W: Write> CommandIo<R, W> {
             let context_blob = resolve_uri_to_bytes(uri, &self.input_objects)?;
             let (context, remainder) = TpmsContext::parse(&context_blob)?;
             if !remainder.is_empty() {
-                return Err(TpmError::Parse(
+                return Err(CliError::Parse(
                     "Context object contains trailing data".to_string(),
                 ));
             }
 
             let mut device = device_arc
                 .lock()
-                .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
             let load_cmd = TpmContextLoadCommand { context };
             let (resp, _) = device.execute(&load_cmd, &[])?;
             let load_resp = resp
                 .ContextLoad()
-                .map_err(|e| TpmError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             Ok(ScopedHandle::new(
                 load_resp.loaded_handle,
                 device_arc.clone(),
             ))
         } else {
-            Err(TpmError::Parse(format!(
+            Err(CliError::Parse(format!(
                 "Unsupported URI scheme for a tpm context: '{uri}'"
             )))
         }
@@ -258,16 +258,16 @@ macro_rules! command_pop {
             ///
             /// # Errors
             ///
-            /// Returns a `TpmError::Execution` if a required object of this type
+            /// Returns a `CliError::Execution` if a required object of this type
             /// is not found in the pipeline.
-            pub fn $name(&mut self) -> Result<$struct, TpmError> {
+            pub fn $name(&mut self) -> Result<$struct, CliError> {
                 self.hydrate()?;
                 let pos = self
                     .input_objects
                     .iter()
                     .rposition(|obj| matches!(obj, $variant(_)))
                     .ok_or_else(|| {
-                        TpmError::Execution(format!(
+                        CliError::Execution(format!(
                             "Pipeline missing required '{}' object",
                             $type_str
                         ))

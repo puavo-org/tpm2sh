@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use cli::{execute_cli, TpmError, POOL};
+use cli::{execute_cli, CliError, POOL};
 use log::error;
 
 fn main() {
@@ -16,15 +16,15 @@ fn main() {
 
     match result {
         Ok(()) => {}
-        Err(TpmError::Help) => std::process::exit(0),
-        Err(TpmError::UsageHandled) => std::process::exit(2),
+        Err(CliError::Help) => std::process::exit(0),
+        Err(CliError::UsageHandled) => std::process::exit(2),
         Err(
-            err @ TpmError::Usage(_)
-            | err @ TpmError::Lexopt(_)
-            | err @ TpmError::Parse(_)
-            | err @ TpmError::PcrSelection(_)
-            | err @ TpmError::InvalidHandle(_)
-            | err @ TpmError::File(_, _),
+            err @ CliError::Usage(_)
+            | err @ CliError::Lexopt(_)
+            | err @ CliError::Parse(_)
+            | err @ CliError::PcrSelection(_)
+            | err @ CliError::InvalidHandle(_)
+            | err @ CliError::File(_, _),
         ) => {
             eprintln!("{err}");
             std::process::exit(2);

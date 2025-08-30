@@ -4,7 +4,7 @@
 use cli::{
     cli::{Algorithms, Commands, CreatePrimary, Import, Objects},
     schema::{Key, Pipeline, PipelineObject},
-    Command, CommandIo, TpmDevice, TpmError, LOG_FORMAT,
+    CliError, Command, CommandIo, TpmDevice, LOG_FORMAT,
 };
 
 use std::{
@@ -74,7 +74,7 @@ fn run_command(
     cmd: &Commands,
     input: &str,
     device: Option<Arc<Mutex<TpmDevice>>>,
-) -> Result<String, TpmError> {
+) -> Result<String, CliError> {
     let mut input_cursor = Cursor::new(input.as_bytes());
     let mut output_buf = Vec::new();
     let mut io = CommandIo::new(&mut input_cursor, &mut output_buf, false);

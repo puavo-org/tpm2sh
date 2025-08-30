@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Algorithms, Commands},
-    enumerate_all, parse_args, Command, CommandIo, CommandType, TpmDevice, TpmError,
+    enumerate_all, parse_args, CliError, Command, CommandIo, CommandType, TpmDevice,
     TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
@@ -22,12 +22,12 @@ const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help i
 
 fn get_chip_algorithms(
     device: Option<Arc<Mutex<TpmDevice>>>,
-) -> Result<HashSet<TpmAlgId>, TpmError> {
+) -> Result<HashSet<TpmAlgId>, CliError> {
     let device_arc =
-        device.ok_or_else(|| TpmError::Execution("TPM device not provided".to_string()))?;
+        device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
     let mut locked_device = device_arc
         .lock()
-        .map_err(|_| TpmError::Execution("TPM device lock poisoned".to_string()))?;
+        .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
     let cap_data_vec = locked_device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
     let algs: HashSet<TpmAlgId> = cap_data_vec
@@ -55,14 +55,14 @@ impl Command for Algorithms {
         );
     }
 
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, TpmError> {
+    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Algorithms { filter: None };
         parse_args!(parser, arg, Self::help, {
             Value(val) if args.filter.is_none() => {
                 args.filter = Some(val.string()?);
             }
             _ => {
-                return Err(TpmError::from(arg.unexpected()));
+                return Err(CliError::from(arg.unexpected()));
             }
         });
         Ok(Commands::Algorithms(args))
@@ -72,12 +72,12 @@ impl Command for Algorithms {
     ///
     /// # Errors
     ///
-    /// Returns a `TpmError` if the execution fails
+    /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), TpmError> {
+    ) -> Result<(), CliError> {
         let chip_algorithms = get_chip_algorithms(device)?;
         let cli_algorithms = enumerate_all();
 
@@ -87,7 +87,7 @@ impl Command for Algorithms {
             .collect();
         let filtered_algorithms: Vec<_> = if let Some(pattern) = &self.filter {
             let re =
-                Regex::new(pattern).map_err(|e| TpmError::Usage(format!("invalid regex: {e}")))?;
+                Regex::new(pattern).map_err(|e| CliError::Usage(format!("invalid regex: {e}")))?;
             supported_algorithms
                 .into_iter()
                 .filter(|alg| re.is_match(&alg.name))
