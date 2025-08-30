@@ -18,6 +18,7 @@ use rsa::{
     RsaPrivateKey,
 };
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use std::fmt;
 use tpm2_protocol::data::{
     Tpm2bDigest, Tpm2bEccParameter, Tpm2bPublicKeyRsa, TpmAlgId, TpmEccCurve, TpmRc, TpmRcBase,
     TpmaObject, TpmsEccParms, TpmsEccPoint, TpmsRsaParms, TpmtKdfScheme, TpmtPublic, TpmtScheme,
@@ -155,6 +156,24 @@ pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmRc> {
 pub enum PrivateKey {
     Rsa(RsaPrivateKey),
     Ecc(SecretKey),
+}
+
+impl Clone for PrivateKey {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Rsa(key) => Self::Rsa(key.clone()),
+            Self::Ecc(key) => Self::Ecc(key.clone())
+        }
+    }
+}
+
+impl fmt::Debug for PrivateKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rsa(key) => f.debug_tuple("Rsa").field(key).finish(),
+            Self::Ecc(key) => f.debug_tuple("Ecc").field(key).finish(),
+        }
+    }
 }
 
 impl PrivateKey {

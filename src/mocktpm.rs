@@ -6,6 +6,7 @@
 #![deny(clippy::pedantic)]
 
 use crate::{
+    crypto::PrivateKey,
     crypto_hmac_verify, crypto_kdfa, crypto_make_name,
     device::TpmTransport,
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
@@ -20,6 +21,7 @@ use std::{
     sync::{Arc, Condvar, Mutex},
 };
 use tpm2_protocol::{
+    self,
     data::{
         Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
         TpmCap, TpmCc, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca,
@@ -44,14 +46,9 @@ const TPM_HEADER_SIZE: usize = 10;
 type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
 
 #[derive(Debug, Clone)]
-enum MockTpmPrivateKey {
-    Rsa(RsaPrivateKey),
-}
-
-#[derive(Debug, Clone)]
 struct MockTpmKey {
     public: TpmtPublic,
-    private: Option<MockTpmPrivateKey>,
+    private: Option<PrivateKey>,
 }
 
 /// `MockTPM` response trait
@@ -253,7 +250,7 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
         let Ok(rsa_key) = RsaPrivateKey::new(&mut rand::thread_rng(), key_bits.into()) else {
             return Err(TpmRc::from(TpmRcBase::Failure));
         };
-        private = Some(MockTpmPrivateKey::Rsa(rsa_key.clone()));
+        private = Some(PrivateKey::Rsa(rsa_key.clone()));
         let modulus = rsa_key.n().to_bytes_be();
         let Ok(unique_rsa) = Tpm2bPublicKeyRsa::try_from(modulus.as_slice()) else {
             return Err(TpmRc::from(TpmRcBase::Value));
@@ -383,7 +380,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     };
 
     let seed = match (parent_private, &parent_key.public) {
-        (MockTpmPrivateKey::Rsa(rsa_priv), TpmtPublic { name_alg, .. }) => {
+        (PrivateKey::Rsa(rsa_priv), TpmtPublic { name_alg, .. }) => {
             let decrypt_result = match name_alg {
                 TpmAlgId::Sha1 => rsa_priv.decrypt(
                     Oaep::new_with_label::<Sha1, _>(KDF_DUPLICATE),
@@ -409,6 +406,9 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
                     return Err(TpmRc::from(TpmRcBase::Value));
                 }
             }
+        }
+        _ => {
+            return Err(TpmRc::from(TpmRcBase::Key));
         }
     };
 
