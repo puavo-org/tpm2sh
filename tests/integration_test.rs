@@ -9,12 +9,9 @@ use cli::{
 
 use std::{
     collections::HashSet,
-    env,
     io::Cursor,
-    os::unix::net::UnixStream,
-    process::{Child, Command as ProcessCommand, Stdio},
     sync::{Arc, Mutex},
-    time::Duration,
+    thread::JoinHandle,
 };
 
 use pkcs8::EncodePrivateKey;
@@ -23,49 +20,19 @@ use tempfile::tempdir;
 use tpm2_protocol::data::TpmAlgId;
 
 struct TestFixture {
-    child: Child,
-    socket_path: std::path::PathBuf,
+    _handle: JoinHandle<()>,
     device: Arc<Mutex<TpmDevice>>,
-}
-
-impl Drop for TestFixture {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = std::fs::remove_file(&self.socket_path);
-    }
 }
 
 #[fixture]
 fn tpm_device() -> TestFixture {
-    let mock_tpm_path = env!("CARGO_BIN_EXE_mocktpm");
-    let cache_dir = tempdir().unwrap();
-    let socket_path = cache_dir.path().join("mocktpm.sock");
-    eprintln!("");
-    let child = ProcessCommand::new(mock_tpm_path)
-        .arg("--cache-path")
-        .arg(cache_dir.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
-        .spawn()
-        .expect("Failed to spawn mocktpm binary");
-
-    let mut stream = None;
-    for _ in 0..10 {
-        if let Ok(s) = UnixStream::connect(&socket_path) {
-            stream = Some(s);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    let stream = stream.expect("Failed to connect to mocktpm socket after multiple retries");
-
-    let device = Arc::new(Mutex::new(TpmDevice::new(stream)));
-
     let _ = LOG_FORMAT.set(cli::cli::LogFormat::Plain);
 
+    let (handle, transport) = cli::mocktpm::mocktpm_start();
+    let device = Arc::new(Mutex::new(TpmDevice::new(transport)));
+
     TestFixture {
-        child,
-        socket_path,
+        _handle: handle,
         device,
     }
 }

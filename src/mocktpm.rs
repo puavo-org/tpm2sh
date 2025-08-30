@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
+// Copyright (c) 2024-2025 Jarkko Sakkinen
 
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 
-use cli::{crypto_hmac_verify, crypto_kdfa, crypto_make_name};
-
-use std::{
-    collections::HashMap,
-    io::{self, Read, Write},
-    os::unix::fs::PermissionsExt,
-    os::unix::net::UnixListener,
-    path::{Path, PathBuf},
-    process::exit,
+use crate::{
+    crypto_hmac_verify, crypto_kdfa, crypto_make_name,
+    device::TpmTransport,
+    transport::{Endpoint, EndpointGuard, EndpointState, Transport},
 };
-
-use lexopt::prelude::*;
-use log::{error, info, warn};
+use log::error;
 use rsa::{traits::PublicKeyParts, Oaep, RsaPrivateKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
+use std::{
+    collections::{HashMap, VecDeque},
+    io::{Read, Write},
+    sync::{Arc, Condvar, Mutex},
+};
 use tpm2_protocol::{
     data::{
         Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
@@ -40,6 +39,9 @@ use tpm2_protocol::{
 
 const KDF_DUPLICATE: &str = "DUPLICATE";
 const KDF_INTEGRITY: &str = "INTEGRITY";
+const TPM_HEADER_SIZE: usize = 10;
+
+type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
 
 #[derive(Debug, Clone)]
 enum MockTpmPrivateKey {
@@ -51,11 +53,6 @@ struct MockTpmKey {
     public: TpmtPublic,
     private: Option<MockTpmPrivateKey>,
 }
-
-const SOCKET_NAME: &str = "mocktpm.sock";
-const TPM_HEADER_SIZE: usize = 10;
-
-type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
 
 /// `MockTPM` response trait
 trait MockTpmResponse {
@@ -142,6 +139,34 @@ impl MockTpm {
             ReadPublic => mocktpm_read_public,
         }
     }
+}
+
+#[must_use]
+pub fn mocktpm_start() -> (std::thread::JoinHandle<()>, impl TpmTransport) {
+    let from_server = Arc::new(EndpointGuard {
+        state: Mutex::new(EndpointState {
+            buffer: VecDeque::new(),
+            writer_dropped: false,
+        }),
+        cvar: Condvar::new(),
+    });
+    let from_client = Arc::new(EndpointGuard {
+        state: Mutex::new(EndpointState {
+            buffer: VecDeque::new(),
+            writer_dropped: false,
+        }),
+        cvar: Condvar::new(),
+    });
+
+    let server = Transport(Endpoint(from_client.clone()), Endpoint(from_server.clone()));
+    let client = Transport(Endpoint(from_server), Endpoint(from_client));
+
+    let handle = std::thread::spawn(move || {
+        let mut state = MockTpm::new();
+        mocktpm_run(server, &mut state);
+    });
+
+    (handle, client)
 }
 
 fn mocktpm_supported_commands() -> &'static [TpmCc] {
@@ -501,7 +526,7 @@ fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmErrorKi
     Ok(buf[..len].to_vec())
 }
 
-fn mocktpm_run<T: Read + Write>(mut stream: T, state: &mut MockTpm) {
+fn mocktpm_run(mut stream: impl Read + Write, state: &mut MockTpm) {
     loop {
         let mut header = [0u8; TPM_HEADER_SIZE];
         if stream.read_exact(&mut header).is_err() {
@@ -540,85 +565,5 @@ fn mocktpm_run<T: Read + Write>(mut stream: T, state: &mut MockTpm) {
             error!("no response");
             break;
         }
-    }
-}
-
-fn run() -> Result<(), String> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_micros()
-        .init();
-
-    let mut parser = lexopt::Parser::from_env();
-    let mut cache_path: Option<PathBuf> = None;
-
-    while let Some(arg) = parser
-        .next()
-        .map_err(|e| format!("Argument parsing error: {e}"))?
-    {
-        match arg {
-            Long("cache-path") => {
-                let value = parser
-                    .value()
-                    .map_err(|e| format!("Missing value for --cache-path: {e}"))?;
-                let path_str = value
-                    .string()
-                    .map_err(|_| "Value for --cache-path is not valid UTF-8".to_string())?;
-                cache_path = Some(PathBuf::from(path_str));
-            }
-            Long("help") => {
-                eprintln!("Usage: mocktpm [--cache-path <PATH>]");
-                return Ok(());
-            }
-            _ => {
-                return Err(format!("Unexpected argument: {}", arg.unexpected()));
-            }
-        }
-    }
-
-    let cache_path = cache_path.unwrap_or_else(|| {
-        directories::ProjectDirs::from("org", "puavo", "tpm2sh").map_or_else(
-            || PathBuf::from("/tmp/tpm2sh"),
-            |d| d.cache_dir().to_path_buf(),
-        )
-    });
-
-    std::fs::create_dir_all(&cache_path).map_err(|e| format!("{}: {e}", cache_path.display()))?;
-
-    let socket_path = cache_path.join(SOCKET_NAME);
-    let path = Path::new(&socket_path);
-
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != io::ErrorKind::NotFound {
-            return Err(format!("{}: {e}", path.display()));
-        }
-    }
-
-    let listener = UnixListener::bind(path).map_err(|e| format!("{}: {e}", path.display()))?;
-
-    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o777)) {
-        warn!("{}: {e}", path.display());
-    }
-
-    info!("Socket: {}", path.display());
-
-    let mut state = MockTpm::new();
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                mocktpm_run(stream, &mut state);
-            }
-            Err(e) => {
-                error!("{e}");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn main() {
-    if let Err(e) = run() {
-        error!("{e}");
-        exit(1);
     }
 }

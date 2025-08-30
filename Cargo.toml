@@ -18,11 +18,6 @@ path = "src/lib.rs"
 name = "tpm2sh"
 path = "src/main.rs"
 
-[[bin]]
-name = "mocktpm"
-path = "src/bin/mocktpm.rs"
-required-features = ["mocktpm"]
-
 [[test]]
 name = "parser"
 path = "tests/parser.rs"
@@ -32,10 +27,6 @@ harness = true
 name = "integration-test"
 path = "tests/integration_test.rs"
 harness = true
-
-[features]
-default = ["mocktpm"]
-mocktpm = []
 
 [dependencies]
 aes = "0.8"
