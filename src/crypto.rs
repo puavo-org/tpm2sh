@@ -32,6 +32,7 @@ pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 #[derive(Debug)]
 pub enum CryptoErrorKind {
     InvalidHmac,
+    InvalidPublicArea,
     UnsupportedNameAlgorithm,
 }
 
@@ -41,6 +42,7 @@ impl core::fmt::Display for CryptoErrorKind {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             CryptoErrorKind::InvalidHmac => write!(f, "invalid hmac"),
+            CryptoErrorKind::InvalidPublicArea => write!(f, "invalid public area"),
             CryptoErrorKind::UnsupportedNameAlgorithm => write!(f, "unsupported name algorithm"),
         }
     }
@@ -470,20 +472,17 @@ pub fn crypto_kdfa(
 /// # Errors
 ///
 /// Returns `TpmError` on parsing failure.
-pub fn tpm_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmError> {
+pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, CryptoErrorKind> {
     let mut name_buf = Vec::new();
     let name_alg = public.name_alg;
     name_buf.extend_from_slice(&(name_alg as u16).to_be_bytes());
-    let public_area_bytes = util::build_to_vec(public)?;
+    let public_area_bytes =
+        util::build_to_vec(public).map_err(|_| CryptoErrorKind::InvalidPublicArea)?;
     let digest: Vec<u8> = match name_alg {
         TpmAlgId::Sha256 => Sha256::digest(&public_area_bytes).to_vec(),
         TpmAlgId::Sha384 => Sha384::digest(&public_area_bytes).to_vec(),
         TpmAlgId::Sha512 => Sha512::digest(&public_area_bytes).to_vec(),
-        _ => {
-            return Err(TpmError::Execution(format!(
-                "Unsupported name algorithm: {name_alg}"
-            )))
-        }
+        _ => return Err(CryptoErrorKind::UnsupportedNameAlgorithm),
     };
     name_buf.extend_from_slice(&digest);
     Ok(name_buf)

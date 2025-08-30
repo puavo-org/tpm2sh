@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    crypto_kdfa, get_auth_sessions, parse_args, resolve_uri_to_bytes, tpm_make_name,
+    crypto_kdfa, crypto_make_name, get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
     Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice, TpmError,
 };
@@ -301,7 +301,7 @@ fn create_import_blob(
         }
     };
 
-    let object_name = tpm_make_name(object_public)?;
+    let object_name = crypto_make_name(object_public)?;
 
     let sym_key = crypto_kdfa(
         parent_name_alg,

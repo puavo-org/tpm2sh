@@ -4,7 +4,7 @@
 #![allow(clippy::all)]
 #![allow(clippy::pedantic)]
 
-use cli::{crypto_kdfa, tpm_make_name, TpmError};
+use cli::{crypto_kdfa, crypto_make_name};
 
 use std::{
     collections::HashMap,
@@ -35,7 +35,7 @@ use tpm2_protocol::{
         TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
         TpmLoadResponse, TpmReadPublicCommand, TpmReadPublicResponse, TpmResponseBody,
     },
-    TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmErrorKind, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 const KDF_DUPLICATE: &str = "DUPLICATE";
@@ -243,7 +243,7 @@ impl MockTpm {
             },
         );
 
-        let Ok(name_bytes) = tpm_make_name(&public) else {
+        let Ok(name_bytes) = crypto_make_name(&public) else {
             return Err(TpmRc::from(TpmRcBase::Hash));
         };
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
@@ -352,7 +352,7 @@ impl MockTpm {
             None => return Err(TpmRc::from(TpmRcBase::Key)),
         };
 
-        let Ok(parent_name_bytes) = tpm_make_name(&parent_key.public) else {
+        let Ok(parent_name_bytes) = crypto_make_name(&parent_key.public) else {
             return Err(TpmRc::from(TpmRcBase::Hash));
         };
         let Ok((parent_name, _)) = Tpm2bName::parse(&parent_name_bytes) else {
@@ -464,7 +464,7 @@ impl MockTpm {
             },
         );
 
-        let Ok(name_bytes) = tpm_make_name(&public) else {
+        let Ok(name_bytes) = crypto_make_name(&public) else {
             return Err(TpmRc::from(TpmRcBase::Hash));
         };
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
@@ -487,7 +487,7 @@ impl MockTpm {
         let Some(key) = self.objects.get(&cmd.object_handle.0) else {
             return Err(TpmRc::from(TpmRcBase::Handle));
         };
-        let Ok(name_bytes) = tpm_make_name(&key.public) else {
+        let Ok(name_bytes) = crypto_make_name(&key.public) else {
             return Err(TpmRc::from(TpmRcBase::Hash));
         };
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
@@ -506,7 +506,7 @@ impl MockTpm {
     }
 }
 
-fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmError> {
+fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmErrorKind> {
     let mut buf = [0u8; TPM_MAX_COMMAND_SIZE];
     let len = {
         let mut writer = TpmWriter::new(&mut buf);
