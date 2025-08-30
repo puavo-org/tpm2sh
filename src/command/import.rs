@@ -91,7 +91,7 @@ macro_rules! ecdh {
             let ephemeral_pk_bytes_encoded = ephemeral_sk.public_key().to_encoded_point(false);
             let ephemeral_pk_bytes = ephemeral_pk_bytes_encoded.as_bytes();
             if ephemeral_pk_bytes.is_empty()
-                || ephemeral_pk_bytes[0] != crate::crypto::UNCOMPRESSED_POINT_TAG
+                || ephemeral_pk_bytes[0] != crate::key::UNCOMPRESSED_POINT_TAG
             {
                 return Err(CliError::Execution(
                     "invalid ephemeral ECC public key format".to_string(),
@@ -250,7 +250,7 @@ fn protect_seed_with_ecc(
     };
 
     if ephemeral_point_bytes.is_empty()
-        || ephemeral_point_bytes[0] != crate::crypto::UNCOMPRESSED_POINT_TAG
+        || ephemeral_point_bytes[0] != crate::key::UNCOMPRESSED_POINT_TAG
     {
         return Err(CliError::Execution(
             "invalid ephemeral ECC public key format".to_string(),
