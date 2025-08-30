@@ -14,7 +14,10 @@ use pkcs8::{
     },
     DecodePrivateKey, EncodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
 };
-use rsa::traits::{PrivateKeyParts, PublicKeyParts};
+use rsa::{
+    traits::{PrivateKeyParts, PublicKeyParts},
+    RsaPrivateKey,
+};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::{cmp::Ordering, str::FromStr};
 use tpm2_protocol::data::{
@@ -259,16 +262,11 @@ impl EncodeValue for TpmKeyAsn1 {
     }
 }
 
-/// A parsed RSA or ECC private key.
+/// RSA or ECC private key
 #[allow(clippy::large_enum_variant)]
-pub enum ParsedKey {
-    Rsa(rsa::RsaPrivateKey),
+pub enum PrivateKey {
+    Rsa(RsaPrivateKey),
     Ecc(SecretKey),
-}
-
-/// Loaded private key from PEM file.
-pub struct PrivateKey {
-    key: ParsedKey,
 }
 
 impl PrivateKey {
@@ -295,10 +293,10 @@ impl PrivateKey {
 
         let key = match oid {
             oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
-                ParsedKey::Rsa(rsa::RsaPrivateKey::from_pkcs8_der(contents)?)
+                PrivateKey::Rsa(rsa::RsaPrivateKey::from_pkcs8_der(contents)?)
             }
             oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
-                ParsedKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
+                PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
             }
             _ => {
                 return Err(CliError::Parse(
@@ -307,7 +305,7 @@ impl PrivateKey {
             }
         };
 
-        Ok(Self { key })
+        Ok(key)
     }
 
     /// Load and parse PEM-encoded PKCS#8 private key from a file.
@@ -331,8 +329,8 @@ impl PrivateKey {
     ///
     /// Returns `CliError`.
     pub fn to_tpmt_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, CliError> {
-        match &self.key {
-            ParsedKey::Rsa(rsa_key) => {
+        match self {
+            PrivateKey::Rsa(rsa_key) => {
                 let modulus_bytes = rsa_key.n().to_bytes_be();
                 let key_bits = u16::try_from(modulus_bytes.len() * 8)
                     .map_err(|_| CliError::Parse("RSA key is too large".to_string()))?;
@@ -371,7 +369,7 @@ impl PrivateKey {
                     )?),
                 })
             }
-            ParsedKey::Ecc(secret_key) => {
+            PrivateKey::Ecc(secret_key) => {
                 let encoded_point = secret_key.public_key().to_encoded_point(false);
                 let pub_bytes = encoded_point.as_bytes();
 
@@ -420,9 +418,9 @@ impl PrivateKey {
     ///
     /// Returns a `CliError::Parse` if the key cannot be processed.
     pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, CliError> {
-        match &self.key {
-            ParsedKey::Rsa(rsa_key) => Ok(rsa_key.primes()[0].to_bytes_be()),
-            ParsedKey::Ecc(secret_key) => Ok(secret_key.to_bytes().to_vec()),
+        match self {
+            PrivateKey::Rsa(rsa_key) => Ok(rsa_key.primes()[0].to_bytes_be()),
+            PrivateKey::Ecc(secret_key) => Ok(secret_key.to_bytes().to_vec()),
         }
     }
 }
