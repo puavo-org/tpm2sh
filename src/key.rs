@@ -2,30 +2,20 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{crypto_hmac, CliError};
-use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
-use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+use crate::{crypto::PrivateKey, crypto_hmac, CliError};
+
+use std::{cmp::Ordering, fs, path::Path, str::FromStr};
+
+use p256::SecretKey;
 use pkcs8::{
     der::{
-        self,
-        asn1::{AnyRef, OctetString},
-        Decode, DecodeValue, Encode, EncodeValue, Reader, Sequence, Writer,
+        self, asn1::OctetString, Decode, DecodeValue, Encode, EncodeValue, Reader, Sequence, Writer,
     },
-    DecodePrivateKey, EncodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+    DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
 };
-use rsa::{
-    traits::{PrivateKeyParts, PublicKeyParts},
-    RsaPrivateKey,
-};
-use sha2::Digest;
-use std::{cmp::Ordering, str::FromStr};
-use tpm2_protocol::data::{
-    Tpm2bDigest, Tpm2bEccParameter, Tpm2bPublicKeyRsa, TpmAlgId, TpmCc, TpmEccCurve, TpmaObject,
-    TpmsAuthCommand, TpmsEccParms, TpmsEccPoint, TpmsRsaParms, TpmtKdfScheme, TpmtPublic,
-    TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms,
-};
-
-pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
+use rsa::RsaPrivateKey;
+use sha2::{Digest, Sha256, Sha384, Sha512};
+use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgInfo {
@@ -262,184 +252,6 @@ impl EncodeValue for TpmKey {
     }
 }
 
-/// RSA or ECC private key
-#[allow(clippy::large_enum_variant)]
-pub enum PrivateKey {
-    Rsa(RsaPrivateKey),
-    Ecc(SecretKey),
-}
-
-impl PrivateKey {
-    /// Load and parse a PEM-encoded PKCS#8 private key from a byte slice.
-    ///
-    /// # Errors
-    ///
-    /// Returns `CliError` on parsing failure.
-    pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<Self, CliError> {
-        let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| CliError::Parse(e.to_string()))?;
-
-        let pem_block = pem::parse(pem_str)?;
-
-        if pem_block.tag() != "PRIVATE KEY" {
-            return Err(CliError::Parse(format!(
-                "invalid PEM tag: {}",
-                pem_block.tag()
-            )));
-        }
-
-        let contents = pem_block.contents();
-        let private_key_info = PrivateKeyInfo::from_der(contents)?;
-        let oid = private_key_info.algorithm.oid;
-
-        let key = match oid {
-            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
-                PrivateKey::Rsa(rsa::RsaPrivateKey::from_pkcs8_der(contents)?)
-            }
-            oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
-                PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
-            }
-            _ => {
-                return Err(CliError::Parse(
-                    "unsupported key algorithm in PEM file".to_string(),
-                ))
-            }
-        };
-
-        Ok(key)
-    }
-
-    /// Load and parse PEM-encoded PKCS#8 private key from a file.
-    ///
-    /// # Errors
-    ///
-    /// Returns `CliError` on file I/O or parsing failure.
-    pub fn from_pem_file(path: &std::path::Path) -> Result<Self, CliError> {
-        let pem_bytes =
-            std::fs::read(path).map_err(|e| CliError::File(path.display().to_string(), e))?;
-        Self::from_pem_bytes(&pem_bytes)
-    }
-
-    /// Converts key to `TpmtPublic`.
-    ///
-    /// Implementation note: according to TCG TPM 2.0 Structures specification,
-    /// exponent zero maps to the default RSA exponent 65537, and the support
-    /// for other values is optional.
-    ///
-    /// # Errors
-    ///
-    /// Returns `CliError`.
-    pub fn to_tpmt_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, CliError> {
-        match self {
-            PrivateKey::Rsa(rsa_key) => {
-                let modulus_bytes = rsa_key.n().to_bytes_be();
-                let key_bits = u16::try_from(modulus_bytes.len() * 8)
-                    .map_err(|_| CliError::Parse("RSA key is too large".to_string()))?;
-
-                let exponent = {
-                    let e_bytes = rsa_key.e().to_bytes_be();
-                    if e_bytes.len() > 4 {
-                        return Err(CliError::Parse("RSA exponent is too large".to_string()));
-                    }
-                    let mut buf = [0u8; 4];
-                    buf[4 - e_bytes.len()..].copy_from_slice(&e_bytes);
-                    u32::from_be_bytes(buf)
-                };
-
-                let exponent = if exponent == 65537 {
-                    0
-                } else {
-                    return Err(CliError::Parse("RSA exponent is unsupported".to_string()));
-                };
-
-                Ok(TpmtPublic {
-                    object_type: TpmAlgId::Rsa,
-                    name_alg: hash_alg,
-                    object_attributes: TpmaObject::RESTRICTED
-                        | TpmaObject::DECRYPT
-                        | TpmaObject::USER_WITH_AUTH,
-                    auth_policy: Tpm2bDigest::default(),
-                    parameters: TpmuPublicParms::Rsa(TpmsRsaParms {
-                        symmetric: TpmtSymDefObject::default(),
-                        scheme: TpmtScheme::default(),
-                        key_bits,
-                        exponent,
-                    }),
-                    unique: TpmuPublicId::Rsa(Tpm2bPublicKeyRsa::try_from(
-                        modulus_bytes.as_slice(),
-                    )?),
-                })
-            }
-            PrivateKey::Ecc(secret_key) => {
-                let encoded_point = secret_key.public_key().to_encoded_point(false);
-                let pub_bytes = encoded_point.as_bytes();
-
-                if pub_bytes.is_empty() || pub_bytes[0] != UNCOMPRESSED_POINT_TAG {
-                    return Err(CliError::Parse("invalid ECC public key format".to_string()));
-                }
-
-                let coord_len = (pub_bytes.len() - 1) / 2;
-                let x = &pub_bytes[1..=coord_len];
-                let y = &pub_bytes[1 + coord_len..];
-
-                let der_bytes = secret_key.to_pkcs8_der()?;
-                let pki = PrivateKeyInfo::from_der(der_bytes.as_bytes())?;
-                let params =
-                    pki.algorithm.parameters.as_ref().ok_or_else(|| {
-                        CliError::Parse("missing ECC curve parameters".to_string())
-                    })?;
-
-                let curve_id = ec_oid_to_tpm_curve(params)?;
-
-                Ok(TpmtPublic {
-                    object_type: TpmAlgId::Ecc,
-                    name_alg: hash_alg,
-                    object_attributes: TpmaObject::RESTRICTED
-                        | TpmaObject::DECRYPT
-                        | TpmaObject::USER_WITH_AUTH,
-                    auth_policy: Tpm2bDigest::default(),
-                    parameters: TpmuPublicParms::Ecc(TpmsEccParms {
-                        symmetric: TpmtSymDefObject::default(),
-                        scheme: TpmtScheme::default(),
-                        curve_id,
-                        kdf: TpmtKdfScheme::default(),
-                    }),
-                    unique: TpmuPublicId::Ecc(TpmsEccPoint {
-                        x: Tpm2bEccParameter::try_from(x)?,
-                        y: Tpm2bEccParameter::try_from(y)?,
-                    }),
-                })
-            }
-        }
-    }
-
-    /// Returns the sensitive part of the private key required for import.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError::Parse` if the key cannot be processed.
-    pub fn get_sensitive_blob(&self) -> Result<Vec<u8>, CliError> {
-        match self {
-            PrivateKey::Rsa(rsa_key) => Ok(rsa_key.primes()[0].to_bytes_be()),
-            PrivateKey::Ecc(secret_key) => Ok(secret_key.to_bytes().to_vec()),
-        }
-    }
-}
-
-/// Convert ECC curve OID from DER `AnyRef` to TPM curve enum.
-fn ec_oid_to_tpm_curve(any: &AnyRef) -> Result<TpmEccCurve, CliError> {
-    let der_bytes = any.to_der()?;
-    let mut reader = der::SliceReader::new(&der_bytes)?;
-    let oid = ObjectIdentifier::decode(&mut reader)
-        .map_err(|_| CliError::Parse("Invalid DER in ECC curve parameters".to_string()))?;
-
-    match oid {
-        SECP_256_R_1 => Ok(TpmEccCurve::NistP256),
-        SECP_384_R_1 => Ok(TpmEccCurve::NistP384),
-        SECP_521_R_1 => Ok(TpmEccCurve::NistP521),
-        _ => Err(CliError::Parse(format!("unsupported ECC curve OID: {oid}"))),
-    }
-}
-
 impl TpmKey {
     /// Serialize TPM key to PEM.
     ///
@@ -483,6 +295,53 @@ impl TpmKey {
     }
 }
 
+/// Load and parse a PEM-encoded PKCS#8 private key from a byte slice.
+///
+/// # Errors
+///
+/// Returns `CliError` on parsing failure.
+pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliError> {
+    let pem_str = std::str::from_utf8(pem_bytes).map_err(|e| CliError::Parse(e.to_string()))?;
+    let pem_block = pem::parse(pem_str)?;
+
+    if pem_block.tag() != "PRIVATE KEY" {
+        return Err(CliError::Parse(format!(
+            "invalid PEM tag: {}",
+            pem_block.tag()
+        )));
+    }
+
+    let contents = pem_block.contents();
+    let private_key_info = PrivateKeyInfo::from_der(contents)?;
+    let oid = private_key_info.algorithm.oid;
+
+    let key = match oid {
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
+            PrivateKey::Rsa(RsaPrivateKey::from_pkcs8_der(contents)?)
+        }
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
+            PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
+        }
+        _ => {
+            return Err(CliError::Parse(
+                "unsupported key algorithm in PEM file".to_string(),
+            ))
+        }
+    };
+
+    Ok(key)
+}
+
+/// Load and parse PEM-encoded PKCS#8 private key from a file.
+///
+/// # Errors
+///
+/// Returns `CliError` on file I/O or parsing failure.
+pub fn private_key_from_pem_file(path: &Path) -> Result<PrivateKey, CliError> {
+    let pem_bytes = fs::read(path).map_err(|e| CliError::File(path.display().to_string(), e))?;
+    private_key_from_pem_bytes(&pem_bytes)
+}
+
 /// Computes the authorization HMAC for a command session.
 ///
 /// # Errors
@@ -507,9 +366,9 @@ pub fn create_auth(
     };
 
     let cp_hash = match session.auth_hash {
-        TpmAlgId::Sha256 => sha2::Sha256::digest(&cp_hash_payload).to_vec(),
-        TpmAlgId::Sha384 => sha2::Sha384::digest(&cp_hash_payload).to_vec(),
-        TpmAlgId::Sha512 => sha2::Sha512::digest(&cp_hash_payload).to_vec(),
+        TpmAlgId::Sha256 => Sha256::digest(&cp_hash_payload).to_vec(),
+        TpmAlgId::Sha384 => Sha384::digest(&cp_hash_payload).to_vec(),
+        TpmAlgId::Sha512 => Sha512::digest(&cp_hash_payload).to_vec(),
         alg => {
             return Err(CliError::Execution(format!(
                 "unsupported session hash algorithm: {alg}"

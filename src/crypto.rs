@@ -1,17 +1,32 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 //! This file contains cryptographic algorithms shared by tpm2sh and `MockTPM`.
 
 use crate::util;
+
+use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use hmac::{Hmac, Mac};
-use pkcs8::ObjectIdentifier;
+use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+use pkcs8::{
+    der::{self, asn1::AnyRef, Decode, Encode},
+    EncodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
+};
+use rsa::{
+    traits::{PrivateKeyParts, PublicKeyParts},
+    RsaPrivateKey,
+};
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tpm2_protocol::data::{TpmAlgId, TpmRc, TpmRcBase, TpmtPublic};
+use tpm2_protocol::data::{
+    Tpm2bDigest, Tpm2bEccParameter, Tpm2bPublicKeyRsa, TpmAlgId, TpmEccCurve, TpmRc, TpmRcBase,
+    TpmaObject, TpmsEccParms, TpmsEccPoint, TpmsRsaParms, TpmtKdfScheme, TpmtPublic, TpmtScheme,
+    TpmtSymDefObject, TpmuPublicId, TpmuPublicParms,
+};
 
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
+pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 
 /// Computes an HMAC digest over a series of data chunks.
 ///
@@ -133,4 +148,134 @@ pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmRc> {
     };
     name_buf.extend_from_slice(&digest);
     Ok(name_buf)
+}
+
+/// RSA or ECC private key
+#[allow(clippy::large_enum_variant)]
+pub enum PrivateKey {
+    Rsa(RsaPrivateKey),
+    Ecc(SecretKey),
+}
+
+impl PrivateKey {
+    /// Converts key to `TpmtPublic`.
+    ///
+    /// Implementation note: according to TCG TPM 2.0 Structures specification,
+    /// exponent zero maps to the default RSA exponent 65537, and the support
+    /// for other values is optional.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `TpmRc` on failure.
+    pub fn to_public(&self, hash_alg: TpmAlgId) -> Result<TpmtPublic, TpmRc> {
+        match self {
+            PrivateKey::Rsa(rsa_key) => {
+                let modulus_bytes = rsa_key.n().to_bytes_be();
+                let key_bits = u16::try_from(modulus_bytes.len() * 8)
+                    .map_err(|_| TpmRc::from(TpmRcBase::KeySize))?;
+
+                let exponent = {
+                    let e_bytes = rsa_key.e().to_bytes_be();
+                    if e_bytes.len() > 4 {
+                        return Err(TpmRc::from(TpmRcBase::Value));
+                    }
+                    let mut buf = [0u8; 4];
+                    buf[4 - e_bytes.len()..].copy_from_slice(&e_bytes);
+                    u32::from_be_bytes(buf)
+                };
+
+                let exponent = if exponent == 65537 {
+                    0
+                } else {
+                    return Err(TpmRc::from(TpmRcBase::Value));
+                };
+
+                Ok(TpmtPublic {
+                    object_type: TpmAlgId::Rsa,
+                    name_alg: hash_alg,
+                    object_attributes: TpmaObject::RESTRICTED
+                        | TpmaObject::DECRYPT
+                        | TpmaObject::USER_WITH_AUTH,
+                    auth_policy: Tpm2bDigest::default(),
+                    parameters: TpmuPublicParms::Rsa(TpmsRsaParms {
+                        symmetric: TpmtSymDefObject::default(),
+                        scheme: TpmtScheme::default(),
+                        key_bits,
+                        exponent,
+                    }),
+                    unique: TpmuPublicId::Rsa(
+                        Tpm2bPublicKeyRsa::try_from(modulus_bytes.as_slice())
+                            .map_err(|_| TpmRc::from(TpmRcBase::Value))?,
+                    ),
+                })
+            }
+            PrivateKey::Ecc(secret_key) => {
+                let encoded_point = secret_key.public_key().to_encoded_point(false);
+                let pub_bytes = encoded_point.as_bytes();
+
+                if pub_bytes.is_empty() || pub_bytes[0] != UNCOMPRESSED_POINT_TAG {
+                    return Err(TpmRc::from(TpmRcBase::Value));
+                }
+
+                let coord_len = (pub_bytes.len() - 1) / 2;
+                let x = &pub_bytes[1..=coord_len];
+                let y = &pub_bytes[1 + coord_len..];
+
+                let der_bytes = secret_key
+                    .to_pkcs8_der()
+                    .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+                let pki = PrivateKeyInfo::from_der(der_bytes.as_bytes())
+                    .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+                let Some(params) = pki.algorithm.parameters.as_ref() else {
+                    return Err(TpmRc::from(TpmRcBase::Value));
+                };
+
+                let curve_id = ec_oid_to_tpm_curve(params)?;
+
+                Ok(TpmtPublic {
+                    object_type: TpmAlgId::Ecc,
+                    name_alg: hash_alg,
+                    object_attributes: TpmaObject::RESTRICTED
+                        | TpmaObject::DECRYPT
+                        | TpmaObject::USER_WITH_AUTH,
+                    auth_policy: Tpm2bDigest::default(),
+                    parameters: TpmuPublicParms::Ecc(TpmsEccParms {
+                        symmetric: TpmtSymDefObject::default(),
+                        scheme: TpmtScheme::default(),
+                        curve_id,
+                        kdf: TpmtKdfScheme::default(),
+                    }),
+                    unique: TpmuPublicId::Ecc(TpmsEccPoint {
+                        x: Tpm2bEccParameter::try_from(x)
+                            .map_err(|_| TpmRc::from(TpmRcBase::Value))?,
+                        y: Tpm2bEccParameter::try_from(y)
+                            .map_err(|_| TpmRc::from(TpmRcBase::Value))?,
+                    }),
+                })
+            }
+        }
+    }
+
+    /// Returns the sensitive part of the private key required for import.
+    #[must_use]
+    pub fn sensitive_blob(&self) -> Vec<u8> {
+        match self {
+            PrivateKey::Rsa(rsa_key) => rsa_key.primes()[0].to_bytes_be(),
+            PrivateKey::Ecc(secret_key) => secret_key.to_bytes().to_vec(),
+        }
+    }
+}
+
+/// Convert ECC curve OID from DER `AnyRef` to TPM curve enum.
+fn ec_oid_to_tpm_curve(any: &AnyRef) -> Result<TpmEccCurve, TpmRc> {
+    let der_bytes = any.to_der().map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+    let mut reader =
+        der::SliceReader::new(&der_bytes).map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+    let oid = ObjectIdentifier::decode(&mut reader).map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+    match oid {
+        SECP_256_R_1 => Ok(TpmEccCurve::NistP256),
+        SECP_384_R_1 => Ok(TpmEccCurve::NistP384),
+        SECP_521_R_1 => Ok(TpmEccCurve::NistP521),
+        _ => Err(TpmRc::from(TpmRcBase::Curve)),
+    }
 }

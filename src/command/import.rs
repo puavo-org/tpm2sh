@@ -6,11 +6,13 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    crypto_hmac, crypto_kdfa, crypto_make_name, get_auth_sessions,
+    crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
+    get_auth_sessions,
+    key::private_key_from_pem_bytes,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
     resolve_uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, CommandType, PrivateKey, TpmDevice,
+    CliError, Command, CommandType, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -92,9 +94,7 @@ macro_rules! ecdh {
             let ephemeral_sk = <$sk_ty>::random(&mut thread_rng());
             let ephemeral_pk_bytes_encoded = ephemeral_sk.public_key().to_encoded_point(false);
             let ephemeral_pk_bytes = ephemeral_pk_bytes_encoded.as_bytes();
-            if ephemeral_pk_bytes.is_empty()
-                || ephemeral_pk_bytes[0] != crate::key::UNCOMPRESSED_POINT_TAG
-            {
+            if ephemeral_pk_bytes.is_empty() || ephemeral_pk_bytes[0] != UNCOMPRESSED_POINT_TAG {
                 return Err(CliError::Execution(
                     "invalid ephemeral ECC public key format".to_string(),
                 ));
@@ -252,9 +252,7 @@ fn protect_seed_with_ecc(
         }
     };
 
-    if ephemeral_point_bytes.is_empty()
-        || ephemeral_point_bytes[0] != crate::key::UNCOMPRESSED_POINT_TAG
-    {
+    if ephemeral_point_bytes.is_empty() || ephemeral_point_bytes[0] != UNCOMPRESSED_POINT_TAG {
         return Err(CliError::Execution(
             "invalid ephemeral ECC public key format".to_string(),
         ));
@@ -426,13 +424,15 @@ impl Command for Import {
 
         let key_uri_str = self.key_uri.as_ref().unwrap();
         let pem_bytes = resolve_uri_to_bytes(key_uri_str, &[])?;
-        let private_key = PrivateKey::from_pem_bytes(&pem_bytes)?;
+        let private_key = private_key_from_pem_bytes(&pem_bytes)?;
 
-        let public = private_key.to_tpmt_public(parent_name_alg)?;
+        let public = private_key
+            .to_public(parent_name_alg)
+            .map_err(CliError::TpmRc)?;
         let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
         };
-        let private_bytes_blob = private_key.get_sensitive_blob()?;
+        let private_bytes_blob = private_key.sensitive_blob();
 
         let (duplicate, in_sym_seed, encryption_key) =
             create_import_blob(&parent_public, &public, &private_bytes_blob, &parent_name)?;

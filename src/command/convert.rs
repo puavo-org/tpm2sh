@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
+    key::TpmKey,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice, TpmKey,
+    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
