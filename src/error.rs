@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::CryptoErrorKind;
 use std::{io::Error as IoError, num::ParseIntError, str::Utf8Error};
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
@@ -10,9 +9,6 @@ use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 pub enum CliError {
     #[error("TPM protocol: {0}")]
     Build(TpmErrorKind),
-
-    #[error("Crypto: {0}")]
-    CryptoErrorKind(#[from] CryptoErrorKind),
 
     #[error("Execution: {0}")]
     Execution(String),

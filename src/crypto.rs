@@ -8,35 +8,16 @@ use crate::util;
 use hmac::{Hmac, Mac};
 use pkcs8::ObjectIdentifier;
 use sha2::{Digest, Sha256, Sha384, Sha512};
-use tpm2_protocol::data::{TpmAlgId, TpmtPublic};
+use tpm2_protocol::data::{TpmAlgId, TpmRc, TpmRcBase, TpmtPublic};
 
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
-
-#[derive(Debug)]
-pub enum CryptoErrorKind {
-    InvalidHmac,
-    InvalidPublicArea,
-    UnsupportedNameAlgorithm,
-}
-
-impl core::error::Error for CryptoErrorKind {}
-
-impl core::fmt::Display for CryptoErrorKind {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        match self {
-            CryptoErrorKind::InvalidHmac => write!(f, "invalid hmac"),
-            CryptoErrorKind::InvalidPublicArea => write!(f, "invalid public area"),
-            CryptoErrorKind::UnsupportedNameAlgorithm => write!(f, "unsupported name algorithm"),
-        }
-    }
-}
 
 /// Implements the `KDFa` key derivation function from the TPM specification.
 ///
 /// # Errors
 ///
-/// Returns `CliError` on parsing failure.
+/// Returns a `TpmRc` error on failure.
 pub fn crypto_kdfa(
     auth_hash: TpmAlgId,
     hmac_key: &[u8],
@@ -44,7 +25,7 @@ pub fn crypto_kdfa(
     context_a: &[u8],
     context_b: &[u8],
     key_bits: u16,
-) -> Result<Vec<u8>, CryptoErrorKind> {
+) -> Result<Vec<u8>, TpmRc> {
     let mut key_stream = Vec::new();
     let key_bytes = (key_bits as usize).div_ceil(8);
     let label_bytes = {
@@ -58,7 +39,7 @@ pub fn crypto_kdfa(
             let mut counter: u32 = 1;
             while key_stream.len() < key_bytes {
                 let mut hmac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                    .map_err(|_| CryptoErrorKind::InvalidHmac)?;
+                    .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
 
                 hmac.update(&counter.to_be_bytes());
                 hmac.update(&label_bytes);
@@ -80,7 +61,7 @@ pub fn crypto_kdfa(
         TpmAlgId::Sha256 => hmac!(Sha256),
         TpmAlgId::Sha384 => hmac!(Sha384),
         TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => return Err(CryptoErrorKind::UnsupportedNameAlgorithm),
+        _ => return Err(TpmRc::from(TpmRcBase::Hash)),
     }
 
     Ok(key_stream)
@@ -90,18 +71,18 @@ pub fn crypto_kdfa(
 ///
 /// # Errors
 ///
-/// Returns `CliError` on parsing failure.
-pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, CryptoErrorKind> {
+/// Returns a `TpmRc` error on failure.
+pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmRc> {
     let mut name_buf = Vec::new();
     let name_alg = public.name_alg;
     name_buf.extend_from_slice(&(name_alg as u16).to_be_bytes());
     let public_area_bytes =
-        util::build_to_vec(public).map_err(|_| CryptoErrorKind::InvalidPublicArea)?;
+        util::build_to_vec(public).map_err(|_| TpmRc::from(TpmRcBase::Value))?;
     let digest: Vec<u8> = match name_alg {
         TpmAlgId::Sha256 => Sha256::digest(&public_area_bytes).to_vec(),
         TpmAlgId::Sha384 => Sha384::digest(&public_area_bytes).to_vec(),
         TpmAlgId::Sha512 => Sha512::digest(&public_area_bytes).to_vec(),
-        _ => return Err(CryptoErrorKind::UnsupportedNameAlgorithm),
+        _ => return Err(TpmRc::from(TpmRcBase::Hash)),
     };
     name_buf.extend_from_slice(&digest);
     Ok(name_buf)

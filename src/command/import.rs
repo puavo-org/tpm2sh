@@ -104,7 +104,8 @@ macro_rules! ecdh {
 
             let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
             let z = shared_secret.raw_secret_bytes();
-            let sym_material = crypto_kdfa(name_alg, z, KDF_STORAGE, context_a, &context_b, 256)?;
+            let sym_material = crypto_kdfa(name_alg, z, KDF_STORAGE, context_a, &context_b, 256)
+                .map_err(CliError::TpmRc)?;
             let (aes_key, iv) = sym_material.split_at(16);
             let mut encrypted_seed_buf = *seed;
             let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
@@ -304,7 +305,7 @@ fn create_import_blob(
         }
     };
 
-    let object_name = crypto_make_name(object_public)?;
+    let object_name = crypto_make_name(object_public).map_err(CliError::TpmRc)?;
 
     let sym_key = crypto_kdfa(
         parent_name_alg,
@@ -313,7 +314,8 @@ fn create_import_blob(
         &object_name,
         parent_name,
         128,
-    )?;
+    )
+    .map_err(CliError::TpmRc)?;
 
     let integrity_key_bits = u16::try_from(
         tpm2_protocol::tpm_hash_size(&parent_name_alg).ok_or_else(|| {
@@ -329,7 +331,8 @@ fn create_import_blob(
         parent_name,
         &[],
         integrity_key_bits,
-    )?;
+    )
+    .map_err(CliError::TpmRc)?;
 
     let sensitive = tpm2_protocol::data::TpmtSensitive::from_private_bytes(
         object_public.object_type,

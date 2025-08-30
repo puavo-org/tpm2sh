@@ -243,9 +243,7 @@ impl MockTpm {
             },
         );
 
-        let Ok(name_bytes) = crypto_make_name(&public) else {
-            return Err(TpmRc::from(TpmRcBase::Hash));
-        };
+        let name_bytes = crypto_make_name(&public)?;
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
@@ -352,9 +350,7 @@ impl MockTpm {
             None => return Err(TpmRc::from(TpmRcBase::Key)),
         };
 
-        let Ok(parent_name_bytes) = crypto_make_name(&parent_key.public) else {
-            return Err(TpmRc::from(TpmRcBase::Hash));
-        };
+        let parent_name_bytes = crypto_make_name(&parent_key.public)?;
         let Ok((parent_name, _)) = Tpm2bName::parse(&parent_name_bytes) else {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
@@ -396,16 +392,14 @@ impl MockTpm {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
 
-        let Ok(hmac_key) = crypto_kdfa(
+        let hmac_key = crypto_kdfa(
             parent_name_alg,
             &seed,
             KDF_INTEGRITY,
             &parent_name,
             &[],
             integrity_key_bits,
-        ) else {
-            return Err(TpmRc::from(TpmRcBase::Failure));
-        };
+        )?;
 
         let Some(hash_len) = tpm2_protocol::tpm_hash_size(&parent_name_alg) else {
             return Err(TpmRc::from(TpmRcBase::Hash));
@@ -464,9 +458,7 @@ impl MockTpm {
             },
         );
 
-        let Ok(name_bytes) = crypto_make_name(&public) else {
-            return Err(TpmRc::from(TpmRcBase::Hash));
-        };
+        let name_bytes = crypto_make_name(&public)?;
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
@@ -487,9 +479,7 @@ impl MockTpm {
         let Some(key) = self.objects.get(&cmd.object_handle.0) else {
             return Err(TpmRc::from(TpmRcBase::Handle));
         };
-        let Ok(name_bytes) = crypto_make_name(&key.public) else {
-            return Err(TpmRc::from(TpmRcBase::Hash));
-        };
+        let name_bytes = crypto_make_name(&key.public)?;
         let Ok(name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
             return Err(TpmRc::from(TpmRcBase::Value));
         };
