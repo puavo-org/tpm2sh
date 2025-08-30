@@ -24,9 +24,17 @@ struct TestFixture {
     device: Arc<Mutex<TpmDevice>>,
 }
 
+fn setup_logging() {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
+        .format_timestamp_micros()
+        .try_init();
+
+    let _ = LOG_FORMAT.set(cli::cli::LogFormat::Pretty);
+}
+
 #[fixture]
 fn tpm_device() -> TestFixture {
-    let _ = LOG_FORMAT.set(cli::cli::LogFormat::Plain);
+    setup_logging();
 
     let (handle, transport) = cli::mocktpm::mocktpm_start();
     let device = Arc::new(Mutex::new(TpmDevice::new(transport)));
