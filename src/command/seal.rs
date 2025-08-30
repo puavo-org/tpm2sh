@@ -3,9 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Seal},
-    get_auth_sessions, parse_args, resolve_uri_to_bytes,
+    get_auth_sessions, resolve_uri_to_bytes,
     util::build_to_vec,
     CliError, Command, CommandIo, CommandType, Key, PipelineEntry, TpmDevice,
 };
@@ -60,7 +61,7 @@ impl Command for Seal {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Seal::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("data") => {
                 args.data_uri = Some(parser.value()?.string()?);
             }

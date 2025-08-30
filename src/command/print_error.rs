@@ -3,9 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PrintError},
-    parse_args, parse_tpm_rc, CliError, Command, CommandIo, CommandType, TpmDevice,
+    parse_tpm_rc, CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -30,7 +31,7 @@ impl Command for PrintError {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut rc_str: Option<String> = None;
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Value(val) if rc_str.is_none() => {
                 rc_str = Some(val.string()?);
             }

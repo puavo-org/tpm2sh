@@ -3,10 +3,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, StartSession},
-    key, parse_args, CliError, Command, CommandIo, CommandType, HmacSession, PipelineEntry,
-    PolicySession, TpmDevice,
+    key, CliError, Command, CommandIo, CommandType, HmacSession, PipelineEntry, PolicySession,
+    TpmDevice,
 };
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
@@ -49,7 +50,7 @@ impl Command for StartSession {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = StartSession::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("session-type") => {
                 args.session_type = parser.value()?.string()?.parse()?;
             }

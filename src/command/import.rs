@@ -3,9 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    crypto_kdfa, crypto_make_name, get_auth_sessions, parse_args, resolve_uri_to_bytes,
+    crypto_kdfa, crypto_make_name, get_auth_sessions, resolve_uri_to_bytes,
     util::build_to_vec,
     CliError, Command, CommandIo, CommandType, Key, PipelineEntry, PrivateKey, TpmDevice,
 };
@@ -394,7 +395,7 @@ impl Command for Import {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Import::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("key") => {
                 args.key_uri = Some(parser.value()?.string()?);
             }

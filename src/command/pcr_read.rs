@@ -3,10 +3,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
-    get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, CliError, Command,
-    CommandIo, CommandType, PipelineEntry, TpmDevice,
+    get_pcr_count, parse_pcr_selection, pcr_response_to_output, CliError, Command, CommandIo,
+    CommandType, PipelineEntry, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -32,7 +33,7 @@ impl Command for PcrRead {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut selection = None;
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Value(val) if selection.is_none() => {
                 selection = Some(val.string()?);
             }

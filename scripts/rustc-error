@@ -14,7 +14,7 @@ def main():
     parser.add_argument("crate", help="crate name")
     parser.add_argument("root", help="crate root")
     parser.add_argument("query", help="substring query")
-    args = parser.parse_args()
+    args = parser.arguments()
     cmd = [
         "rustc",
         "--crate-type", "lib",

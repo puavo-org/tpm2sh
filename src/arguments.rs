@@ -17,7 +17,7 @@ pub type CommandLineOption<'a> = (Option<&'a str>, &'a str, &'a str, &'a str);
 pub type CommandLineArgument<'a> = (&'a str, &'a str);
 
 #[macro_export]
-macro_rules! parse_args {
+macro_rules! arguments {
     ($parser:ident, $arg:ident, $help_fn:expr, { $($matcher:tt)* }) => {
         while let Some($arg) = $parser.next()? {
             match $arg {

@@ -2,9 +2,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Objects},
-    parse_args, CliError, Command, CommandIo, CommandType, PipelineEntry, Tpm, TpmDevice,
+    CliError, Command, CommandIo, CommandType, PipelineEntry, Tpm, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -27,7 +28,7 @@ impl Command for Objects {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }

@@ -3,10 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
-    parse_args, resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType, Key,
-    PipelineEntry, TpmDevice, TpmKey,
+    resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType, Key, PipelineEntry,
+    TpmDevice, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -50,7 +51,7 @@ impl Command for Convert {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Convert::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("from") => {
                 args.from = parser.value()?.string()?.parse()?;
             }

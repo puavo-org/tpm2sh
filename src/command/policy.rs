@@ -2,10 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
-    get_pcr_count, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri, CliError,
-    Command, CommandIo, CommandType, PipelineEntry, PolicySession, TpmDevice,
+    get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri, CliError, Command,
+    CommandIo, CommandType, PipelineEntry, PolicySession, TpmDevice,
 };
 use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
@@ -284,7 +285,7 @@ impl Command for Policy {
         let mut args = Policy::default();
         let mut expression_arg: Option<String> = None;
 
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             lexopt::Arg::Value(val) if expression_arg.is_none() => {
                 expression_arg = Some(val.string()?);
             }

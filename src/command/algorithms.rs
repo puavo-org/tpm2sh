@@ -3,10 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Algorithms, Commands},
-    enumerate_all, parse_args, CliError, Command, CommandIo, CommandType, TpmDevice,
-    TPM_CAP_PROPERTY_MAX,
+    enumerate_all, CliError, Command, CommandIo, CommandType, TpmDevice, TPM_CAP_PROPERTY_MAX,
 };
 use lexopt::prelude::*;
 use regex::Regex;
@@ -57,7 +57,7 @@ impl Command for Algorithms {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Algorithms { filter: None };
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Value(val) if args.filter.is_none() => {
                 args.filter = Some(val.string()?);
             }

@@ -3,10 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo, CliError,
-    Command, CommandIo, CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
+    get_auth_sessions, parse_tpm_handle_from_uri, util, Alg, AlgInfo, CliError, Command, CommandIo,
+    CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -125,7 +126,7 @@ impl Command for CreatePrimary {
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = CreatePrimary::default();
         let mut alg_set = false;
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Short('H') | Long("hierarchy") => {
                 args.hierarchy = parser.value()?.string()?.parse()?;
             }

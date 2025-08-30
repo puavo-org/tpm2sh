@@ -3,10 +3,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Load},
-    get_auth_sessions, parse_args, resolve_uri_to_bytes, util, CliError, Command, CommandIo,
-    CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
+    get_auth_sessions, resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType,
+    PipelineEntry, ScopedHandle, Tpm, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -41,7 +42,7 @@ impl Command for Load {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Load::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("parent-password") => {
                 args.parent_password.password = Some(parser.value()?.string()?);
             }

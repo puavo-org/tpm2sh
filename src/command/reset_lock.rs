@@ -3,9 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, ResetLock},
-    get_auth_sessions, parse_args, CliError, Command, CommandIo, CommandType, TpmDevice,
+    get_auth_sessions, CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -35,7 +36,7 @@ impl Command for ResetLock {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = ResetLock::default();
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
             }

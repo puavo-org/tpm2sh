@@ -3,10 +3,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments,
+    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrEvent},
-    get_auth_sessions, parse_args, parse_tpm_handle_from_uri, resolve_uri_to_bytes, CliError,
-    Command, CommandIo, CommandType, TpmDevice,
+    get_auth_sessions, parse_tpm_handle_from_uri, resolve_uri_to_bytes, CliError, Command,
+    CommandIo, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -46,7 +47,7 @@ impl Command for PcrEvent {
         let mut args = PcrEvent::default();
         let mut handle_uri_arg = None;
         let mut data_uri_arg = None;
-        parse_args!(parser, arg, Self::help, {
+        arguments!(parser, arg, Self::help, {
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
             }

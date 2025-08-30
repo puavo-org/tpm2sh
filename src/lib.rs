@@ -5,7 +5,7 @@
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 
-pub mod arg_parser;
+pub mod arguments;
 pub mod cli;
 pub mod command;
 pub mod command_io;
@@ -20,7 +20,7 @@ pub mod session;
 pub mod uri;
 pub mod util;
 
-pub use self::arg_parser::parse_cli;
+pub use self::arguments::parse_cli;
 pub use self::command_io::{CommandIo, ScopedHandle};
 pub use self::crypto::*;
 pub use self::device::*;
