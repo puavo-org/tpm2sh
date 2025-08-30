@@ -10,7 +10,7 @@ use std::{
     collections::HashMap,
     io::{self, Read, Write},
     os::unix::fs::PermissionsExt,
-    os::unix::net::{UnixListener, UnixStream},
+    os::unix::net::UnixListener,
     path::{Path, PathBuf},
     process::exit,
 };
@@ -523,9 +523,7 @@ fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmErrorKi
     Ok(buf[..len].to_vec())
 }
 
-fn mocktpm_run(mut stream: UnixStream) {
-    let mut state = MockTpm::new();
-
+fn mocktpm_run<T: Read + Write>(mut stream: T, state: &mut MockTpm) {
     loop {
         let mut header = [0u8; TPM_HEADER_SIZE];
         if stream.read_exact(&mut header).is_err() {
@@ -624,10 +622,11 @@ fn run() -> Result<(), String> {
 
     info!("Socket: {}", path.display());
 
+    let mut state = MockTpm::new();
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                mocktpm_run(stream);
+                mocktpm_run(stream, &mut state);
             }
             Err(e) => {
                 error!("{e}");

@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-//! This file contains cryptographic algorithms shared by tpm2sh and MockTPM.
+//! This file contains cryptographic algorithms shared by tpm2sh and `MockTPM`.
 
 use crate::util;
 use hmac::{Hmac, Mac};
