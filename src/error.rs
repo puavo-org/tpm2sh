@@ -72,6 +72,22 @@ pub enum CliError {
     UsageHandled,
 }
 
+impl CliError {
+    /// Checks if the error is related to user input or usage.
+    #[must_use]
+    pub fn is_usage_error(&self) -> bool {
+        matches!(
+            self,
+            Self::Usage(_)
+                | Self::Lexopt(_)
+                | Self::Parse(_)
+                | Self::PcrSelection(_)
+                | Self::InvalidHandle(_)
+                | Self::File(_, _)
+        )
+    }
+}
+
 impl From<base64::DecodeError> for CliError {
     fn from(err: base64::DecodeError) -> Self {
         ParseError::from(err).into()

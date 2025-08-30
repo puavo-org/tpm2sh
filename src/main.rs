@@ -18,20 +18,14 @@ fn main() {
         Ok(()) => {}
         Err(CliError::Help) => std::process::exit(0),
         Err(CliError::UsageHandled) => std::process::exit(2),
-        Err(
-            err @ CliError::Usage(_)
-            | err @ CliError::Lexopt(_)
-            | err @ CliError::Parse(_)
-            | err @ CliError::PcrSelection(_)
-            | err @ CliError::InvalidHandle(_)
-            | err @ CliError::File(_, _),
-        ) => {
-            eprintln!("{err}");
-            std::process::exit(2);
-        }
         Err(err) => {
-            error!("{err}");
-            std::process::exit(1);
+            if err.is_usage_error() {
+                eprintln!("{err}");
+                std::process::exit(2);
+            } else {
+                error!("{err}");
+                std::process::exit(1);
+            }
         }
     }
 }
