@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
     get_pcr_count, parse_args, parse_pcr_selection, pcr_response_to_output, CliError, Command,
-    CommandIo, CommandType, PipelineObject, TpmDevice,
+    CommandIo, CommandType, PipelineEntry, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -77,7 +77,7 @@ impl Command for PcrRead {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
 
-        io.push_object(PipelineObject::PcrValues(pcr_output));
+        io.push_object(PipelineEntry::PcrValues(pcr_output));
         Ok(())
     }
 }

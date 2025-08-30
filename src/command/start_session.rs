@@ -5,7 +5,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, StartSession},
-    key, parse_args, CliError, Command, CommandIo, CommandType, HmacSession, PipelineObject,
+    key, parse_args, CliError, Command, CommandIo, CommandType, HmacSession, PipelineEntry,
     PolicySession, TpmDevice,
 };
 use lexopt::prelude::*;
@@ -104,13 +104,13 @@ impl Command for StartSession {
         let algorithm = key::tpm_alg_id_to_str(auth_hash).to_string();
 
         let session_obj = if self.session_type == crate::cli::SessionType::Policy {
-            PipelineObject::PolicySession(PolicySession {
+            PipelineEntry::PolicySession(PolicySession {
                 context: format!("tpm://{handle:#010x}"),
                 algorithm,
                 digest: hex::encode(vec![0; digest_len]),
             })
         } else {
-            PipelineObject::HmacSession(HmacSession {
+            PipelineEntry::HmacSession(HmacSession {
                 context: format!("tpm://{handle:#010x}"),
                 algorithm,
             })

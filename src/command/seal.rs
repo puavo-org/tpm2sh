@@ -7,7 +7,7 @@ use crate::{
     cli::{Commands, Seal},
     get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, CommandIo, CommandType, Key, PipelineObject, TpmDevice,
+    CliError, Command, CommandIo, CommandType, Key, PipelineEntry, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -169,7 +169,7 @@ impl Command for Seal {
             private: format!("data://base64,{}", base64_engine.encode(priv_bytes)),
         };
 
-        io.push_object(PipelineObject::Key(new_key_obj));
+        io.push_object(PipelineEntry::Key(new_key_obj));
         Ok(())
     }
 }

@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
     get_auth_sessions, parse_args, parse_tpm_handle_from_uri, util, Alg, AlgInfo, CliError,
-    Command, CommandIo, CommandType, PipelineObject, ScopedHandle, Tpm, TpmDevice,
+    Command, CommandIo, CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -229,7 +229,7 @@ impl Command for CreatePrimary {
             }
         };
 
-        io.push_object(PipelineObject::Tpm(final_object));
+        io.push_object(PipelineEntry::Tpm(final_object));
         Ok(())
     }
 }

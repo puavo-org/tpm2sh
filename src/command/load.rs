@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Load},
     get_auth_sessions, parse_args, resolve_uri_to_bytes, util, CliError, Command, CommandIo,
-    CommandType, PipelineObject, ScopedHandle, Tpm, TpmDevice,
+    CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -113,7 +113,7 @@ impl Command for Load {
             parent: Some(parent_obj.context),
         };
 
-        io.push_object(PipelineObject::Tpm(new_tpm_obj));
+        io.push_object(PipelineEntry::Tpm(new_tpm_obj));
         Ok(())
     }
 }

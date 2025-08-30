@@ -4,7 +4,7 @@
 
 use crate::{
     parse_tpm_handle_from_uri, resolve_uri_to_bytes,
-    schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineObject, PolicySession, Tpm},
+    schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineEntry, PolicySession, Tpm},
     CliError, TpmDevice, POOL,
 };
 use log::warn;
@@ -99,8 +99,8 @@ fn stdin_ready() -> Result<bool, CliError> {
 pub struct CommandIo<R: Read, W: Write> {
     reader: R,
     writer: W,
-    input_objects: Vec<PipelineObject>,
-    output_objects: Vec<PipelineObject>,
+    input_objects: Vec<PipelineEntry>,
+    output_objects: Vec<PipelineEntry>,
     hydrated: bool,
     is_reader_tty: bool,
 }
@@ -124,7 +124,7 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     }
 
     /// Adds an object to be written to the output stream upon finalization.
-    pub fn push_object(&mut self, obj: PipelineObject) {
+    pub fn push_object(&mut self, obj: PipelineEntry) {
         self.output_objects.push(obj);
     }
 
@@ -164,7 +164,7 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     /// # Errors
     ///
     /// Returns a `CliError::Execution` if the pipeline is empty.
-    pub fn get_active_object(&mut self) -> Result<&PipelineObject, CliError> {
+    pub fn get_active_object(&mut self) -> Result<&PipelineEntry, CliError> {
         self.hydrate()?;
         self.input_objects.last().ok_or_else(|| {
             CliError::Execution("Required object not found in input pipeline".to_string())
@@ -176,7 +176,7 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     /// # Errors
     ///
     /// Returns a `CliError::Execution` if the pipeline is empty.
-    pub fn pop_active_object(&mut self) -> Result<PipelineObject, CliError> {
+    pub fn pop_active_object(&mut self) -> Result<PipelineEntry, CliError> {
         self.hydrate()?;
         self.input_objects.pop().ok_or_else(|| {
             CliError::Execution("Required object not found in input pipeline".to_string())
@@ -284,24 +284,24 @@ macro_rules! command_pop {
     };
 }
 
-command_pop!(pop_tpm, PipelineObject::Tpm, Tpm, "tpm");
-command_pop!(pop_key, PipelineObject::Key, Key, "key");
-command_pop!(pop_data, PipelineObject::Data, Data, "data");
+command_pop!(pop_tpm, PipelineEntry::Tpm, Tpm, "tpm");
+command_pop!(pop_key, PipelineEntry::Key, Key, "key");
+command_pop!(pop_data, PipelineEntry::Data, Data, "data");
 command_pop!(
     pop_pcr_values,
-    PipelineObject::PcrValues,
+    PipelineEntry::PcrValues,
     PcrValues,
     "pcr-values"
 );
 command_pop!(
     pop_hmac_session,
-    PipelineObject::HmacSession,
+    PipelineEntry::HmacSession,
     HmacSession,
     "hmac-session"
 );
 command_pop!(
     pop_policy_session,
-    PipelineObject::PolicySession,
+    PipelineEntry::PolicySession,
     PolicySession,
     "policy-session"
 );

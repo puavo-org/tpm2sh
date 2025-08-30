@@ -7,7 +7,7 @@ use crate::{
     cli::{Commands, Import},
     crypto_kdfa, crypto_make_name, get_auth_sessions, parse_args, resolve_uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, CommandIo, CommandType, Key, PipelineObject, PrivateKey, TpmDevice,
+    CliError, Command, CommandIo, CommandType, Key, PipelineEntry, PrivateKey, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -495,7 +495,7 @@ impl Command for Import {
             private: format!("data://base64,{}", base64_engine.encode(priv_key_bytes)),
         };
 
-        io.push_object(PipelineObject::Key(new_key));
+        io.push_object(PipelineEntry::Key(new_key));
         Ok(())
     }
 }

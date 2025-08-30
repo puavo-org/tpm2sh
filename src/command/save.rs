@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Save},
     get_auth_sessions, parse_args, parse_tpm_handle_from_uri, CliError, Command, CommandIo,
-    CommandType, PipelineObject, Tpm, TpmDevice,
+    CommandType, PipelineEntry, Tpm, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -114,7 +114,7 @@ impl Command for Save {
             parent: object_to_save.parent,
         };
 
-        io.push_object(PipelineObject::Tpm(persistent_tpm_object));
+        io.push_object(PipelineEntry::Tpm(persistent_tpm_object));
         Ok(())
     }
 }

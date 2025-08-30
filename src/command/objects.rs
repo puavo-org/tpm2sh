@@ -4,7 +4,7 @@
 use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Objects},
-    parse_args, CliError, Command, CommandIo, CommandType, PipelineObject, Tpm, TpmDevice,
+    parse_args, CliError, Command, CommandIo, CommandType, PipelineEntry, Tpm, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -58,7 +58,7 @@ impl Command for Objects {
                 context: format!("tpm://{handle:#010x}"),
                 parent: None,
             };
-            io.push_object(PipelineObject::Tpm(tpm_obj));
+            io.push_object(PipelineEntry::Tpm(tpm_obj));
         }
 
         let persistent_handles = locked_device.get_all_handles(TpmRh::PersistentFirst)?;
@@ -67,7 +67,7 @@ impl Command for Objects {
                 context: format!("tpm://{handle:#010x}"),
                 parent: None,
             };
-            io.push_object(PipelineObject::Tpm(tpm_obj));
+            io.push_object(PipelineEntry::Tpm(tpm_obj));
         }
 
         Ok(())

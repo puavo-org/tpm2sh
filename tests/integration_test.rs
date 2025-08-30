@@ -3,7 +3,7 @@
 
 use cli::{
     cli::{Algorithms, Commands, CreatePrimary, Import, Objects},
-    schema::{Key, Pipeline, PipelineObject},
+    schema::{Key, Pipeline, PipelineEntry},
     CliError, Command, CommandIo, TpmDevice, LOG_FORMAT,
 };
 
@@ -138,7 +138,7 @@ fn test_subcommand_objects(tpm_device: TestFixture) {
         .objects
         .iter()
         .filter_map(|obj| {
-            if let PipelineObject::Tpm(tpm) = obj {
+            if let PipelineEntry::Tpm(tpm) = obj {
                 tpm.context
                     .strip_prefix("tpm://0x")
                     .and_then(|hex| u32::from_str_radix(hex, 16).ok())
@@ -164,7 +164,7 @@ fn test_subcommand_import(tpm_device: TestFixture) {
         .objects
         .into_iter()
         .find_map(|obj| match obj {
-            PipelineObject::Tpm(tpm) => Some(tpm),
+            PipelineEntry::Tpm(tpm) => Some(tpm),
             _ => None,
         })
         .expect("TPM2_CreatePrimary failed");
@@ -175,7 +175,7 @@ fn test_subcommand_import(tpm_device: TestFixture) {
     std::fs::write(&key_path, pem_doc.as_bytes()).unwrap();
     let input_pipeline = Pipeline {
         version: 1,
-        objects: vec![PipelineObject::Tpm(parent_obj)],
+        objects: vec![PipelineEntry::Tpm(parent_obj)],
     };
     let input_json = serde_json::to_string(&input_pipeline).unwrap();
     let import_cmd = Commands::Import(Import {
@@ -193,13 +193,13 @@ fn test_subcommand_import(tpm_device: TestFixture) {
     let key_count = output_pipeline
         .objects
         .iter()
-        .filter(|o| matches!(o, PipelineObject::Key(_)))
+        .filter(|o| matches!(o, PipelineEntry::Key(_)))
         .count();
     assert_eq!(key_count, 1, "The number of objects must be one");
     assert!(
         matches!(
             output_pipeline.objects.last(),
-            Some(PipelineObject::Key(Key { .. }))
+            Some(PipelineEntry::Key(Key { .. }))
         ),
         "The last object must be the imported key"
     );

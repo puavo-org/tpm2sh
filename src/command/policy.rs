@@ -5,7 +5,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
     get_pcr_count, key, parse_args, parse_pcr_selection, parse_tpm_handle_from_uri, CliError,
-    Command, CommandIo, CommandType, PipelineObject, PolicySession, TpmDevice,
+    Command, CommandIo, CommandType, PipelineEntry, PolicySession, TpmDevice,
 };
 use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
@@ -357,7 +357,7 @@ impl Command for Policy {
             flush_session(&mut chip, session_handle)?;
             writeln!(io.writer(), "{}", session_obj.digest)?;
         } else {
-            io.push_object(PipelineObject::PolicySession(session_obj));
+            io.push_object(PipelineEntry::PolicySession(session_obj));
         }
 
         Ok(())

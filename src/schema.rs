@@ -9,12 +9,12 @@ use tpm2_protocol::data::{TpmtPublic, TpmuPublicParms};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Pipeline {
     pub version: u32,
-    pub objects: Vec<PipelineObject>,
+    pub objects: Vec<PipelineEntry>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
-pub enum PipelineObject {
+pub enum PipelineEntry {
     #[serde(rename = "tpm")]
     Tpm(Tpm),
     #[serde(rename = "key")]
@@ -29,7 +29,7 @@ pub enum PipelineObject {
     PolicySession(PolicySession),
 }
 
-impl PipelineObject {
+impl PipelineEntry {
     /// Returns a reference to the inner `Tpm` if the variant is `Tpm`, else `None`.
     #[must_use]
     pub fn as_tpm(&self) -> Option<&Tpm> {

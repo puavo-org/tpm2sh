@@ -6,7 +6,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
     parse_args, resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType, Key,
-    PipelineObject, TpmDevice, TpmKey,
+    PipelineEntry, TpmDevice, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -112,7 +112,7 @@ impl Command for Convert {
                     public: format!("data://base64,{}", base64_engine.encode(&tpm_key.pub_key)),
                     private: format!("data://base64,{}", base64_engine.encode(&tpm_key.priv_key)),
                 };
-                io.push_object(PipelineObject::Key(key_obj));
+                io.push_object(PipelineEntry::Key(key_obj));
             }
             KeyFormat::Pem => {
                 let pem_string = tpm_key.to_pem()?;

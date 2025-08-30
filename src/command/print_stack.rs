@@ -5,7 +5,7 @@ use crate::{
     arg_parser::{format_subcommand_help, CommandLineOption},
     cli::{Commands, PrintStack},
     parse_args,
-    schema::{Key, PipelineObject, PublicArea},
+    schema::{Key, PipelineEntry, PublicArea},
     CliError, Command, CommandIo, CommandType, TpmDevice,
 };
 use std::io::{Read, Write};
@@ -72,12 +72,12 @@ impl Command for PrintStack {
 }
 
 /// Helper function to print a detailed summary of a pipeline object.
-fn pretty_print_object<W: Write>(obj: &PipelineObject, writer: &mut W) -> Result<(), CliError> {
+fn pretty_print_object<W: Write>(obj: &PipelineEntry, writer: &mut W) -> Result<(), CliError> {
     let json_val = serde_json::to_value(obj)?;
     let pretty_json = serde_json::to_string_pretty(&json_val)?;
     writeln!(writer, "{pretty_json}")?;
 
-    if let PipelineObject::Key(key) = obj {
+    if let PipelineEntry::Key(key) = obj {
         writeln!(writer, "  Decoded Public Area:")?;
         print_decoded_public_area(key, writer)?;
     }

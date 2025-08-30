@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::{CliError, PipelineObject};
+use crate::{CliError, PipelineEntry};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::path::Path;
 
@@ -14,7 +14,7 @@ use std::path::Path;
 /// or a pipeline index is out of bounds.
 pub fn resolve_uri_to_bytes(
     uri_str: &str,
-    pipeline_objects: &[PipelineObject],
+    pipeline_objects: &[PipelineEntry],
 ) -> Result<Vec<u8>, CliError> {
     if let Some(path) = uri_str.strip_prefix("file://") {
         std::fs::read(Path::new(path)).map_err(|e| CliError::File(path.to_string(), e))
