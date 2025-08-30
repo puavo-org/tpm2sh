@@ -7,7 +7,11 @@ use log::{trace, warn};
 use std::{
     fmt::Debug,
     io::{self, IsTerminal, Read, Write},
-    sync::mpsc::{self, RecvTimeoutError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, RecvTimeoutError},
+        Arc,
+    },
     time::Duration,
 };
 use tpm2_protocol::{
@@ -68,9 +72,12 @@ impl TpmDevice {
         let command_bytes = &command_buf[..len];
 
         let (tx, rx) = mpsc::channel::<()>();
+        let spinner_started = Arc::new(AtomicBool::new(false));
         if std::io::stderr().is_terminal() && C::COMMAND != data::TpmCc::FlushContext {
+            let spinner_started = spinner_started.clone();
             POOL.execute(move || {
                 if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
+                    spinner_started.store(true, Ordering::Relaxed);
                     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
                     let message = "Waiting for TPM...";
                     let mut stderr = io::stderr();
@@ -87,10 +94,6 @@ impl TpmDevice {
                         let _ = stderr.flush();
                         i += 1;
                     }
-
-                    let final_message = "✔ TPM operation complete.";
-                    let _ = write!(stderr, "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h");
-                    let _ = stderr.flush();
                 }
             });
         }
@@ -129,6 +132,13 @@ impl TpmDevice {
         self.transport.read_exact(&mut resp_buf[header.len()..])?;
 
         drop(tx);
+
+        if spinner_started.load(Ordering::Relaxed) {
+            let mut stderr = io::stderr();
+            let final_message = "✔ TPM operation complete.";
+            let _ = write!(stderr, "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h");
+            let _ = stderr.flush();
+        }
 
         let result = tpm2_protocol::message::tpm_parse_response(C::COMMAND, &resp_buf)?;
 
