@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{get_log_format, pretty_printer::PrettyTrace, CliError, POOL};
+use crate::{get_log_format, print::TpmPrint, CliError, POOL};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -51,7 +51,7 @@ impl TpmDevice {
         sessions: &[tpm2_protocol::data::TpmsAuthCommand],
     ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), CliError>
     where
-        C: tpm2_protocol::message::TpmHeaderCommand + PrettyTrace,
+        C: tpm2_protocol::message::TpmHeaderCommand + TpmPrint,
     {
         let log_format = get_log_format();
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
@@ -98,7 +98,7 @@ impl TpmDevice {
         match log_format {
             crate::cli::LogFormat::Pretty => {
                 trace!(target: "cli::device", "{}", C::COMMAND);
-                command.pretty_trace("", 1);
+                command.print("", 1);
             }
             crate::cli::LogFormat::Plain => {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
@@ -136,7 +136,7 @@ impl TpmDevice {
             Ok((rc, response_body, _)) => match log_format {
                 crate::cli::LogFormat::Pretty => {
                     trace!(target: "cli::device", "Response (rc={rc})");
-                    response_body.pretty_trace("", 1);
+                    response_body.print("", 1);
                 }
                 crate::cli::LogFormat::Plain => {
                     trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
