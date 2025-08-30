@@ -22,7 +22,7 @@ const ABOUT: &str = "Deletes a transient or persistent object";
 const USAGE: &str = "tpm2sh delete [OPTIONS] [HANDLE_URI]";
 const ARGS: &[CommandLineArgument] = &[(
     "HANDLE_URI",
-    "URI of the object to delete (e.g. 'tpm://0x80000001'). If omitted, uses active object.",
+    "URI of the object to delete (e.g. 'tpm://0x40000001'). If omitted, uses active object.",
 )];
 const OPTIONS: &[CommandLineOption] = &[
     (None, "--password", "<PASSWORD>", "Authorization value"),

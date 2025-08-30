@@ -6,14 +6,14 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
-    error::ParseError,
     key::TpmKey,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
     resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use pkcs8::{der::asn1::OctetString, ObjectIdentifier};
+use log::debug;
+use pkcs8::der::asn1::OctetString;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data, TpmParse};
@@ -36,6 +36,12 @@ const OPTIONS: &[CommandLineOption] = &[
         "--to",
         "<FORMAT>",
         "Output format [possible: json, pem, der]",
+    ),
+    (
+        None,
+        "--parent",
+        "<HANDLE_URI>",
+        "URI of the parent object (e.g., 'tpm://0x40000001')",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
@@ -60,6 +66,9 @@ impl Command for Convert {
             }
             Long("to") => {
                 args.to = parser.value()?.string()?.parse()?;
+            }
+            Long("parent") => {
+                args.parent_uri = Some(parser.value()?.string()?);
             }
             Value(val) if args.input_uri.is_none() => {
                 args.input_uri = Some(val.string()?);
@@ -99,9 +108,13 @@ impl Command for Convert {
                 let private_bytes = resolve_uri_to_bytes(&key_obj.private, &[])?;
 
                 let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
-                let oid = ObjectIdentifier::from_arcs([2, 23, 133, 10, 1, 3])
-                    .map_err(|e| ParseError::Custom(format!("OID creation error: {e:?}")))?;
-                let parent_handle = crate::parse_tpm_handle_from_uri("tpm://0x40000001")?;
+                let oid = crate::crypto::ID_LOADABLE_KEY;
+                let parent_handle = if let Some(uri) = &self.parent_uri {
+                    crate::parse_tpm_handle_from_uri(uri)?
+                } else {
+                    debug!(target: "cli::convert", "No parent URI provided, defaulting to Owner hierarchy (0x40000001)");
+                    data::TpmRh::Owner as u32
+                };
 
                 TpmKey {
                     oid,

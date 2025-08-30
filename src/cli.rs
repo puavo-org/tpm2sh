@@ -347,6 +347,7 @@ pub struct Convert {
     pub from: KeyFormat,
     pub to: KeyFormat,
     pub input_uri: Option<String>,
+    pub parent_uri: Option<String>,
 }
 
 #[derive(Debug, Default)]

@@ -25,8 +25,9 @@ use tpm2_protocol::data::{
     TpmtSymDefObject, TpmuPublicId, TpmuPublicParms,
 };
 
-pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
-pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
+pub const ID_LOADABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.3");
+pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.4");
+pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.5");
 pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 
 /// Computes an HMAC digest over a series of data chunks.
@@ -162,7 +163,7 @@ impl Clone for PrivateKey {
     fn clone(&self) -> Self {
         match self {
             Self::Rsa(key) => Self::Rsa(key.clone()),
-            Self::Ecc(key) => Self::Ecc(key.clone())
+            Self::Ecc(key) => Self::Ecc(key.clone()),
         }
     }
 }
