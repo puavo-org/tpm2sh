@@ -217,7 +217,7 @@ fn print_usage() {
     println!("{output}");
 }
 
-fn print_main_help() {
+pub fn print_main_help() {
     print_usage();
     let mut output = "\nSUBCOMMANDS:\n".to_string();
     for cmd in SUBCOMMANDS {
@@ -270,8 +270,7 @@ pub fn parse_cli() -> Result<Option<Cli>, CliError> {
     while let Some(arg) = parser.next()? {
         match arg {
             Short('h') | Long("help") => {
-                print_main_help();
-                return Ok(None);
+                return Err(CliError::Help);
             }
             Short('V') | Long("version") => {
                 print_version();

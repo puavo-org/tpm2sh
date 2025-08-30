@@ -103,8 +103,14 @@ pub trait Command {
 ///
 /// Returns a `CliError` if opening the device, or executing the command fails.
 pub fn execute_cli() -> Result<(), CliError> {
-    let Some(cli) = parse_cli()? else {
-        return Ok(());
+    let cli = match parse_cli() {
+        Ok(Some(cli)) => cli,
+        Ok(None) => return Ok(()),
+        Err(CliError::Help) => {
+            crate::arguments::print_main_help();
+            return Err(CliError::Help);
+        }
+        Err(e) => return Err(e),
     };
 
     if let Some(command) = cli.command {
