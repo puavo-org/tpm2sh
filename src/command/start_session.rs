@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, StartSession},
-    key, CliError, Command, CommandIo, CommandType, HmacSession, PipelineEntry, PolicySession,
-    TpmDevice,
+    key,
+    pipeline::{CommandIo, Entry as PipelineEntry, HmacSession, PolicySession},
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};

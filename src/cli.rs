@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{CliError, Command, CommandIo, CommandType, TpmDevice};
+use crate::{CliError, Command, CommandType, TpmDevice};
 use std::{
     io::{Read, Write},
     str::FromStr,
@@ -230,7 +230,7 @@ impl Command for Commands {
 
     fn run<R: Read, W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
+        io: &mut crate::pipeline::CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), crate::CliError> {
         match self {

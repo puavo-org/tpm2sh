@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device, key::tpm_alg_id_to_str, schema, CliError, TpmDevice};
+use crate::{device, key::tpm_alg_id_to_str, pipeline, CliError, TpmDevice};
 use pest::Parser as PestParser;
 use pest_derive::Parser;
 use std::collections::BTreeMap;
@@ -40,8 +40,8 @@ pub(crate) fn get_pcr_count(chip: &mut TpmDevice) -> Result<usize, CliError> {
 /// Converts a `TpmPcrReadResponse` to the structured `PcrValues` format.
 pub(crate) fn pcr_response_to_output(
     resp: &message::TpmPcrReadResponse,
-) -> Result<schema::PcrValues, CliError> {
-    let mut pcr_output = schema::PcrValues {
+) -> Result<pipeline::PcrValues, CliError> {
+    let mut pcr_output = pipeline::PcrValues {
         update: resp.pcr_update_counter,
         banks: BTreeMap::new(),
     };
@@ -73,7 +73,7 @@ pub(crate) fn pcr_response_to_output(
 
 /// Converts a `PcrValues` object into a `TpmlPcrSelection` list.
 pub(crate) fn pcr_values_to_selection(
-    pcr_values: &schema::PcrValues,
+    pcr_values: &pipeline::PcrValues,
     pcr_count: usize,
 ) -> Result<data::TpmlPcrSelection, CliError> {
     let mut list = data::TpmlPcrSelection::new();

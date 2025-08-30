@@ -3,9 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    parse_tpm_handle_from_uri, resolve_uri_to_bytes,
-    schema::{Data, HmacSession, Key, PcrValues, Pipeline, PipelineEntry, PolicySession, Tpm},
-    CliError, TpmDevice, POOL,
+    parse_tpm_handle_from_uri,
+    pipeline::{
+        Data, Entry as PipelineEntry, HmacSession, Key, PcrValues, Pipeline, PolicySession, Tpm,
+    },
+    resolve_uri_to_bytes, CliError, TpmDevice, POOL,
 };
 use log::warn;
 use polling::{Event, Events, Poller};

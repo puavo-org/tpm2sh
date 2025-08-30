@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
-    get_pcr_count, parse_pcr_selection, pcr_response_to_output, CliError, Command, CommandIo,
-    CommandType, PipelineEntry, TpmDevice,
+    get_pcr_count, parse_pcr_selection, pcr_response_to_output,
+    pipeline::{CommandIo, Entry as PipelineEntry},
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};

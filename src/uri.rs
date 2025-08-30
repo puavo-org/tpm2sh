@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::{CliError, PipelineEntry};
+use crate::{pipeline::Entry as PipelineEntry, CliError};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::path::Path;
 
-/// Resolves a URI string into a raw byte vector.
-/// `pipe://` URIs are resolved against the provided pipeline objects.
+/// Resolves a URI string into bytes. `pipe://` URIs contain an index that point
+/// to a `PipelineEntry` to be consumed.
 ///
 /// # Errors
 ///
-/// Returns a `CliError` if the URI is malformed, a file cannot be read,
-/// or a pipeline index is out of bounds.
+/// Returns a `CliError` if the URI is malformed, file cannot be read, or a
+/// pipeline index is out of bounds.
 pub fn resolve_uri_to_bytes(
     uri_str: &str,
     pipeline_objects: &[PipelineEntry],

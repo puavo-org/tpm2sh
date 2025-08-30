@@ -6,8 +6,8 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Convert, KeyFormat},
-    resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType, Key, PipelineEntry,
-    TpmDevice, TpmKey,
+    pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
+    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice, TpmKey,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -91,7 +91,7 @@ impl Command for Convert {
 
         let tpm_key = match self.from {
             KeyFormat::Json => {
-                let key_obj: Key = serde_json::from_slice(&input_bytes)?;
+                let key_obj: PipelineKey = serde_json::from_slice(&input_bytes)?;
                 let public_bytes = resolve_uri_to_bytes(&key_obj.public, &[])?;
                 let private_bytes = resolve_uri_to_bytes(&key_obj.private, &[])?;
 
@@ -109,7 +109,7 @@ impl Command for Convert {
 
         match self.to {
             KeyFormat::Json => {
-                let key_obj = Key {
+                let key_obj = PipelineKey {
                     public: format!("data://base64,{}", base64_engine.encode(&tpm_key.pub_key)),
                     private: format!("data://base64,{}", base64_engine.encode(&tpm_key.priv_key)),
                 };

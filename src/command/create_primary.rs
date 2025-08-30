@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, CreatePrimary},
-    get_auth_sessions, parse_tpm_handle_from_uri, util, Alg, AlgInfo, CliError, Command, CommandIo,
-    CommandType, PipelineEntry, ScopedHandle, Tpm, TpmDevice,
+    get_auth_sessions, parse_tpm_handle_from_uri,
+    pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
+    util, Alg, AlgInfo, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -209,7 +210,7 @@ impl Command for CreatePrimary {
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-            Tpm {
+            PipelineTpm {
                 context: format!("tpm://{persistent_handle:#010x}"),
                 parent: None,
             }
@@ -224,7 +225,7 @@ impl Command for CreatePrimary {
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             let context_bytes = util::build_to_vec(&save_resp.context)?;
 
-            Tpm {
+            PipelineTpm {
                 context: format!("data://base64,{}", base64_engine.encode(context_bytes)),
                 parent: None,
             }

@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Load},
-    get_auth_sessions, resolve_uri_to_bytes, util, CliError, Command, CommandIo, CommandType,
-    PipelineEntry, ScopedHandle, Tpm, TpmDevice,
+    get_auth_sessions,
+    pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
+    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -109,7 +110,7 @@ impl Command for Load {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let context_bytes = util::build_to_vec(&save_resp.context)?;
 
-        let new_tpm_obj = Tpm {
+        let new_tpm_obj = PipelineTpm {
             context: format!("data://base64,{}", base64_engine.encode(context_bytes)),
             parent: Some(parent_obj.context),
         };

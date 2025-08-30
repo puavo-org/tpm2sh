@@ -3,8 +3,8 @@
 
 use cli::{
     cli::{Algorithms, Commands, CreatePrimary, Import, Objects},
-    schema::{Key, Pipeline, PipelineEntry},
-    CliError, Command, CommandIo, TpmDevice, LOG_FORMAT,
+    pipeline::{CommandIo, Entry as PipelineEntry, Key, Pipeline},
+    CliError, Command, TpmDevice, LOG_FORMAT,
 };
 
 use std::{

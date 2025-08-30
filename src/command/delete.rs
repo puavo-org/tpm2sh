@@ -5,8 +5,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Delete},
-    get_auth_sessions, parse_tpm_handle_from_uri, CliError, Command, CommandIo, CommandType,
-    TpmDevice,
+    get_auth_sessions, parse_tpm_handle_from_uri,
+    pipeline::CommandIo,
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};

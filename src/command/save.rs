@@ -6,8 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, Save},
-    get_auth_sessions, parse_tpm_handle_from_uri, CliError, Command, CommandIo, CommandType,
-    PipelineEntry, Tpm, TpmDevice,
+    get_auth_sessions, parse_tpm_handle_from_uri,
+    pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};
@@ -110,12 +111,12 @@ impl Command for Save {
         resp.EvictControl()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-        let persistent_tpm_object = Tpm {
+        let pipeline_tpm = PipelineTpm {
             context: format!("tpm://{persistent_handle:#010x}"),
             parent: object_to_save.parent,
         };
 
-        io.push_object(PipelineEntry::Tpm(persistent_tpm_object));
+        io.push_object(PipelineEntry::Tpm(pipeline_tpm));
         Ok(())
     }
 }

@@ -6,9 +6,11 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    crypto_kdfa, crypto_make_name, get_auth_sessions, resolve_uri_to_bytes,
+    crypto_kdfa, crypto_make_name, get_auth_sessions,
+    pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
+    resolve_uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, CommandIo, CommandType, Key, PipelineEntry, PrivateKey, TpmDevice,
+    CliError, Command, CommandType, PrivateKey, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -491,7 +493,7 @@ impl Command for Import {
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
 
-        let new_key = Key {
+        let new_key = PipelineKey {
             public: format!("data://base64,{}", base64_engine.encode(pub_key_bytes)),
             private: format!("data://base64,{}", base64_engine.encode(priv_key_bytes)),
         };

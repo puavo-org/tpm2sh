@@ -8,36 +8,35 @@
 pub mod arguments;
 pub mod cli;
 pub mod command;
-pub mod command_io;
 pub mod crypto;
 pub mod device;
 pub mod error;
 pub mod key;
 pub mod pcr;
+pub mod pipeline;
 pub mod print;
-pub mod schema;
 pub mod session;
 pub mod uri;
 pub mod util;
 
 pub use self::arguments::parse_cli;
-pub use self::command_io::{CommandIo, ScopedHandle};
 pub use self::crypto::*;
 pub use self::device::*;
 pub use self::error::CliError;
 pub use self::key::*;
 pub use self::pcr::*;
 pub use self::print::TpmPrint;
-pub use self::schema::*;
 pub use self::session::*;
 pub use self::uri::*;
 pub use self::util::*;
-use once_cell::sync::{Lazy, OnceCell};
+
 use std::{
     fs::OpenOptions,
     io::{IsTerminal, Read, Write},
     sync::{Arc, Mutex},
 };
+
+use once_cell::sync::{Lazy, OnceCell};
 use threadpool::ThreadPool;
 
 pub static POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(4));
@@ -91,7 +90,7 @@ pub trait Command {
     /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
+        io: &mut pipeline::CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError>;
 }
@@ -122,7 +121,7 @@ pub fn execute_cli() -> Result<(), CliError> {
 
         let stdin = std::io::stdin();
         let is_tty = stdin.is_terminal();
-        let mut io = CommandIo::new(stdin, std::io::stdout(), is_tty);
+        let mut io = pipeline::CommandIo::new(stdin, std::io::stdout(), is_tty);
         let cmd_type = command.command_type();
         command.run(&mut io, device_arc)?;
 

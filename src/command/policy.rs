@@ -5,8 +5,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
-    get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri, CliError, Command,
-    CommandIo, CommandType, PipelineEntry, PolicySession, TpmDevice,
+    get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri,
+    pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
@@ -329,7 +330,7 @@ impl Command for Policy {
                         start_trial_session(&mut chip, cli::SessionType::Trial, hash_alg)?;
                     let handle_uri = format!("tpm://{trial_handle:#010x}");
                     Ok::<_, CliError>((
-                        PolicySession {
+                        PipelinePolicySession {
                             context: handle_uri,
                             algorithm: key::tpm_alg_id_to_str(hash_alg).to_string(),
                             digest: String::new(),

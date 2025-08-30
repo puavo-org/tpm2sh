@@ -5,8 +5,10 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, PrintStack},
-    schema::{Key, PipelineEntry, PublicArea},
-    CliError, Command, CommandIo, CommandType, TpmDevice,
+    pipeline::{
+        CommandIo, Entry as PipelineEntry, Key as PipelineKey, PublicArea as PipelinePublicArea,
+    },
+    CliError, Command, CommandType, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -86,11 +88,11 @@ fn pretty_print_object<W: Write>(obj: &PipelineEntry, writer: &mut W) -> Result<
 }
 
 /// Decodes and prints the public area of a key object.
-fn print_decoded_public_area<W: Write>(key: &Key, writer: &mut W) -> Result<(), CliError> {
+fn print_decoded_public_area<W: Write>(key: &PipelineKey, writer: &mut W) -> Result<(), CliError> {
     let pub_bytes = crate::resolve_uri_to_bytes(&key.public, &[])?;
     let (tpm_pub, _) = tpm2_protocol::data::Tpm2bPublic::parse(&pub_bytes)?;
 
-    let public_area = PublicArea::try_from(&tpm_pub.inner)?;
+    let public_area = PipelinePublicArea::try_from(&tpm_pub.inner)?;
     let pa_json = serde_json::to_string_pretty(&public_area)?;
 
     for line in pa_json.lines() {

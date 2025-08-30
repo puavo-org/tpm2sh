@@ -6,7 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PrintError},
-    parse_tpm_rc, CliError, Command, CommandIo, CommandType, TpmDevice,
+    parse_tpm_rc,
+    pipeline::CommandIo,
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};

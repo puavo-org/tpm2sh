@@ -6,7 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, ResetLock},
-    get_auth_sessions, CliError, Command, CommandIo, CommandType, TpmDevice,
+    get_auth_sessions,
+    pipeline::CommandIo,
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use std::io::{Read, Write};

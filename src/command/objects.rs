@@ -5,7 +5,8 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Objects},
-    CliError, Command, CommandIo, CommandType, PipelineEntry, Tpm, TpmDevice,
+    pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
+    CliError, Command, CommandType, TpmDevice,
 };
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
@@ -55,7 +56,7 @@ impl Command for Objects {
 
         let transient_handles = locked_device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
-            let tpm_obj = Tpm {
+            let tpm_obj = PipelineTpm {
                 context: format!("tpm://{handle:#010x}"),
                 parent: None,
             };
@@ -64,7 +65,7 @@ impl Command for Objects {
 
         let persistent_handles = locked_device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
-            let tpm_obj = Tpm {
+            let tpm_obj = PipelineTpm {
                 context: format!("tpm://{handle:#010x}"),
                 parent: None,
             };
