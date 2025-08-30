@@ -34,7 +34,7 @@ use tpm2_protocol::{
         TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
         TpmLoadResponse, TpmReadPublicCommand, TpmReadPublicResponse, TpmResponseBody,
     },
-    TpmBuffer, TpmErrorKind, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuffer, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 const KDF_DUPLICATE: &str = "DUPLICATE";
@@ -378,7 +378,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     };
 
     let parent_name_bytes = crypto_make_name(&parent_key.public)?;
-    let Ok((parent_name, _)) = Tpm2bName::parse(&parent_name_bytes) else {
+    let Ok(parent_name) = Tpm2bName::try_from(parent_name_bytes.as_slice()) else {
         return Err(TpmRc::from(TpmRcBase::Value));
     };
 
