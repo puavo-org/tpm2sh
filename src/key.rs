@@ -2,9 +2,8 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::CliError;
+use crate::{crypto_hmac, CliError};
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
-use hmac::{Hmac, Mac};
 use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
 use pkcs8::{
     der::{
@@ -18,7 +17,7 @@ use rsa::{
     traits::{PrivateKeyParts, PublicKeyParts},
     RsaPrivateKey,
 };
-use sha2::{Digest, Sha256, Sha384, Sha512};
+use sha2::Digest;
 use std::{cmp::Ordering, str::FromStr};
 use tpm2_protocol::data::{
     Tpm2bDigest, Tpm2bEccParameter, Tpm2bPublicKeyRsa, TpmAlgId, TpmCc, TpmEccCurve, TpmaObject,
@@ -484,37 +483,6 @@ impl TpmKey {
     }
 }
 
-fn compute_hmac(
-    auth_hash: TpmAlgId,
-    hmac_key: &[u8],
-    attributes: u8,
-    nonce_tpm: &[u8],
-    nonce_caller: &[u8],
-    cp_hash_payload: &[u8],
-) -> Result<Vec<u8>, CliError> {
-    macro_rules! hmac {
-        ($digest:ty) => {{
-            let cp_hash = <$digest as Digest>::digest(cp_hash_payload);
-            let mut mac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                .map_err(|e| CliError::Execution(format!("HMAC init error: {e}")))?;
-            mac.update(&cp_hash);
-            mac.update(nonce_tpm);
-            mac.update(nonce_caller);
-            mac.update(&[attributes]);
-            Ok(mac.finalize().into_bytes().to_vec())
-        }};
-    }
-
-    match auth_hash {
-        TpmAlgId::Sha256 => hmac!(Sha256),
-        TpmAlgId::Sha384 => hmac!(Sha384),
-        TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => Err(CliError::Execution(format!(
-            "unsupported session hash algorithm: {auth_hash}"
-        ))),
-    }
-}
-
 /// Computes the authorization HMAC for a command session.
 ///
 /// # Errors
@@ -538,14 +506,28 @@ pub fn create_auth(
         payload
     };
 
-    let hmac_bytes = compute_hmac(
+    let cp_hash = match session.auth_hash {
+        TpmAlgId::Sha256 => sha2::Sha256::digest(&cp_hash_payload).to_vec(),
+        TpmAlgId::Sha384 => sha2::Sha384::digest(&cp_hash_payload).to_vec(),
+        TpmAlgId::Sha512 => sha2::Sha512::digest(&cp_hash_payload).to_vec(),
+        alg => {
+            return Err(CliError::Execution(format!(
+                "unsupported session hash algorithm: {alg}"
+            )))
+        }
+    };
+
+    let hmac_bytes = crypto_hmac(
         session.auth_hash,
         &session.hmac_key,
-        session.attributes.bits(),
-        &session.nonce_tpm,
-        nonce_caller,
-        &cp_hash_payload,
-    )?;
+        &[
+            &cp_hash,
+            &session.nonce_tpm,
+            nonce_caller,
+            &[session.attributes.bits()],
+        ],
+    )
+    .map_err(CliError::TpmRc)?;
 
     Ok(TpmsAuthCommand {
         session_handle: session.handle,

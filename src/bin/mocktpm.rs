@@ -4,7 +4,7 @@
 #![allow(clippy::all)]
 #![allow(clippy::pedantic)]
 
-use cli::{crypto_kdfa, crypto_make_name};
+use cli::{crypto_hmac_verify, crypto_kdfa, crypto_make_name};
 
 use std::{
     collections::HashMap,
@@ -15,7 +15,6 @@ use std::{
     process::exit,
 };
 
-use hmac::Mac;
 use lexopt::prelude::*;
 use log::{error, info, warn};
 use rsa::{traits::PublicKeyParts, Oaep, RsaPrivateKey};
@@ -411,26 +410,12 @@ impl MockTpm {
 
         let (received_hmac, encrypted_sensitive) = cmd.duplicate.split_at(hash_len);
 
-        macro_rules! verify_hmac {
-            ($digest:ty) => {{
-                let mut integrity_mac =
-                    <hmac::Hmac<$digest> as hmac::Mac>::new_from_slice(&hmac_key).unwrap();
-                integrity_mac.update(encrypted_sensitive);
-                integrity_mac.update(&parent_name);
-                integrity_mac.verify_slice(received_hmac).is_ok()
-            }};
-        }
-
-        let hmac_ok = match parent_name_alg {
-            TpmAlgId::Sha256 => verify_hmac!(Sha256),
-            TpmAlgId::Sha384 => verify_hmac!(Sha384),
-            TpmAlgId::Sha512 => verify_hmac!(Sha512),
-            _ => false,
-        };
-
-        if !hmac_ok {
-            return Err(TpmRc::from(TpmRcBase::Integrity));
-        }
+        crypto_hmac_verify(
+            parent_name_alg,
+            &hmac_key,
+            &[encrypted_sensitive, &parent_name],
+            received_hmac,
+        )?;
 
         let resp = TpmImportResponse {
             out_private: Tpm2bPrivate::default(),

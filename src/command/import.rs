@@ -6,7 +6,7 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Commands, Import},
-    crypto_kdfa, crypto_make_name, get_auth_sessions,
+    crypto_hmac, crypto_kdfa, crypto_make_name, get_auth_sessions,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
     resolve_uri_to_bytes,
     util::build_to_vec,
@@ -16,7 +16,6 @@ use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
-use hmac::Mac;
 use lexopt::prelude::*;
 use num_traits::FromPrimitive;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
@@ -346,27 +345,8 @@ fn create_import_blob(
     let cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
     cipher.encrypt(&mut enc_data);
 
-    macro_rules! hmac {
-        ($digest:ty) => {{
-            let mut integrity_mac =
-                <hmac::Hmac<$digest> as hmac::Mac>::new_from_slice(&hmac_key)
-                    .map_err(|e| CliError::Execution(format!("HMAC init error: {e}")))?;
-            integrity_mac.update(&enc_data);
-            integrity_mac.update(parent_name);
-            integrity_mac.finalize().into_bytes().to_vec()
-        }};
-    }
-
-    let final_mac = match parent_name_alg {
-        TpmAlgId::Sha256 => hmac!(Sha256),
-        TpmAlgId::Sha384 => hmac!(Sha384),
-        TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => {
-            return Err(CliError::Execution(format!(
-                "unsupported hash algorithm for integrity HMAC: {parent_name_alg}"
-            )))
-        }
-    };
+    let final_mac = crypto_hmac(parent_name_alg, &hmac_key, &[&enc_data, parent_name])
+        .map_err(CliError::TpmRc)?;
 
     let duplicate_blob = {
         let mut duplicate_blob_buf = [0u8; TPM_MAX_COMMAND_SIZE];

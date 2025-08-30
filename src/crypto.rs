@@ -13,6 +13,63 @@ use tpm2_protocol::data::{TpmAlgId, TpmRc, TpmRcBase, TpmtPublic};
 pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.4");
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.1.5");
 
+/// Computes an HMAC digest over a series of data chunks.
+///
+/// # Errors
+///
+/// Returns a `TpmRc` error if the key is invalid or the algorithm is unsupported.
+pub fn crypto_hmac(alg: TpmAlgId, key: &[u8], data_chunks: &[&[u8]]) -> Result<Vec<u8>, TpmRc> {
+    macro_rules! hmac {
+        ($digest:ty) => {{
+            let mut mac = <Hmac<$digest> as Mac>::new_from_slice(key)
+                .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+            for chunk in data_chunks {
+                mac.update(chunk);
+            }
+            Ok(mac.finalize().into_bytes().to_vec())
+        }};
+    }
+
+    match alg {
+        TpmAlgId::Sha256 => hmac!(Sha256),
+        TpmAlgId::Sha384 => hmac!(Sha384),
+        TpmAlgId::Sha512 => hmac!(Sha512),
+        _ => Err(TpmRc::from(TpmRcBase::Hash)),
+    }
+}
+
+/// Verifies an HMAC signature over a series of data chunks.
+///
+/// # Errors
+///
+/// Returns a `TpmRc` error if the key is invalid, the algorithm is unsupported,
+/// or the signature does not match.
+pub fn crypto_hmac_verify(
+    alg: TpmAlgId,
+    key: &[u8],
+    data_chunks: &[&[u8]],
+    signature: &[u8],
+) -> Result<(), TpmRc> {
+    macro_rules! verify_hmac {
+        ($digest:ty) => {{
+            let mut mac = <Hmac<$digest> as Mac>::new_from_slice(key)
+                .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+            for chunk in data_chunks {
+                mac.update(chunk);
+            }
+            mac.verify_slice(signature)
+                .map_err(|_| TpmRc::from(TpmRcBase::Integrity))
+        }};
+    }
+
+    match alg {
+        TpmAlgId::Sha256 => verify_hmac!(Sha256),
+        TpmAlgId::Sha384 => verify_hmac!(Sha384),
+        TpmAlgId::Sha512 => verify_hmac!(Sha512),
+        _ => Err(TpmRc::from(TpmRcBase::Hash)),
+    }
+}
+
 /// Implements the `KDFa` key derivation function from the TPM specification.
 ///
 /// # Errors
@@ -34,34 +91,24 @@ pub fn crypto_kdfa(
         bytes
     };
 
-    macro_rules! hmac {
-        ($digest:ty) => {{
-            let mut counter: u32 = 1;
-            while key_stream.len() < key_bytes {
-                let mut hmac = <Hmac<$digest> as Mac>::new_from_slice(hmac_key)
-                    .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+    let mut counter: u32 = 1;
+    while key_stream.len() < key_bytes {
+        let counter_bytes = counter.to_be_bytes();
+        let key_bits_bytes = u32::from(key_bits).to_be_bytes();
+        let hmac_payload = [
+            counter_bytes.as_slice(),
+            label_bytes.as_slice(),
+            context_a,
+            context_b,
+            key_bits_bytes.as_slice(),
+        ];
 
-                hmac.update(&counter.to_be_bytes());
-                hmac.update(&label_bytes);
-                hmac.update(context_a);
-                hmac.update(context_b);
-                hmac.update(&u32::from(key_bits).to_be_bytes());
+        let result = crypto_hmac(auth_hash, hmac_key, &hmac_payload)?;
+        let remaining = key_bytes - key_stream.len();
+        let to_take = remaining.min(result.len());
+        key_stream.extend_from_slice(&result[..to_take]);
 
-                let result = hmac.finalize().into_bytes();
-                let remaining = key_bytes - key_stream.len();
-                let to_take = remaining.min(result.len());
-                key_stream.extend_from_slice(&result[..to_take]);
-
-                counter += 1;
-            }
-        }};
-    }
-
-    match auth_hash {
-        TpmAlgId::Sha256 => hmac!(Sha256),
-        TpmAlgId::Sha384 => hmac!(Sha384),
-        TpmAlgId::Sha512 => hmac!(Sha512),
-        _ => return Err(TpmRc::from(TpmRcBase::Hash)),
+        counter += 1;
     }
 
     Ok(key_stream)
