@@ -56,7 +56,7 @@ impl Command for ResetLock {
     /// Returns a `CliError` if the execution fails
     fn run<R: Read, W: Write>(
         &self,
-        _io: &mut CommandIo<R, W>,
+        io: &mut CommandIo<R, W>,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -75,7 +75,7 @@ impl Command for ResetLock {
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-        println!("Dictionary attack lockout has been reset.");
+        writeln!(io.writer(), "Dictionary attack lockout has been reset.")?;
         Ok(())
     }
 }

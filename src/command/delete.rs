@@ -98,7 +98,10 @@ impl Command for Delete {
             let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            println!("Deleted persistent handle {persistent_handle:#010x}");
+            writeln!(
+                io.writer(),
+                "Deleted persistent handle {persistent_handle:#010x}"
+            )?;
         } else if handle >= TpmRh::TransientFirst as u32 {
             let flush_handle = TpmTransient(handle);
             let flush_cmd = TpmFlushContextCommand {
@@ -107,7 +110,7 @@ impl Command for Delete {
             let (resp, _) = chip.execute(&flush_cmd, &[])?;
             resp.FlushContext()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            println!("Flushed transient handle {flush_handle:#010x}");
+            writeln!(io.writer(), "Flushed transient handle {flush_handle:#010x}")?;
         } else {
             return Err(CliError::InvalidHandle(format!(
                 "'{handle:#010x}' is not a transient or persistent handle"
