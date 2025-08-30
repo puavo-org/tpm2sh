@@ -198,17 +198,20 @@ impl Command for CreatePrimary {
         let object_handle = create_primary_resp.object_handle;
 
         let final_object = if let Some(uri) = &self.handle_uri {
+            let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
             let persistent_handle = TpmPersistent(parse_tpm_handle_from_uri(uri)?);
             let evict_cmd = TpmEvictControlCommand {
                 auth: (TpmRh::Owner as u32).into(),
-                object_handle: object_handle.0.into(),
+                object_handle: object_handle_guard.handle().0.into(),
                 persistent_handle,
             };
-            let evict_handles = [TpmRh::Owner as u32, object_handle.into()];
+            let evict_handles = [TpmRh::Owner as u32, object_handle_guard.handle().into()];
             let evict_sessions = get_auth_sessions(&evict_cmd, &evict_handles, None, None)?;
             let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+
+            std::mem::forget(object_handle_guard);
 
             PipelineTpm {
                 context: format!("tpm://{persistent_handle:#010x}"),
