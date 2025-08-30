@@ -11,6 +11,7 @@ use crate::{
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
+use pkcs8::{der::asn1::OctetString, ObjectIdentifier};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data, TpmParse};
@@ -96,11 +97,15 @@ impl Command for Convert {
                 let private_bytes = resolve_uri_to_bytes(&key_obj.private, &[])?;
 
                 let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
+                let oid = ObjectIdentifier::from_arcs([2, 23, 133, 10, 1, 3])
+                    .map_err(|e| CliError::Parse(format!("OID creation error: {e:?}")))?;
+                let parent_handle = crate::parse_tpm_handle_from_uri("tpm://0x40000001")?;
+
                 TpmKey {
-                    oid: vec![2, 23, 133, 10, 1, 3],
-                    parent: "tpm://0x40000001".to_string(),
-                    pub_key: util::build_to_vec(&public)?,
-                    priv_key: private_bytes,
+                    oid,
+                    parent: parent_handle,
+                    pub_key: OctetString::new(util::build_to_vec(&public)?)?,
+                    priv_key: OctetString::new(private_bytes)?,
                 }
             }
             KeyFormat::Pem => TpmKey::from_pem(&input_bytes)?,

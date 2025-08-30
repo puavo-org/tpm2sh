@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
@@ -218,17 +218,18 @@ pub fn enumerate_all() -> impl Iterator<Item = Alg> {
     rsa_iter.chain(ecc_iter).chain(keyedhash_iter)
 }
 
+/// A TPM key struct that is directly compatible with ASN.1 DER encoding.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TpmKeyAsn1 {
+pub struct TpmKey {
     pub oid: ObjectIdentifier,
     pub parent: u32,
     pub pub_key: OctetString,
     pub priv_key: OctetString,
 }
 
-impl Sequence<'_> for TpmKeyAsn1 {}
+impl Sequence<'_> for TpmKey {}
 
-impl<'a> DecodeValue<'a> for TpmKeyAsn1 {
+impl<'a> DecodeValue<'a> for TpmKey {
     fn decode_value<R: Reader<'a>>(reader: &mut R, _header: der::Header) -> der::Result<Self> {
         reader.sequence(|reader| {
             let oid = ObjectIdentifier::decode(reader)?;
@@ -245,7 +246,7 @@ impl<'a> DecodeValue<'a> for TpmKeyAsn1 {
     }
 }
 
-impl EncodeValue for TpmKeyAsn1 {
+impl EncodeValue for TpmKey {
     fn value_len(&self) -> der::Result<der::Length> {
         self.oid.encoded_len()?
             + self.parent.encoded_len()?
@@ -440,14 +441,6 @@ fn ec_oid_to_tpm_curve(any: &AnyRef) -> Result<TpmEccCurve, CliError> {
     }
 }
 
-/// TPM key ready for serialization or deserialization.
-pub struct TpmKey {
-    pub oid: Vec<u32>,
-    pub parent: String,
-    pub pub_key: Vec<u8>,
-    pub priv_key: Vec<u8>,
-}
-
 impl TpmKey {
     /// Serialize TPM key to PEM.
     ///
@@ -465,16 +458,7 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
     pub fn to_der(&self) -> Result<Vec<u8>, CliError> {
-        let asn1 = TpmKeyAsn1 {
-            oid: ObjectIdentifier::from_arcs(self.oid.iter().copied())
-                .map_err(|e| CliError::Parse(format!("OID encode error: {e:?}")))?,
-            parent: u32::from_str_radix(self.parent.trim_start_matches("0x"), 16)?,
-            pub_key: OctetString::new(self.pub_key.clone())?,
-            priv_key: OctetString::new(self.priv_key.clone())?,
-        };
-
-        asn1.to_der()
-            .map_err(|e| CliError::Parse(format!("DER encode error: {e}")))
+        Encode::to_der(self).map_err(|e| CliError::Parse(format!("DER encode error: {e}")))
     }
 
     /// Parse TPM key from PEM bytes.
@@ -496,14 +480,7 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the DER bytes cannot be parsed into a valid `TpmKeyAsn1` data.
     pub fn from_der(der_bytes: &[u8]) -> Result<Self, CliError> {
-        let asn1 = TpmKeyAsn1::from_der(der_bytes)?;
-
-        Ok(TpmKey {
-            oid: asn1.oid.arcs().collect(),
-            parent: format!("{:#010x}", asn1.parent),
-            pub_key: asn1.pub_key.as_bytes().to_vec(),
-            priv_key: asn1.priv_key.as_bytes().to_vec(),
-        })
+        Ok(Decode::from_der(der_bytes)?)
     }
 }
 
