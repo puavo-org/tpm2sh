@@ -5,9 +5,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, Delete},
-    parse_tpm_handle_from_uri,
     pipeline::CommandIo,
     session::get_sessions_from_args,
+    uri::uri_to_tpm_handle,
     CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
@@ -70,10 +70,10 @@ impl Command for Delete {
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let handle = if let Some(uri) = &self.handle_uri {
-            parse_tpm_handle_from_uri(uri)?
+            uri_to_tpm_handle(uri)?
         } else {
             let tpm_obj = io.pop_tpm()?;
-            parse_tpm_handle_from_uri(&tpm_obj.context)?
+            uri_to_tpm_handle(&tpm_obj.context)?
         };
 
         if handle >= TpmRh::PersistentFirst as u32 {

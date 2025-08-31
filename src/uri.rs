@@ -12,7 +12,7 @@ use std::path::Path;
 ///
 /// Returns a `CliError` if the URI is malformed, file cannot be read, or a
 /// pipeline index is out of bounds.
-pub fn resolve_uri_to_bytes(
+pub fn uri_to_bytes(
     uri_str: &str,
     pipeline_objects: &[PipelineEntry],
 ) -> Result<Vec<u8>, CliError> {
@@ -62,7 +62,7 @@ pub fn resolve_uri_to_bytes(
 /// # Errors
 ///
 /// Returns a `CliError` if the URI is malformed or the handle is not a valid hex u32.
-pub fn parse_tpm_handle_from_uri(uri_str: &str) -> Result<u32, CliError> {
+pub fn uri_to_tpm_handle(uri_str: &str) -> Result<u32, CliError> {
     if let Some(handle_str) = uri_str.strip_prefix("tpm://") {
         crate::util::parse_hex_u32(handle_str)
     } else {

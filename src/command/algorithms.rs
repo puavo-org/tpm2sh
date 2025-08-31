@@ -6,9 +6,10 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Algorithms, Cli, Commands},
-    enumerate_all,
+    device::TPM_CAP_PROPERTY_MAX,
+    key::enumerate_all,
     pipeline::CommandIo,
-    CliError, Command, CommandType, TpmDevice, TPM_CAP_PROPERTY_MAX,
+    CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
 use regex::Regex;

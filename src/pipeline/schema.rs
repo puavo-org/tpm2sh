@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::CliError;
-use serde::{Deserialize, Serialize};
+use crate::{
+    error::CliError,
+    key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
+};
 use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 use tpm2_protocol::data::{TpmtPublic, TpmuPublicParms};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -103,8 +107,8 @@ impl TryFrom<&TpmtPublic> for PublicArea {
     type Error = CliError;
 
     fn try_from(public: &TpmtPublic) -> Result<Self, Self::Error> {
-        let object_type = crate::key::tpm_alg_id_to_str(public.object_type).to_string();
-        let name_alg = crate::key::tpm_alg_id_to_str(public.name_alg).to_string();
+        let object_type = tpm_alg_id_to_str(public.object_type).to_string();
+        let name_alg = tpm_alg_id_to_str(public.name_alg).to_string();
         let attributes: Vec<String> = public
             .object_attributes
             .flag_names()
@@ -123,7 +127,7 @@ impl TryFrom<&TpmtPublic> for PublicArea {
             }
             TpmuPublicParms::Ecc(p) => serde_json::json!({
                 "ecc": {
-                    "curve": crate::key::tpm_ecc_curve_to_str(p.curve_id),
+                    "curve": tpm_ecc_curve_to_str(p.curve_id),
                 }
             }),
             TpmuPublicParms::KeyedHash(_) => serde_json::json!({"keyedhash": {}}),

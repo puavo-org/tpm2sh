@@ -6,10 +6,9 @@ use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PcrEvent},
-    parse_tpm_handle_from_uri,
     pipeline::CommandIo,
-    resolve_uri_to_bytes,
     session::get_sessions_from_args,
+    uri::{uri_to_bytes, uri_to_tpm_handle},
     CliError, Command, CommandType, TpmDevice,
 };
 
@@ -87,10 +86,10 @@ impl Command for PcrEvent {
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let pcr_handle = parse_tpm_handle_from_uri(&self.handle_uri)?;
+        let pcr_handle = uri_to_tpm_handle(&self.handle_uri)?;
         let handles = [pcr_handle];
 
-        let data_bytes = resolve_uri_to_bytes(&self.data_uri, &[])?;
+        let data_bytes = uri_to_bytes(&self.data_uri, &[])?;
         let event_data = Tpm2bEvent::try_from(data_bytes.as_slice())?;
         let command = TpmPcrEventCommand {
             pcr_handle,

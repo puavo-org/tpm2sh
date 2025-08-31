@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{CliError, Command, CommandType, TpmDevice};
+use crate::{error::CliError, key::Alg, pipeline::CommandIo, Command, CommandType, TpmDevice};
 use std::{
     io::{Read, Write},
     str::FromStr,
@@ -233,10 +233,10 @@ impl Command for Commands {
 
     fn run<R: Read, W: Write>(
         &self,
-        io: &mut crate::pipeline::CommandIo<R, W>,
+        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
-    ) -> Result<(), crate::CliError> {
+    ) -> Result<(), CliError> {
         match self {
             Self::Algorithms(args) => args.run(io, cli, device),
             Self::Convert(args) => args.run(io, cli, device),
@@ -267,7 +267,7 @@ pub struct PasswordArgs {
 #[derive(Debug, Default)]
 pub struct CreatePrimary {
     pub hierarchy: Hierarchy,
-    pub algorithm: crate::Alg,
+    pub algorithm: Alg,
     pub handle_uri: Option<String>,
 }
 

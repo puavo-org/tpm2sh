@@ -6,7 +6,7 @@ use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PcrRead},
-    get_pcr_count, parse_pcr_selection, pcr_response_to_output,
+    pcr::{get_pcr_count, parse_pcr_selection, pcr_response_to_output},
     pipeline::{CommandIo, Entry as PipelineEntry},
     CliError, Command, CommandType, TpmDevice,
 };

@@ -7,8 +7,8 @@ use crate::{
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Load},
     pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
-    resolve_uri_to_bytes,
     session::get_sessions_from_args,
+    uri::uri_to_bytes,
     util, CliError, Command, CommandType, TpmDevice,
 };
 
@@ -71,8 +71,8 @@ impl Command for Load {
         let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
-        let pub_bytes = resolve_uri_to_bytes(&key_to_load.public, &[])?;
-        let priv_bytes = resolve_uri_to_bytes(&key_to_load.private, &[])?;
+        let pub_bytes = uri_to_bytes(&key_to_load.public, &[])?;
+        let priv_bytes = uri_to_bytes(&key_to_load.private, &[])?;
 
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;

@@ -6,9 +6,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, Save},
-    parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
     session::get_sessions_from_args,
+    uri::uri_to_tpm_handle,
     CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
@@ -79,8 +79,7 @@ impl Command for Save {
         let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &object_to_save)?;
         let object_handle = object_handle_guard.handle();
 
-        let persistent_handle =
-            TpmPersistent(parse_tpm_handle_from_uri(self.to_uri.as_ref().unwrap())?);
+        let persistent_handle = TpmPersistent(uri_to_tpm_handle(self.to_uri.as_ref().unwrap())?);
         let auth_handle = TpmRh::Owner;
         let handles = [auth_handle as u32, object_handle.into()];
 

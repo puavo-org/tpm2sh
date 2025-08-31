@@ -5,11 +5,11 @@
 use crate::{
     cli::Cli,
     error::ParseError,
-    parse_tpm_handle_from_uri,
     pipeline::{
         Data, Entry as PipelineEntry, HmacSession, Key, PcrValues, Pipeline, PolicySession, Tpm,
     },
-    resolve_uri_to_bytes, CliError, TpmDevice,
+    uri::{uri_to_bytes, uri_to_tpm_handle},
+    CliError, TpmDevice,
 };
 use log::warn;
 use polling::{Event, Events, Poller};
@@ -285,10 +285,10 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     ) -> Result<ScopedHandle, CliError> {
         let uri = &tpm_obj.context;
         if uri.starts_with("tpm://") {
-            let handle = parse_tpm_handle_from_uri(uri)?;
+            let handle = uri_to_tpm_handle(uri)?;
             Ok(ScopedHandle::new(TpmTransient(handle), device_arc))
         } else if uri.starts_with("data://") {
-            let context_blob = resolve_uri_to_bytes(uri, &self.input_objects)?;
+            let context_blob = uri_to_bytes(uri, &self.input_objects)?;
             let (context, remainder) = TpmsContext::parse(&context_blob)?;
             if !remainder.is_empty() {
                 return Err(ParseError::Custom(

@@ -6,8 +6,7 @@
 #![deny(clippy::pedantic)]
 
 use crate::{
-    crypto::PrivateKey,
-    crypto_hmac_verify, crypto_kdfa, crypto_make_name,
+    crypto::{crypto_hmac_verify, crypto_kdfa, crypto_make_name, PrivateKey},
     device::TpmTransport,
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
 };

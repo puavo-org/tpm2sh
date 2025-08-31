@@ -6,15 +6,21 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, CreatePrimary},
-    parse_tpm_handle_from_uri,
+    error::CliError,
+    key::{Alg, AlgInfo},
     pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
     session::get_sessions_from_args,
-    util, Alg, AlgInfo, CliError, Command, CommandType, TpmDevice,
+    uri::uri_to_tpm_handle,
+    util, Command, CommandType, TpmDevice,
 };
+
+use std::{
+    io::{Read, Write},
+    sync::{Arc, Mutex},
+};
+
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -191,7 +197,7 @@ impl Command for CreatePrimary {
 
         let final_object = if let Some(uri) = &self.handle_uri {
             let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
-            let persistent_handle = TpmPersistent(parse_tpm_handle_from_uri(uri)?);
+            let persistent_handle = TpmPersistent(uri_to_tpm_handle(uri)?);
             let evict_cmd = TpmEvictControlCommand {
                 auth: (TpmRh::Owner as u32).into(),
                 object_handle: object_handle_guard.handle().0.into(),

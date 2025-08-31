@@ -9,8 +9,8 @@ use crate::{
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
     key::private_key_from_pem_bytes,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    resolve_uri_to_bytes,
     session::get_sessions_from_args,
+    uri::uri_to_bytes,
     util::build_to_vec,
     CliError, Command, CommandType, TpmDevice,
 };
@@ -411,7 +411,7 @@ impl Command for Import {
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = self.key_uri.as_ref().unwrap();
-        let pem_bytes = resolve_uri_to_bytes(key_uri_str, &[])?;
+        let pem_bytes = uri_to_bytes(key_uri_str, &[])?;
         let private_key = private_key_from_pem_bytes(&pem_bytes)?;
 
         let public = private_key

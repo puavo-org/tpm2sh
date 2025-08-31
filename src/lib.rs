@@ -21,18 +21,8 @@ pub mod transport;
 pub mod uri;
 pub mod util;
 
-pub use self::arguments::parse_cli;
-pub use self::crypto::*;
-pub use self::device::*;
-pub use self::error::CliError;
-pub use self::key::*;
-pub use self::pcr::*;
-pub use self::print::TpmPrint;
-pub use self::session::*;
-pub use self::uri::*;
-pub use self::util::*;
+use crate::{arguments::parse_cli, cli::Cli, device::TpmDevice, error::CliError};
 
-use crate::cli::Cli;
 use std::{
     fs::OpenOptions,
     io::{IsTerminal, Read, Write},

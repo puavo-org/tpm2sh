@@ -3,9 +3,9 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    crypto::PrivateKey,
-    crypto_hmac,
+    crypto::{crypto_hmac, PrivateKey},
     error::{CliError, ParseError},
+    session::AuthSession,
 };
 
 use std::{cmp::Ordering, fs, path::Path, str::FromStr};
@@ -57,8 +57,7 @@ impl FromStr for Alg {
                 let key_bits: u16 = key_bits_str.parse().map_err(|_| {
                     CliError::Usage(format!("Invalid RSA key bits value: '{key_bits_str}'"))
                 })?;
-                let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Rsa,
@@ -67,10 +66,8 @@ impl FromStr for Alg {
                 })
             }
             ["ecc", curve_id_str, name_alg_str] => {
-                let curve_id =
-                    crate::key::tpm_ecc_curve_from_str(curve_id_str).map_err(CliError::Usage)?;
-                let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let curve_id = tpm_ecc_curve_from_str(curve_id_str).map_err(CliError::Usage)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Ecc,
@@ -79,8 +76,7 @@ impl FromStr for Alg {
                 })
             }
             ["keyedhash", name_alg_str] => {
-                let name_alg =
-                    crate::key::tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::KeyedHash,
@@ -351,7 +347,7 @@ pub fn private_key_from_pem_file(path: &Path) -> Result<PrivateKey, CliError> {
 /// Returns a `CliError::Execution` if the session's hash algorithm is not
 /// supported, or if an HMAC operation fails.
 pub fn create_auth(
-    session: &super::AuthSession,
+    session: &AuthSession,
     nonce_caller: &tpm2_protocol::data::Tpm2bNonce,
     command_code: TpmCc,
     handles: &[u32],

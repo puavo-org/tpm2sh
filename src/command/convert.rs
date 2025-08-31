@@ -8,7 +8,8 @@ use crate::{
     cli::{Cli, Commands, Convert, KeyFormat},
     key::TpmKey,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
+    uri::{uri_to_bytes, uri_to_tpm_handle},
+    util, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -90,22 +91,22 @@ impl Command for Convert {
         cli: &Cli,
         _device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
-        let input_bytes = resolve_uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
+        let input_bytes = uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
 
         let tpm_key = match self.from {
             KeyFormat::Json => {
                 let key_obj: PipelineKey = serde_json::from_slice(&input_bytes)?;
-                let public_bytes = resolve_uri_to_bytes(&key_obj.public, &[])?;
-                let private_bytes = resolve_uri_to_bytes(&key_obj.private, &[])?;
+                let public_bytes = uri_to_bytes(&key_obj.public, &[])?;
+                let private_bytes = uri_to_bytes(&key_obj.private, &[])?;
 
                 let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
                 let oid = crate::crypto::ID_LOADABLE_KEY;
 
                 let parent_handle = if let Some(uri) = &cli.parent_uri {
-                    crate::parse_tpm_handle_from_uri(uri)?
+                    uri_to_tpm_handle(uri)?
                 } else {
                     let parent_obj = io.pop_tpm()?;
-                    crate::parse_tpm_handle_from_uri(&parent_obj.context)?
+                    uri_to_tpm_handle(&parent_obj.context)?
                 };
 
                 TpmKey {

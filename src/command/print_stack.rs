@@ -8,10 +8,15 @@ use crate::{
     pipeline::{
         CommandIo, Entry as PipelineEntry, Key as PipelineKey, PublicArea as PipelinePublicArea,
     },
+    uri::uri_to_bytes,
     CliError, Command, CommandType, TpmDevice,
 };
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+
+use std::{
+    io::{Read, Write},
+    sync::{Arc, Mutex},
+};
+
 use tpm2_protocol::TpmParse;
 
 const ABOUT: &str = "Prints a human-readable summary of the object stack to stdout";
@@ -90,7 +95,7 @@ fn pretty_print_object<W: Write>(obj: &PipelineEntry, writer: &mut W) -> Result<
 
 /// Decodes and prints the public area of a key object.
 fn print_decoded_public_area<W: Write>(key: &PipelineKey, writer: &mut W) -> Result<(), CliError> {
-    let pub_bytes = crate::resolve_uri_to_bytes(&key.public, &[])?;
+    let pub_bytes = uri_to_bytes(&key.public, &[])?;
     let (tpm_pub, _) = tpm2_protocol::data::Tpm2bPublic::parse(&pub_bytes)?;
 
     let public_area = PipelinePublicArea::try_from(&tpm_pub.inner)?;

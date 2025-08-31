@@ -6,9 +6,11 @@ use crate::{
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Cli, Commands, Policy},
     error::ParseError,
-    get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri,
+    key::tpm_alg_id_to_str,
+    pcr::{get_pcr_count, parse_pcr_selection},
     pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
     session::get_sessions_from_args,
+    uri::uri_to_tpm_handle,
     CliError, Command, CommandType, TpmDevice,
 };
 use pest::iterators::{Pair, Pairs};
@@ -160,7 +162,7 @@ impl PolicyExecutor<'_> {
         session_handle: TpmSession,
         auth_handle_uri: &str,
     ) -> Result<(), CliError> {
-        let auth_handle = parse_tpm_handle_from_uri(auth_handle_uri)?;
+        let auth_handle = uri_to_tpm_handle(auth_handle_uri)?;
         let cmd = TpmPolicySecretCommand {
             auth_handle: auth_handle.into(),
             policy_session: session_handle.0.into(),
@@ -346,7 +348,7 @@ impl Command for Policy {
                     Ok::<_, CliError>((
                         PipelinePolicySession {
                             context: handle_uri,
-                            algorithm: key::tpm_alg_id_to_str(hash_alg).to_string(),
+                            algorithm: tpm_alg_id_to_str(hash_alg).to_string(),
                             digest: String::new(),
                         },
                         true,
@@ -356,7 +358,7 @@ impl Command for Policy {
 
         let ast = parse_policy_expression(&self.expression)?;
         let pcr_count = get_pcr_count(&mut chip)?;
-        let session_handle = TpmSession(parse_tpm_handle_from_uri(&session_obj.context)?);
+        let session_handle = TpmSession(uri_to_tpm_handle(&session_obj.context)?);
 
         {
             let mut executor = PolicyExecutor { pcr_count, chip };

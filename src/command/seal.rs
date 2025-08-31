@@ -7,8 +7,8 @@ use crate::{
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Seal},
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    resolve_uri_to_bytes,
     session::get_sessions_from_args,
+    uri::uri_to_bytes,
     util::build_to_vec,
     CliError, Command, CommandType, TpmDevice,
 };
@@ -97,7 +97,7 @@ impl Command for Seal {
         let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
-        let data_to_seal = resolve_uri_to_bytes(self.data_uri.as_ref().unwrap(), &[])?;
+        let data_to_seal = uri_to_bytes(self.data_uri.as_ref().unwrap(), &[])?;
 
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
         if self.object_password.password.is_some() {

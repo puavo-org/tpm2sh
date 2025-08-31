@@ -4,8 +4,11 @@
 
 use crate::{
     cli::Cli,
+    key::create_auth,
     pipeline::{CommandIo, Entry as PipelineEntry},
-    util, CliError,
+    uri::uri_to_tpm_handle,
+    util::build_to_vec,
+    CliError,
 };
 use log::debug;
 use rand::RngCore;
@@ -60,7 +63,7 @@ fn get_auth_for_hmac_session<C>(
 where
     C: TpmHeader,
 {
-    let params = util::build_to_vec(command)?;
+    let params = build_to_vec(command)?;
 
     let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
         CliError::Execution(format!(
@@ -73,8 +76,13 @@ where
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
     let nonce_caller = data::Tpm2bNonce::try_from(nonce_bytes.as_slice())?;
 
-    let auth = crate::create_auth(session, &nonce_caller, C::COMMAND, handles, &params)?;
-    Ok(vec![auth])
+    Ok(vec![create_auth(
+        session,
+        &nonce_caller,
+        C::COMMAND,
+        handles,
+        &params,
+    )?])
 }
 
 /// Prepares the authorization sessions for a command based on the global arguments.
@@ -98,7 +106,7 @@ pub fn get_sessions_from_args<R: Read, W: Write, C: TpmHeader>(
         let session_entry = io.resolve_entry_from_pipe_uri(uri)?.clone();
         if let PipelineEntry::HmacSession(s) = session_entry {
             let session = AuthSession {
-                handle: TpmSession(crate::parse_tpm_handle_from_uri(&s.context)?),
+                handle: TpmSession(uri_to_tpm_handle(&s.context)?),
                 nonce_tpm: Tpm2bNonce::default(),
                 attributes: TpmaSession::default(),
                 hmac_key: Tpm2bAuth::default(),
@@ -119,7 +127,7 @@ pub fn get_sessions_from_args<R: Read, W: Write, C: TpmHeader>(
     match io.pop_hmac_session() {
         Ok(s) => {
             let session = AuthSession {
-                handle: TpmSession(crate::parse_tpm_handle_from_uri(&s.context)?),
+                handle: TpmSession(uri_to_tpm_handle(&s.context)?),
                 nonce_tpm: Tpm2bNonce::default(),
                 attributes: TpmaSession::default(),
                 hmac_key: Tpm2bAuth::default(),

@@ -6,8 +6,8 @@ use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PrintError},
-    parse_tpm_rc,
     pipeline::CommandIo,
+    util::parse_tpm_rc,
     CliError, Command, CommandType, TpmDevice,
 };
 use std::io::{Read, Write};

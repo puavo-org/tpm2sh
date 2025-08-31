@@ -2,9 +2,12 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use cli::{
-    cli::{Algorithms, Commands, CreatePrimary, Import, Objects},
+    cli::{Algorithms, Commands, CreatePrimary, Import, LogFormat, Objects},
+    device::TpmDevice,
+    error::CliError,
+    key::enumerate_all,
     pipeline::{CommandIo, Entry as PipelineEntry, Key, Pipeline},
-    CliError, Command, TpmDevice, LOG_FORMAT,
+    Command, LOG_FORMAT,
 };
 
 use std::{
@@ -29,7 +32,7 @@ fn setup_logging() {
         .format_timestamp_micros()
         .try_init();
 
-    let _ = LOG_FORMAT.set(cli::cli::LogFormat::Pretty);
+    let _ = LOG_FORMAT.set(LogFormat::Pretty);
 }
 
 #[fixture]
@@ -75,7 +78,7 @@ fn test_subcommand_algorithms(tpm_device: TestFixture) {
     .into_iter()
     .collect();
 
-    let mut expected: Vec<String> = cli::enumerate_all()
+    let mut expected: Vec<String> = enumerate_all()
         .filter(|alg| supported_tpm_algs.contains(&alg.object_type))
         .map(|alg| alg.name)
         .collect();

@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use cli::{execute_cli, CliError};
+use cli::{error::CliError, execute_cli};
 use log::error;
 
 fn main() {
