@@ -3,9 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, ResetLock},
+    cli::{Cli, ResetLock},
     session::session_from_args,
     CliError, Command, TpmDevice,
 };
@@ -13,28 +11,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
-const ABOUT: &str = "Resets the dictionary attack lockout timer";
-const USAGE: &str = "tpm2sh reset-lock [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
-
 impl Command for ResetLock {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("reset-lock", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let args = ResetLock;
-        arguments!(parser, arg, Self::help, {
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        Ok(Commands::ResetLock(args))
-    }
-
     /// Runs `reset-lock`.
     ///
     /// # Errors

@@ -38,12 +38,6 @@ pub enum CliError {
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("")]
-    Help,
-
-    #[error("")]
-    HelpHandled,
-
     #[error("Handle: {0}")]
     InvalidHandle(String),
 
@@ -52,9 +46,6 @@ pub enum CliError {
 
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
-
-    #[error("Lexopt: {0}")]
-    Lexopt(#[from] lexopt::Error),
 
     #[error("Parser: {0}")]
     Parse(#[from] ParseError),
@@ -70,9 +61,6 @@ pub enum CliError {
 
     #[error("{0}")]
     Usage(String),
-
-    #[error("")]
-    UsageHandled,
 }
 
 impl CliError {
@@ -82,7 +70,6 @@ impl CliError {
         matches!(
             self,
             Self::Usage(_)
-                | Self::Lexopt(_)
                 | Self::Parse(_)
                 | Self::PcrSelection(_)
                 | Self::InvalidHandle(_)

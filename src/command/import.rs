@@ -3,9 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, Import},
+    cli::{Cli, Import},
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
     device::ScopedHandle,
     key::{private_key_from_pem_bytes, JsonTpmKey},
@@ -18,7 +16,6 @@ use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
-use lexopt::prelude::*;
 use num_traits::FromPrimitive;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use rand::{thread_rng, RngCore};
@@ -36,18 +33,6 @@ use tpm2_protocol::{
     message::{TpmImportCommand, TpmReadPublicCommand},
     TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
-
-const ABOUT: &str = "Imports an external key";
-const USAGE: &str = "tpm2sh import --key <KEY_URI> [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        None,
-        "--key",
-        "<KEY_URI>",
-        "URI of the external private key to import (e.g., 'file:///path/to/key.pem')",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
 
 const KDF_DUPLICATE: &str = "DUPLICATE";
 const KDF_INTEGRITY: &str = "INTEGRITY";
@@ -359,31 +344,6 @@ fn create_import_blob(
 }
 
 impl Command for Import {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("import", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Import::default();
-        arguments!(parser, arg, Self::help, {
-            Long("key") => {
-                args.key_uri = Some(parser.value()?.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        if args.key_uri.is_none() {
-            return Err(CliError::Usage(
-                "Missing required argument: --key <KEY_URI>".to_string(),
-            ));
-        }
-        Ok(Commands::Import(args))
-    }
-
     /// Runs `import`.
     ///
     /// # Errors
@@ -419,7 +379,7 @@ impl Command for Import {
             read_public(Some(device_arc.clone()), parent_handle.handle())?;
         let parent_name_alg = parent_public.name_alg;
 
-        let key_uri_str = self.key_uri.as_ref().unwrap();
+        let key_uri_str = &self.key_uri;
         let pem_bytes = uri_to_bytes(key_uri_str, &[])?;
         let private_key = private_key_from_pem_bytes(&pem_bytes)?;
 

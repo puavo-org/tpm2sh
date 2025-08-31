@@ -18,8 +18,8 @@ use tpm2_protocol::{
     self,
     data::{self, TpmCc, TpmSt, TpmaCc, TpmsContext, TpmuCapabilities},
     message::{
-        TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
-        TpmGetCapabilityResponse, TpmResponseBody,
+        TpmCommandBuild, TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
+        TpmGetCapabilityResponse, TpmHeader, TpmResponseBody,
     },
     TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -166,15 +166,15 @@ impl TpmDevice {
         sessions: &[tpm2_protocol::data::TpmsAuthCommand],
     ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), CliError>
     where
-        C: tpm2_protocol::message::TpmHeaderCommand + TpmPrint,
+        C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
         let log_format = get_log_format();
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut command_buf);
-            let tag = if C::COMMAND == TpmCc::GetCapability {
-                TpmSt::NoSessions
-            } else if sessions.is_empty() && !C::WITH_SESSIONS {
+            let tag = if C::COMMAND == TpmCc::GetCapability
+                || (sessions.is_empty() && !C::WITH_SESSIONS)
+            {
                 TpmSt::NoSessions
             } else {
                 TpmSt::Sessions

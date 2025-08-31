@@ -3,12 +3,9 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, SessionType, StartSession},
+    cli::{Cli, SessionType, StartSession},
     CliError, Command, TpmDevice,
 };
-use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -18,39 +15,7 @@ use tpm2_protocol::{
     tpm_hash_size,
 };
 
-const ABOUT: &str = "Starts an authorization session";
-const USAGE: &str = "tpm2sh start-session [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        Some("-t"),
-        "--type",
-        "<TYPE>",
-        "[default: hmac, possible: hmac, policy, trial]",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
-
 impl Command for StartSession {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("start-session", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = StartSession::default();
-        arguments!(parser, arg, Self::help, {
-            Short('t') | Long("type") => {
-                args.session_type = parser.value()?.string()?.parse()?;
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        Ok(Commands::StartSession(args))
-    }
-
     /// Runs `start-session`.
     ///
     /// # Errors

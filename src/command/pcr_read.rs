@@ -3,8 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Cli, Commands, PcrRead},
+    cli::{Cli, PcrRead},
     pcr::{pcr_get_count, pcr_parse_selection, pcr_to_values},
     CliError, Command, TpmDevice,
 };
@@ -12,34 +11,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmPcrReadCommand;
 
-const ABOUT: &str = "Reads PCR values from the TPM";
-const USAGE: &str = "tpm2sh pcr-read <SELECTION>";
-const ARGS: &[CommandLineArgument] = &[("SELECTION", "e.g. 'sha256:0,1,2+sha1:0'")];
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
-
 impl Command for PcrRead {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("pcr-read", ABOUT, USAGE, ARGS, OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let values = collect_values(parser)?;
-        if values.len() != 1 {
-            return Err(CliError::Usage(format!(
-                "'pcr-read' requires 1 argument, but {} were provided",
-                values.len()
-            )));
-        }
-        let selection = values
-            .into_iter()
-            .next()
-            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-        Ok(Commands::PcrRead(PcrRead { selection }))
-    }
-
     /// Runs `pcr-read`.
     ///
     /// # Errors

@@ -2,36 +2,14 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, Objects},
+    cli::{Cli, Objects},
     CliError, Command, TpmDevice,
 };
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::TpmRh;
 
-const ABOUT: &str = "Lists objects in volatile and non-volatile memory";
-const USAGE: &str = "tpm2sh objects";
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
-
 impl Command for Objects {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("objects", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        arguments!(parser, arg, Self::help, {
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        Ok(Commands::Objects(Objects))
-    }
-
     /// Runs `objects`.
     ///
     /// # Errors

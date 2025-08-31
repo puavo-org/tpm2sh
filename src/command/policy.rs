@@ -2,9 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Cli, Commands, Policy},
+    cli::{self, Cli, Policy},
     error::ParseError,
     pcr::{pcr_get_count, pcr_parse_selection},
     session::session_from_args,
@@ -41,11 +39,6 @@ enum PolicyAst {
     },
     Or(Vec<PolicyAst>),
 }
-
-const ABOUT: &str = "Builds a policy and prints the final digest";
-const USAGE: &str = "tpm2sh policy <EXPRESSION>";
-const ARGS: &[CommandLineArgument] = &[("EXPRESSION", "e.g., 'pcr(\"sha256:0\",\"...\")'")];
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, CliError> {
     if pair.as_rule() != Rule::quoted_string {
@@ -266,33 +259,6 @@ fn get_policy_digest(
 }
 
 impl Command for Policy {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("policy", ABOUT, USAGE, ARGS, OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        arguments!(parser, arg, Self::help, {
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        let values = collect_values(parser)?;
-        if values.len() != 1 {
-            return Err(CliError::Usage(format!(
-                "'policy' requires 1 argument, but {} were provided",
-                values.len()
-            )));
-        }
-        let expression = values
-            .into_iter()
-            .next()
-            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-        Ok(Commands::Policy(Policy { expression }))
-    }
-
     /// Run 'policy'.
     ///
     /// # Errors

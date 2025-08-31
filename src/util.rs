@@ -72,6 +72,15 @@ pub fn parse_tpm_rc(s: &str) -> Result<TpmRc, CliError> {
     Ok(TpmRc::try_from(raw_rc)?)
 }
 
+/// A clap value parser for `TpmRc`.
+///
+/// # Errors
+///
+/// Returns an error string if the input is not a valid hex u32 or not a valid `TpmRc`.
+pub fn parse_tpm_rc_str(s: &str) -> Result<TpmRc, String> {
+    parse_tpm_rc(s).map_err(|e| e.to_string())
+}
+
 /// A helper to build a `TpmBuild` type into a `Vec<u8>`.
 ///
 /// # Errors

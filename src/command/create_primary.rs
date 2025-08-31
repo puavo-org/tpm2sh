@@ -3,9 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, CreatePrimary},
+    cli::{Cli, CreatePrimary},
     device::ScopedHandle,
     error::CliError,
     key::{Alg, AlgInfo},
@@ -17,7 +15,6 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use lexopt::prelude::*;
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -28,30 +25,6 @@ use tpm2_protocol::{
     message::{TpmContextSaveCommand, TpmCreatePrimaryCommand, TpmEvictControlCommand},
     TpmPersistent,
 };
-
-const ABOUT: &str = "Creates a primary key";
-const USAGE: &str = "tpm2sh create-primary [OPTIONS] --algorithm <ALGORITHM>";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        Some("-H"),
-        "--hierarchy",
-        "<HIERARCHY>",
-        "[default: owner, possible: owner, platform, endorsement]",
-    ),
-    (
-        None,
-        "--algorithm",
-        "<ALGORITHM>",
-        "Public key algorithm. Run 'algorithms' for options",
-    ),
-    (
-        None,
-        "--handle",
-        "<HANDLE_URI>",
-        "Store object to non-volatile memory (e.g., 'tpm://0x81000001')",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
 
 fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
     let mut object_attributes = TpmaObject::USER_WITH_AUTH
@@ -111,40 +84,6 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
 }
 
 impl Command for CreatePrimary {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("create-primary", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = CreatePrimary::default();
-        let mut alg_set = false;
-        arguments!(parser, arg, Self::help, {
-            Short('H') | Long("hierarchy") => {
-                args.hierarchy = parser.value()?.string()?.parse()?;
-            }
-            Long("algorithm") => {
-                args.algorithm = parser.value()?.string()?.parse()?;
-                alg_set = true;
-            }
-            Long("handle") => {
-                args.handle_uri = Some(parser.value()?.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-
-        if !alg_set {
-            return Err(CliError::Usage(
-                "Missing required argument: --algorithm <ALGORITHM>".to_string(),
-            ));
-        }
-        Ok(Commands::CreatePrimary(args))
-    }
-
     /// Runs `create-primary`.
     ///
     /// # Errors

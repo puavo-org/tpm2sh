@@ -3,24 +3,16 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Algorithms, Cli, Commands},
+    cli::{Algorithms, Cli},
     device::TPM_CAP_PROPERTY_MAX,
     key::enumerate_all,
     CliError, Command, TpmDevice,
 };
-use lexopt::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::{TpmAlgId, TpmCap, TpmuCapabilities};
-
-const ABOUT: &str = "Lists available algorithms";
-const USAGE: &str = "tpm2sh algorithms [OPTIONS] [FILTER]";
-const ARGS: &[CommandLineArgument] = &[("FILTER", "A regex to filter the algorithm names")];
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 fn get_chip_algorithms(
     device: Option<Arc<Mutex<TpmDevice>>>,
@@ -46,26 +38,6 @@ fn get_chip_algorithms(
 }
 
 impl Command for Algorithms {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("algorithms", ABOUT, USAGE, ARGS, OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Algorithms { filter: None };
-        arguments!(parser, arg, Self::help, {
-            Value(val) if args.filter.is_none() => {
-                args.filter = Some(val.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        Ok(Commands::Algorithms(args))
-    }
-
     /// Runs `algorithms`.
     ///
     /// # Errors

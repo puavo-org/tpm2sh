@@ -2,14 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Cli, Commands, Delete},
+    cli::{Cli, Delete},
     session::session_from_args,
     uri::uri_to_tpm_handle,
     CliError, Command, TpmDevice,
 };
-use lexopt::prelude::*;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
@@ -18,40 +15,7 @@ use tpm2_protocol::{
     TpmPersistent, TpmTransient,
 };
 
-const ABOUT: &str = "Deletes a transient or persistent object";
-const USAGE: &str = "tpm2sh delete [OPTIONS] <HANDLE_URI>";
-const ARGS: &[CommandLineArgument] = &[(
-    "HANDLE_URI",
-    "URI of the object to delete (e.g. 'tpm://0x81000001').",
-)];
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
-
 impl Command for Delete {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("delete", ABOUT, USAGE, ARGS, OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Delete::default();
-        arguments!(parser, arg, Self::help, {
-            Value(val) if args.handle_uri.is_none() => {
-                args.handle_uri = Some(val.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        if args.handle_uri.is_none() {
-            return Err(CliError::Usage(
-                "Missing required argument <HANDLE_URI>".to_string(),
-            ));
-        }
-        Ok(Commands::Delete(args))
-    }
-
     /// Runs `delete`.
     ///
     /// # Errors
@@ -69,7 +33,7 @@ impl Command for Delete {
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let handle = uri_to_tpm_handle(self.handle_uri.as_ref().unwrap())?;
+        let handle = uri_to_tpm_handle(&self.handle_uri)?;
 
         if handle >= TpmRh::PersistentFirst as u32 {
             let persistent_handle = TpmPersistent(handle);

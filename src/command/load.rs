@@ -3,9 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, Load},
+    cli::{Cli, Load},
     device::ScopedHandle,
     session::session_from_args,
     uri::uri_to_bytes,
@@ -16,62 +14,13 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use lexopt::prelude::*;
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmContextSaveCommand, TpmLoadCommand},
     TpmParse,
 };
 
-const ABOUT: &str = "Loads a TPM key or sealed object";
-const USAGE: &str = "tpm2sh load [OPTIONS] --public <URI> --private <URI>";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        None,
-        "--public",
-        "<URI>",
-        "URI of the public part of the key",
-    ),
-    (
-        None,
-        "--private",
-        "<URI>",
-        "URI of the private part of the key",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
-
 impl Command for Load {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("load", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Load::default();
-        arguments!(parser, arg, Self::help, {
-            Long("public") => {
-                args.public_uri = Some(parser.value()?.string()?);
-            }
-            Long("private") => {
-                args.private_uri = Some(parser.value()?.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-
-        if args.public_uri.is_none() || args.private_uri.is_none() {
-            return Err(CliError::Usage(
-                "Missing required arguments: --public and --private".to_string(),
-            ));
-        }
-
-        Ok(Commands::Load(args))
-    }
-
     /// Runs `load`.
     ///
     /// # Errors
@@ -92,8 +41,8 @@ impl Command for Load {
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
         let parent_handle = ScopedHandle::from_uri(&device_arc, parent_uri)?;
 
-        let pub_bytes = uri_to_bytes(self.public_uri.as_ref().unwrap(), &[])?;
-        let priv_bytes = uri_to_bytes(self.private_uri.as_ref().unwrap(), &[])?;
+        let pub_bytes = uri_to_bytes(&self.public_uri, &[])?;
+        let priv_bytes = uri_to_bytes(&self.private_uri, &[])?;
 
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;

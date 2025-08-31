@@ -5,7 +5,6 @@
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 
-pub mod arguments;
 pub mod cli;
 pub mod command;
 pub mod crypto;
@@ -20,8 +19,8 @@ pub mod transport;
 pub mod uri;
 pub mod util;
 
-use crate::{arguments::parse_cli, cli::Cli, device::TpmDevice, error::CliError};
-
+use crate::{cli::Cli, device::TpmDevice, error::CliError};
+use clap::{CommandFactory, Parser};
 use std::{
     fs::OpenOptions,
     io::{self, Write},
@@ -37,22 +36,8 @@ pub(crate) fn get_log_format() -> cli::LogFormat {
     *LOG_FORMAT.get().unwrap_or(&cli::LogFormat::default())
 }
 
-/// A trait for parsing and executing subcommands.
+/// A trait for executing subcommands.
 pub trait Command {
-    /// Prints the help message for a subcommand.
-    fn help()
-    where
-        Self: Sized;
-
-    /// Parses the arguments for a subcommand.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` on parsing failure.
-    fn parse(parser: &mut lexopt::Parser) -> Result<cli::Commands, CliError>
-    where
-        Self: Sized;
-
     /// Returns `true` if the command does not require TPM device access.
     fn is_local(&self) -> bool {
         false
@@ -77,18 +62,7 @@ pub trait Command {
 ///
 /// Returns a `CliError` if opening the device, or executing the command fails.
 pub fn execute_cli() -> Result<(), CliError> {
-    let cli = match parse_cli() {
-        Ok(Some(cli)) => cli,
-        Ok(None) => return Ok(()),
-        Err(CliError::Help) => {
-            crate::arguments::print_main_help();
-            return Err(CliError::Help);
-        }
-        Err(CliError::HelpHandled) => {
-            return Err(CliError::HelpHandled);
-        }
-        Err(e) => return Err(e),
-    };
+    let cli = Cli::parse();
 
     if let Some(command) = &cli.command {
         let _ = LOG_FORMAT.set(cli.log_format);
@@ -106,6 +80,9 @@ pub fn execute_cli() -> Result<(), CliError> {
 
         command.run(&cli, device_arc, &mut io::stdout())
     } else {
+        Cli::command()
+            .help_template(cli::USAGE_TEMPLATE)
+            .print_help()?;
         Ok(())
     }
 }

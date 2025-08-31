@@ -3,9 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
-    arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, Seal},
+    cli::{Cli, Seal},
     device::ScopedHandle,
     key::JsonTpmKey,
     session::session_from_args,
@@ -14,7 +12,6 @@ use crate::{
     CliError, Command, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use lexopt::prelude::*;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
@@ -26,53 +23,7 @@ use tpm2_protocol::{
     message::TpmCreateCommand,
 };
 
-const ABOUT: &str = "Seals a secret to a TPM object";
-const USAGE: &str = "tpm2sh seal --data <URI> [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[
-    (
-        None,
-        "--data",
-        "<URI>",
-        "URI of the secret to seal (e.g., 'data://utf8,mysecret')",
-    ),
-    (
-        None,
-        "--object-password",
-        "<PASSWORD>",
-        "Authorization for the new sealed object",
-    ),
-    (Some("-h"), "--help", "", "Print help information"),
-];
-
 impl Command for Seal {
-    fn help() {
-        println!(
-            "{}",
-            format_subcommand_help("seal", ABOUT, USAGE, &[], OPTIONS)
-        );
-    }
-
-    fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Seal::default();
-        arguments!(parser, arg, Self::help, {
-            Long("data") => {
-                args.data_uri = Some(parser.value()?.string()?);
-            }
-            Long("object-password") => {
-                args.object_password.password = Some(parser.value()?.string()?);
-            }
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
-        if args.data_uri.is_none() {
-            return Err(CliError::Usage(
-                "Missing required argument: --data <URI>".to_string(),
-            ));
-        }
-        Ok(Commands::Seal(args))
-    }
-
     /// Runs `seal`.
     ///
     /// # Errors
@@ -94,10 +45,10 @@ impl Command for Seal {
         let parent_handle_guard = ScopedHandle::from_uri(&device_arc, parent_uri)?;
         let parent_handle = parent_handle_guard.handle();
 
-        let data_to_seal = uri_to_bytes(self.data_uri.as_ref().unwrap(), &[])?;
+        let data_to_seal = uri_to_bytes(&self.data_uri, &[])?;
 
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
-        if self.object_password.password.is_some() {
+        if self.object_password.is_some() {
             object_attributes |= TpmaObject::USER_WITH_AUTH;
         }
         let public_template = TpmtPublic {
@@ -113,12 +64,7 @@ impl Command for Seal {
             unique: TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
         };
 
-        let sealed_obj_password = self
-            .object_password
-            .password
-            .as_deref()
-            .unwrap_or("")
-            .as_bytes();
+        let sealed_obj_password = self.object_password.as_deref().unwrap_or("").as_bytes();
         let cmd = TpmCreateCommand {
             parent_handle: parent_handle.0.into(),
             in_sensitive: Tpm2bSensitiveCreate {

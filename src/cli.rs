@@ -3,43 +3,87 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{device::TpmDevice, error::CliError, key::Alg, Command};
+use clap::{
+    builder::styling::{AnsiColor, Color, Style, Styles},
+    Args, Parser, Subcommand, ValueEnum,
+};
 use std::{
+    fmt,
     io::Write,
-    str::FromStr,
     sync::{Arc, Mutex},
 };
-use tpm2_protocol::data::{TpmAlgId, TpmRc, TpmRh, TpmSe};
+use tpm2_protocol::data::{TpmRc, TpmRh, TpmSe};
 
-#[derive(Debug, Clone, Copy, Default)]
+const STYLES: Styles = Styles::styled()
+    .header(Style::new().bold())
+    .usage(Style::new().bold())
+    .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
+    .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))));
+
+pub(crate) const USAGE_TEMPLATE: &str = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+{options-heading}
+{options}
+";
+
+const HELP_TEMPLATE: &str = "\
+{about-with-newline}
+{usage-heading} {usage}
+
+{subcommands-heading}
+{subcommands}
+
+{options-heading}
+{options}
+";
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum LogFormat {
     #[default]
     Plain,
     Pretty,
 }
 
-impl FromStr for LogFormat {
-    type Err = CliError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "plain" => Ok(Self::Plain),
-            "pretty" => Ok(Self::Pretty),
-            _ => Err(CliError::Usage(format!("Invalid log format: '{s}'"))),
-        }
+impl fmt::Display for LogFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 
-#[derive(Debug, Default)]
+/// TPM 2.0 shell
+#[derive(Parser, Debug, Default)]
+#[command(version, about, styles = STYLES, help_template = HELP_TEMPLATE)]
 pub struct Cli {
+    /// TPM device path
+    #[arg(short = 'd', long, default_value = "/dev/tpmrm0", global = true)]
     pub device: String,
+
+    /// Logging format
+    #[arg(long, value_enum, default_value_t = LogFormat::Plain, global = true)]
     pub log_format: LogFormat,
+
+    /// Default authorization password for objects and sessions
+    #[arg(short = 'p', long, global = true)]
     pub password: Option<String>,
+
+    /// Parent object URI (e.g., '<tpm://0x40000001>', '<file:///.../context.bin>')
+    #[arg(short = 'P', long, global = true, value_name = "URI")]
     pub parent: Option<String>,
+
+    /// Session object URI (e.g., '<tpm://0x03000000>')
+    #[arg(short = 'S', long, global = true, value_name = "URI")]
     pub session: Option<String>,
+
+    #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
 pub enum Hierarchy {
     #[default]
     Owner,
@@ -47,15 +91,12 @@ pub enum Hierarchy {
     Endorsement,
 }
 
-impl FromStr for Hierarchy {
-    type Err = CliError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "owner" => Ok(Hierarchy::Owner),
-            "platform" => Ok(Hierarchy::Platform),
-            "endorsement" => Ok(Hierarchy::Endorsement),
-            _ => Err(CliError::Usage(format!("Invalid hierarchy: '{s}'"))),
-        }
+impl fmt::Display for Hierarchy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 
@@ -69,7 +110,7 @@ impl From<Hierarchy> for TpmRh {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum SessionType {
     #[default]
     Hmac,
@@ -77,15 +118,12 @@ pub enum SessionType {
     Trial,
 }
 
-impl FromStr for SessionType {
-    type Err = CliError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "hmac" => Ok(SessionType::Hmac),
-            "policy" => Ok(SessionType::Policy),
-            "trial" => Ok(SessionType::Trial),
-            _ => Err(CliError::Usage(format!("Invalid session type: '{s}'"))),
-        }
+impl fmt::Display for SessionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 
@@ -99,39 +137,7 @@ impl From<SessionType> for TpmSe {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub enum SessionHashAlg {
-    #[default]
-    Sha256,
-    Sha384,
-    Sha512,
-}
-
-impl FromStr for SessionHashAlg {
-    type Err = CliError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "sha256" => Ok(SessionHashAlg::Sha256),
-            "sha384" => Ok(SessionHashAlg::Sha384),
-            "sha512" => Ok(SessionHashAlg::Sha512),
-            _ => Err(CliError::Usage(format!(
-                "Invalid session hash algorithm: '{s}'"
-            ))),
-        }
-    }
-}
-
-impl From<SessionHashAlg> for TpmAlgId {
-    fn from(alg: SessionHashAlg) -> Self {
-        match alg {
-            SessionHashAlg::Sha256 => Self::Sha256,
-            SessionHashAlg::Sha384 => Self::Sha384,
-            SessionHashAlg::Sha512 => Self::Sha512,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum KeyFormat {
     #[default]
     Json,
@@ -139,99 +145,181 @@ pub enum KeyFormat {
     Der,
 }
 
-impl FromStr for KeyFormat {
-    type Err = CliError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "json" => Ok(KeyFormat::Json),
-            "pem" => Ok(KeyFormat::Pem),
-            "der" => Ok(KeyFormat::Der),
-            _ => Err(CliError::Usage(format!("Invalid key format: '{s}'"))),
-        }
+impl fmt::Display for KeyFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.to_possible_value()
+            .expect("no values are skipped")
+            .get_name()
+            .fmt(f)
     }
 }
 
-#[derive(Debug)]
-pub enum Commands {
-    Algorithms(Algorithms),
-    Convert(Convert),
-    CreatePrimary(CreatePrimary),
-    Delete(Delete),
-    Import(Import),
-    Load(Load),
-    Objects(Objects),
-    PcrEvent(PcrEvent),
-    PcrRead(PcrRead),
-    Policy(Policy),
-    PrintError(PrintError),
-    ResetLock(ResetLock),
-    Save(Save),
-    Seal(Seal),
-    StartSession(StartSession),
-    Unseal(Unseal),
+macro_rules! tpm2sh_command {
+    ($($command:ident),* $(,)?) => {
+        #[derive(Subcommand, Debug)]
+        pub enum Commands {
+            $(
+                $command($command),
+            )*
+        }
+
+        impl Command for Commands {
+            fn is_local(&self) -> bool {
+                match self {
+                    $(
+                        Self::$command(args) => args.is_local(),
+                    )*
+                }
+            }
+
+            fn run<W: Write>(
+                &self,
+                cli: &Cli,
+                device: Option<Arc<Mutex<TpmDevice>>>,
+                writer: &mut W,
+            ) -> Result<(), CliError> {
+                match self {
+                    $(
+                        Self::$command(args) => args.run(cli, device, writer),
+                    )*
+                }
+            }
+        }
+    };
 }
 
-impl Command for Commands {
-    fn help()
-    where
-        Self: Sized,
-    {
-        unimplemented!();
-    }
+tpm2sh_command!(
+    Algorithms,
+    Convert,
+    CreatePrimary,
+    Delete,
+    Import,
+    Load,
+    Objects,
+    PcrEvent,
+    PcrRead,
+    Policy,
+    PrintError,
+    ResetLock,
+    Save,
+    Seal,
+    StartSession,
+    Unseal,
+);
 
-    fn parse(_parser: &mut lexopt::Parser) -> Result<Self, CliError>
-    where
-        Self: Sized,
-    {
-        unimplemented!();
-    }
+/// Lists available algorithms
+#[derive(Args, Debug, Default)]
+pub struct Algorithms {
+    /// A regex to filter the algorithm names
+    pub filter: Option<String>,
+}
 
-    fn is_local(&self) -> bool {
-        match self {
-            Self::Algorithms(args) => args.is_local(),
-            Self::Convert(args) => args.is_local(),
-            Self::CreatePrimary(args) => args.is_local(),
-            Self::Delete(args) => args.is_local(),
-            Self::Import(args) => args.is_local(),
-            Self::Load(args) => args.is_local(),
-            Self::Objects(args) => args.is_local(),
-            Self::PcrEvent(args) => args.is_local(),
-            Self::PcrRead(args) => args.is_local(),
-            Self::Policy(args) => args.is_local(),
-            Self::PrintError(args) => args.is_local(),
-            Self::ResetLock(args) => args.is_local(),
-            Self::Save(args) => args.is_local(),
-            Self::Seal(args) => args.is_local(),
-            Self::StartSession(args) => args.is_local(),
-            Self::Unseal(args) => args.is_local(),
-        }
-    }
+/// Converts keys between ASN.1 and JSON format
+#[derive(Args, Debug, Default)]
+pub struct Convert {
+    /// Input format
+    #[arg(long, value_enum, default_value_t = KeyFormat::Json)]
+    pub from: KeyFormat,
+    /// Output format
+    #[arg(long, value_enum, default_value_t = KeyFormat::Json)]
+    pub to: KeyFormat,
+    /// URI of the input object (e.g., '<file:///path/to/key.pem>')
+    pub input_uri: String,
+}
 
-    fn run<W: Write>(
-        &self,
-        cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
-        writer: &mut W,
-    ) -> Result<(), CliError> {
-        match self {
-            Self::Algorithms(args) => args.run(cli, device, writer),
-            Self::Convert(args) => args.run(cli, device, writer),
-            Self::CreatePrimary(args) => args.run(cli, device, writer),
-            Self::Delete(args) => args.run(cli, device, writer),
-            Self::Import(args) => args.run(cli, device, writer),
-            Self::Load(args) => args.run(cli, device, writer),
-            Self::Objects(args) => args.run(cli, device, writer),
-            Self::PcrEvent(args) => args.run(cli, device, writer),
-            Self::PcrRead(args) => args.run(cli, device, writer),
-            Self::Policy(args) => args.run(cli, device, writer),
-            Self::PrintError(args) => args.run(cli, device, writer),
-            Self::ResetLock(args) => args.run(cli, device, writer),
-            Self::Save(args) => args.run(cli, device, writer),
-            Self::Seal(args) => args.run(cli, device, writer),
-            Self::StartSession(args) => args.run(cli, device, writer),
-            Self::Unseal(args) => args.run(cli, device, writer),
-        }
-    }
+/// Creates a primary key
+#[derive(Args, Debug, Default)]
+pub struct CreatePrimary {
+    /// Hierarchy for the new key
+    #[arg(short = 'H', long, value_enum, default_value_t = Hierarchy::Owner)]
+    pub hierarchy: Hierarchy,
+    /// Public key algorithm. Run 'algorithms' for options
+    #[arg(long)]
+    pub algorithm: Alg,
+    /// Store object to non-volatile memory (e.g., '<tpm://0x81000001>')
+    #[arg(long, value_name = "HANDLE_URI")]
+    pub handle_uri: Option<String>,
+}
+
+/// Deletes a transient or persistent object
+#[derive(Args, Debug, Default)]
+pub struct Delete {
+    /// URI of the object to delete (e.g. '<tpm://0x81000001>')
+    #[arg(value_name = "HANDLE_URI")]
+    pub handle_uri: String,
+}
+
+/// Imports an external key
+#[derive(Args, Debug, Default)]
+pub struct Import {
+    /// URI of the external private key to import (e.g., '<file:///path/to/key.pem>')
+    #[arg(long, value_name = "KEY_URI")]
+    pub key_uri: String,
+}
+
+/// Loads a TPM key
+#[derive(Args, Debug, Default)]
+pub struct Load {
+    /// URI of the public part of the key
+    #[arg(long, value_name = "URI")]
+    pub public_uri: String,
+    /// URI of the private part of the key
+    #[arg(long, value_name = "URI")]
+    pub private_uri: String,
+}
+
+/// Lists objects in volatile and non-volatile memory
+#[derive(Args, Debug, Default)]
+pub struct Objects;
+
+/// Extends a PCR with an event
+#[derive(Args, Debug, Default)]
+pub struct PcrEvent {
+    /// PCR to extend (e.g., '<pcr://sha256,7>')
+    #[arg(value_name = "PCR_URI")]
+    pub pcr_uri: String,
+    /// URI of the data (e.g., '<data://hex,deadbeef>')
+    #[arg(value_name = "DATA_URI")]
+    pub data_uri: String,
+}
+
+/// Reads PCRs
+#[derive(Args, Debug, Default)]
+pub struct PcrRead {
+    /// PCR selection (e.g. 'sha256:0,1,2+sha1:0')
+    #[arg(value_name = "SELECTION")]
+    pub selection: String,
+}
+
+/// Builds a policy using a policy expression
+#[derive(Args, Debug, Default)]
+pub struct Policy {
+    /// Policy expression (e.g., 'pcr("sha256:0","...")')
+    #[arg(value_name = "EXPRESSION")]
+    pub expression: String,
+}
+
+/// Encodes and print a TPM error code
+#[derive(Args, Debug)]
+pub struct PrintError {
+    /// TPM error code (e.g., '0x100')
+    #[arg(value_parser = crate::util::parse_tpm_rc_str)]
+    pub rc: TpmRc,
+}
+
+/// Resets the dictionary attack lockout timer
+#[derive(Args, Debug, Default)]
+pub struct ResetLock;
+
+/// Saves to non-volatile memory
+#[derive(Args, Debug, Default)]
+pub struct Save {
+    /// URI for the persistent object to be created (e.g., '<tpm://0x81000001>')
+    #[arg(long, value_name = "HANDLE_URI")]
+    pub to_uri: String,
+    /// URI of the transient object context to save (e.g., '<file:///path/to/context.bin>')
+    #[arg(long = "in", value_name = "CONTEXT_URI")]
+    pub in_uri: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -239,86 +327,29 @@ pub struct PasswordArgs {
     pub password: Option<String>,
 }
 
-#[derive(Debug, Default)]
-pub struct CreatePrimary {
-    pub hierarchy: Hierarchy,
-    pub algorithm: Alg,
-    pub handle_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Save {
-    pub to_uri: Option<String>,
-    pub in_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Delete {
-    pub handle_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Import {
-    pub key_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Algorithms {
-    pub filter: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Load {
-    pub public_uri: Option<String>,
-    pub private_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Objects;
-
-#[derive(Debug, Default)]
-pub struct PcrRead {
-    pub selection: String,
-}
-
-#[derive(Debug, Default)]
-pub struct PcrEvent {
-    pub pcr_uri: String,
+/// Seals a keyedhash object
+#[derive(Args, Debug, Default)]
+pub struct Seal {
+    /// URI of the secret to seal (e.g., '<data://utf8,mysecret>')
+    #[arg(long, value_name = "URI")]
     pub data_uri: String,
+    /// Authorization for the new sealed object
+    #[arg(long, value_name = "PASSWORD")]
+    pub object_password: Option<String>,
 }
 
-#[derive(Debug)]
-pub struct PrintError {
-    pub rc: TpmRc,
-}
-
-#[derive(Debug, Default)]
-pub struct ResetLock;
-
-#[derive(Debug, Default)]
+/// Starts an authorization session
+#[derive(Args, Debug, Default)]
 pub struct StartSession {
+    /// Session type
+    #[arg(short, long, value_enum, default_value_t = SessionType::Hmac)]
     pub session_type: SessionType,
 }
 
-#[derive(Debug, Default)]
-pub struct Seal {
-    pub data_uri: Option<String>,
-    pub object_password: PasswordArgs,
-}
-
-#[derive(Debug, Default)]
+/// Unseals a keyedhash object
+#[derive(Args, Debug, Default)]
 pub struct Unseal {
-    pub handle_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Convert {
-    pub from: KeyFormat,
-    pub to: KeyFormat,
-    pub input_uri: Option<String>,
-}
-
-#[derive(Debug, Default)]
-pub struct Policy {
-    pub expression: String,
+    /// URI of the loaded sealed object to unseal (e.g., '<tpm://0x80000000>')
+    #[arg(long, value_name = "HANDLE_URI")]
+    pub handle_uri: String,
 }
