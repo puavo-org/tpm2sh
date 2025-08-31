@@ -66,7 +66,7 @@ impl Command for Load {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         let save_handle = load_resp.object_handle;
-        let save_handle_guard = ScopedHandle::new(save_handle, device_arc.clone());
+        let _ = ScopedHandle::new(save_handle, device_arc.clone());
         let (resp, _) = {
             let mut chip = device_arc
                 .lock()
@@ -84,9 +84,6 @@ impl Command for Load {
             "data://base64,{}",
             base64_engine.encode(context_bytes)
         )?;
-
-        save_handle_guard.flush()?;
-        parent_handle.flush()?;
 
         Ok(())
     }

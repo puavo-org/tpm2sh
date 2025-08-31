@@ -88,31 +88,6 @@ impl ScopedHandle {
         self.handle
     }
 
-    /// Flushes the transient handle from the TPM.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the `TPM2_FlushContext` command fails.
-    pub fn flush(self) -> Result<(), CliError> {
-        let handle = self.handle;
-        let device_arc = self.device.clone();
-        std::mem::forget(self);
-
-        let mut device = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-        let cmd = TpmFlushContextCommand {
-            flush_handle: handle.into(),
-        };
-        device.execute(&cmd, &[]).map_err(|e| {
-            CliError::Execution(format!(
-                "Failed to flush transient handle {handle:#010x}: {e}"
-            ))
-        })?;
-        Ok(())
-    }
-
     /// Consumes the guard without flushing the handle. This should be used when
     /// the handle has been consumed by another command, such as `TPM2_EvictControl`.
     pub fn forget(self) {
@@ -122,15 +97,17 @@ impl ScopedHandle {
 
 impl Drop for ScopedHandle {
     fn drop(&mut self) {
-        warn!(
-			"ScopedHandle for handle {:#010x} was dropped without being flushed or forgotten. This is a resource leak.",
-			self.handle
-		);
-        #[cfg(debug_assertions)]
-        panic!(
-            "ScopedHandle for handle {:#010x} dropped without flush() or forget().",
-            self.handle
-        );
+        let handle = self.handle;
+        if let Ok(mut device) = self.device.lock() {
+            let cmd = TpmFlushContextCommand {
+                flush_handle: handle.into(),
+            };
+            if let Err(err) = device.execute(&cmd, &[]) {
+                warn!("tpm://{handle:#010x}: {err}");
+            }
+        } else {
+            warn!("tpm://{handle:#010x}: no transport");
+        }
     }
 }
 

@@ -103,7 +103,6 @@ impl Command for Seal {
         let json_string = serde_json::to_string_pretty(&key)?;
         writeln!(writer, "{json_string}")?;
 
-        parent_handle_guard.flush()?;
         Ok(())
     }
 }

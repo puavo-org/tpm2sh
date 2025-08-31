@@ -141,7 +141,7 @@ impl Command for CreatePrimary {
 
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
         } else {
-            let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
+            let _ = ScopedHandle::new(object_handle, device_arc.clone());
             let save_command = TpmContextSaveCommand {
                 save_handle: object_handle,
             };
@@ -150,8 +150,6 @@ impl Command for CreatePrimary {
                 .ContextSave()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             let context_bytes = util::build_to_vec(&save_resp.context)?;
-
-            object_handle_guard.flush()?;
 
             writeln!(
                 writer,
