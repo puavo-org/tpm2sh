@@ -53,21 +53,21 @@ impl Command for PcrEvent {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
-
-        let mut values = collect_values(parser)?;
-        if values.len() == 2 {
-            args.data_uri = values
-                .pop()
-                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-            args.handle_uri = values
-                .pop()
-                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-            Ok(Commands::PcrEvent(args))
-        } else {
-            Err(CliError::Usage(
-                "Missing required arguments: <PCR_HANDLE_URI> <DATA_URI>".to_string(),
-            ))
+        let values = collect_values(parser)?;
+        if values.len() != 2 {
+            return Err(CliError::Usage(format!(
+                "'pcr-event' requires 2 arguments, but {} were provided",
+                values.len()
+            )));
         }
+        let mut values_iter = values.into_iter();
+        args.handle_uri = values_iter
+            .next()
+            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+        args.data_uri = values_iter
+            .next()
+            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+        Ok(Commands::PcrEvent(args))
     }
 
     /// Runs `pcr-event`.

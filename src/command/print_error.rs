@@ -34,20 +34,20 @@ impl Command for PrintError {
         arguments!(parser, arg, Self::help, {
             _ => return Err(CliError::from(arg.unexpected())),
         });
-
-        let mut values = collect_values(parser)?;
-        if values.len() == 1 {
-            let rc_str = values
-                .pop()
-                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-            Ok(Commands::PrintError(PrintError {
-                rc: parse_tpm_rc(&rc_str)?,
-            }))
-        } else {
-            Err(CliError::Usage(
-                "Missing required argument: <RC>".to_string(),
-            ))
+        let values = collect_values(parser)?;
+        if values.len() != 1 {
+            return Err(CliError::Usage(format!(
+                "'print-error' requires 1 argument, but {} were provided",
+                values.len()
+            )));
         }
+        let rc_str = values
+            .into_iter()
+            .next()
+            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+        Ok(Commands::PrintError(PrintError {
+            rc: parse_tpm_rc(&rc_str)?,
+        }))
     }
 
     fn is_local(&self) -> bool {

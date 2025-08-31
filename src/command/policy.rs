@@ -298,18 +298,18 @@ impl Command for Policy {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
-
-        let mut values = collect_values(parser)?;
-        if values.len() == 1 {
-            let expression = values
-                .pop()
-                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-            Ok(Commands::Policy(Policy { expression }))
-        } else {
-            Err(CliError::Usage(
-                "Missing required argument: <EXPRESSION>".to_string(),
-            ))
+        let values = collect_values(parser)?;
+        if values.len() != 1 {
+            return Err(CliError::Usage(format!(
+                "'policy' requires 1 argument, but {} were provided",
+                values.len()
+            )));
         }
+        let expression = values
+            .into_iter()
+            .next()
+            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+        Ok(Commands::Policy(Policy { expression }))
     }
 
     /// Run 'policy'.

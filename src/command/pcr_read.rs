@@ -37,18 +37,18 @@ impl Command for PcrRead {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
-
-        let mut values = collect_values(parser)?;
-        if values.len() == 1 {
-            let selection = values
-                .pop()
-                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
-            Ok(Commands::PcrRead(PcrRead { selection }))
-        } else {
-            Err(CliError::Usage(
-                "Missing required argument: <SELECTION>".to_string(),
-            ))
+        let values = collect_values(parser)?;
+        if values.len() != 1 {
+            return Err(CliError::Usage(format!(
+                "'pcr-read' requires 1 argument, but {} were provided",
+                values.len()
+            )));
         }
+        let selection = values
+            .into_iter()
+            .next()
+            .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+        Ok(Commands::PcrRead(PcrRead { selection }))
     }
 
     /// Runs `pcr-read`.
