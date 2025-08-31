@@ -32,6 +32,7 @@ pub use self::session::*;
 pub use self::uri::*;
 pub use self::util::*;
 
+use crate::cli::Cli;
 use std::{
     fs::OpenOptions,
     io::{IsTerminal, Read, Write},
@@ -91,6 +92,7 @@ pub trait Command {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut pipeline::CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError>;
 }
@@ -114,7 +116,7 @@ pub fn execute_cli() -> Result<(), CliError> {
         Err(e) => return Err(e),
     };
 
-    if let Some(command) = cli.command {
+    if let Some(command) = &cli.command {
         let _ = LOG_FORMAT.set(cli.log_format);
 
         let device_arc = if command.is_local() {
@@ -132,7 +134,7 @@ pub fn execute_cli() -> Result<(), CliError> {
         let is_tty = stdin.is_terminal();
         let mut io = pipeline::CommandIo::new(stdin, std::io::stdout(), is_tty);
         let cmd_type = command.command_type();
-        command.run(&mut io, device_arc)?;
+        command.run(&mut io, &cli, device_arc)?;
 
         match cmd_type {
             CommandType::Standalone => Ok(()),

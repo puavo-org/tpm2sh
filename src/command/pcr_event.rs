@@ -5,14 +5,19 @@
 use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, PcrEvent},
-    get_auth_sessions, parse_tpm_handle_from_uri,
+    cli::{Cli, Commands, PcrEvent},
+    parse_tpm_handle_from_uri,
     pipeline::CommandIo,
-    resolve_uri_to_bytes, CliError, Command, CommandType, TpmDevice,
+    resolve_uri_to_bytes,
+    session::get_sessions_from_args,
+    CliError, Command, CommandType, TpmDevice,
 };
-use lexopt::prelude::*;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
+
+use std::{
+    io::{Read, Write},
+    sync::{Arc, Mutex},
+};
+
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
 
 const ABOUT: &str = "Extends a PCR with an event";
@@ -27,10 +32,7 @@ const ARGS: &[CommandLineArgument] = &[
         "URI of the data to extend with (e.g., 'data://hex,deadbeef')",
     ),
 ];
-const OPTIONS: &[CommandLineOption] = &[
-    (None, "--password", "<PASSWORD>", "Authorization value"),
-    (Some("-h"), "--help", "", "Print help information"),
-];
+const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PcrEvent {
     fn command_type(&self) -> CommandType {
@@ -47,9 +49,6 @@ impl Command for PcrEvent {
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = PcrEvent::default();
         arguments!(parser, arg, Self::help, {
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
@@ -79,6 +78,7 @@ impl Command for PcrEvent {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -97,8 +97,7 @@ impl Command for PcrEvent {
             event_data,
         };
 
-        let sessions =
-            get_auth_sessions(&command, &handles, None, self.password.password.as_deref())?;
+        let sessions = get_sessions_from_args(io, &command, &handles, cli)?;
         let (resp, _) = chip.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

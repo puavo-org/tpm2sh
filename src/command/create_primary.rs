@@ -5,9 +5,10 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, CreatePrimary},
-    get_auth_sessions, parse_tpm_handle_from_uri,
+    cli::{Cli, Commands, CreatePrimary},
+    parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
+    session::get_sessions_from_args,
     util, Alg, AlgInfo, CliError, Command, CommandType, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -45,12 +46,6 @@ const OPTIONS: &[CommandLineOption] = &[
         "--handle",
         "<HANDLE_URI>",
         "Store object to non-volatile memory (e.g., 'tpm://0x81000001')",
-    ),
-    (
-        None,
-        "--password",
-        "<PASSWORD>",
-        "Authorization value for the hierarchy",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
@@ -138,9 +133,6 @@ impl Command for CreatePrimary {
             Long("handle") => {
                 args.handle_uri = Some(parser.value()?.string()?);
             }
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
@@ -162,6 +154,7 @@ impl Command for CreatePrimary {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         io.clear_input()?;
@@ -174,12 +167,11 @@ impl Command for CreatePrimary {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
-        let user_password = self.password.password.as_deref().unwrap_or("").as_bytes();
         let cmd = TpmCreatePrimaryCommand {
             primary_handle: (primary_handle as u32).into(),
             in_sensitive: Tpm2bSensitiveCreate {
                 inner: TpmsSensitiveCreate {
-                    user_auth: Tpm2bAuth::try_from(user_password)?,
+                    user_auth: Tpm2bAuth::default(),
                     data: Tpm2bSensitiveData::default(),
                 },
             },
@@ -189,7 +181,7 @@ impl Command for CreatePrimary {
             outside_info: Tpm2bData::default(),
             creation_pcr: TpmlPcrSelection::default(),
         };
-        let sessions = get_auth_sessions(&cmd, &handles, None, self.password.password.as_deref())?;
+        let sessions = get_sessions_from_args(io, &cmd, &handles, cli)?;
         let (resp, _) = chip.execute(&cmd, &sessions)?;
 
         let create_primary_resp = resp
@@ -206,7 +198,7 @@ impl Command for CreatePrimary {
                 persistent_handle,
             };
             let evict_handles = [TpmRh::Owner as u32, object_handle_guard.handle().into()];
-            let evict_sessions = get_auth_sessions(&evict_cmd, &evict_handles, None, None)?;
+            let evict_sessions = get_sessions_from_args(io, &evict_cmd, &evict_handles, cli)?;
             let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

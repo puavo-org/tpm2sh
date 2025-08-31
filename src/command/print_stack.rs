@@ -4,7 +4,7 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, PrintStack},
+    cli::{Cli, Commands, PrintStack},
     pipeline::{
         CommandIo, Entry as PipelineEntry, Key as PipelineKey, PublicArea as PipelinePublicArea,
     },
@@ -51,11 +51,12 @@ impl Command for PrintStack {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         _device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let mut objects = Vec::new();
 
-        while let Ok(obj) = io.pop_active_object() {
+        while let Ok(obj) = io.pop_object() {
             objects.push(obj);
         }
 

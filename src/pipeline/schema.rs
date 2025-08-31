@@ -39,6 +39,16 @@ impl Entry {
             None
         }
     }
+
+    /// Returns a reference to the inner `PolicySession` if the variant is `PolicySession`, else `None`.
+    #[must_use]
+    pub fn as_policy_session(&self) -> Option<&PolicySession> {
+        if let Self::PolicySession(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]

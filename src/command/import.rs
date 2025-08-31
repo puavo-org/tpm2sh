@@ -5,12 +5,12 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Import},
+    cli::{Cli, Commands, Import},
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
-    get_auth_sessions,
     key::private_key_from_pem_bytes,
     pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
     resolve_uri_to_bytes,
+    session::get_sessions_from_args,
     util::build_to_vec,
     CliError, Command, CommandType, TpmDevice,
 };
@@ -45,12 +45,6 @@ const OPTIONS: &[CommandLineOption] = &[
         "--key",
         "<KEY_URI>",
         "URI of the external private key to import (e.g., 'file:///path/to/key.pem')",
-    ),
-    (
-        None,
-        "--parent-password",
-        "<PASSWORD>",
-        "Authorization for the parent object",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
@@ -382,9 +376,6 @@ impl Command for Import {
             Long("key") => {
                 args.key_uri = Some(parser.value()?.string()?);
             }
-            Long("parent-password") => {
-                args.parent_password.password = Some(parser.value()?.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
@@ -406,16 +397,13 @@ impl Command for Import {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
-        let parent_obj = io
-            .get_active_object()?
-            .as_tpm()
-            .ok_or_else(|| CliError::Execution("Pipeline missing parent 'tpm' object".to_string()))?
-            .clone();
+        let parent_obj = io.resolve_parent(cli)?;
         let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
@@ -456,12 +444,7 @@ impl Command for Import {
             symmetric_alg,
         };
         let handles = [parent_handle.into()];
-        let sessions = get_auth_sessions(
-            &import_cmd,
-            &handles,
-            None,
-            self.parent_password.password.as_deref(),
-        )?;
+        let sessions = get_sessions_from_args(io, &import_cmd, &handles, cli)?;
 
         let (resp, _) = {
             let mut chip = device_arc

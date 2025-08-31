@@ -5,7 +5,7 @@
 use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, PcrRead},
+    cli::{Cli, Commands, PcrRead},
     get_pcr_count, parse_pcr_selection, pcr_response_to_output,
     pipeline::{CommandIo, Entry as PipelineEntry},
     CliError, Command, CommandType, TpmDevice,
@@ -59,6 +59,7 @@ impl Command for PcrRead {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         io.clear_input()?;

@@ -212,6 +212,24 @@ const SUBCOMMANDS: &[Subcommand] = &[
 const GLOBAL_OPTIONS: &[CommandLineOption] = &[
     (Some("-d"), "--device", "<DEVICE>", "[default: /dev/tpmrm0]"),
     (
+        Some("-p"),
+        "--password",
+        "<PASSWORD>",
+        "Default authorization password",
+    ),
+    (
+        Some("-P"),
+        "--parent",
+        "<URI>",
+        "Parent object URI (e.g., 'tpm://0x40000001', 'pipe://-1')",
+    ),
+    (
+        Some("-S"),
+        "--session",
+        "<URI>",
+        "Session object URI (e.g., 'pipe://-1')",
+    ),
+    (
         None,
         "--log-format",
         "<FORMAT>",
@@ -294,6 +312,15 @@ pub fn parse_cli() -> Result<Option<Cli>, CliError> {
             }
             Short('d') | Long("device") => {
                 cli.device = parser.value()?.string()?;
+            }
+            Short('p') | Long("password") => {
+                cli.password = Some(parser.value()?.string()?);
+            }
+            Short('P') | Long("parent") => {
+                cli.parent_uri = Some(parser.value()?.string()?);
+            }
+            Short('S') | Long("session") => {
+                cli.session_uri = Some(parser.value()?.string()?);
             }
             Long("log-format") => {
                 cli.log_format = parser.value()?.string()?.parse()?;

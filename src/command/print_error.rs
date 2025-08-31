@@ -5,7 +5,7 @@
 use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, PrintError},
+    cli::{Cli, Commands, PrintError},
     parse_tpm_rc,
     pipeline::CommandIo,
     CliError, Command, CommandType, TpmDevice,
@@ -57,6 +57,7 @@ impl Command for PrintError {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         _device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         writeln!(io.writer(), "{}", self.rc)?;

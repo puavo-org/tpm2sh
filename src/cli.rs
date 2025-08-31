@@ -33,6 +33,9 @@ impl FromStr for LogFormat {
 pub struct Cli {
     pub device: String,
     pub log_format: LogFormat,
+    pub password: Option<String>,
+    pub parent_uri: Option<String>,
+    pub session_uri: Option<String>,
     pub command: Option<Commands>,
 }
 
@@ -231,26 +234,27 @@ impl Command for Commands {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut crate::pipeline::CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), crate::CliError> {
         match self {
-            Self::Algorithms(args) => args.run(io, device),
-            Self::Convert(args) => args.run(io, device),
-            Self::CreatePrimary(args) => args.run(io, device),
-            Self::Delete(args) => args.run(io, device),
-            Self::Import(args) => args.run(io, device),
-            Self::Load(args) => args.run(io, device),
-            Self::Objects(args) => args.run(io, device),
-            Self::PcrEvent(args) => args.run(io, device),
-            Self::PcrRead(args) => args.run(io, device),
-            Self::Policy(args) => args.run(io, device),
-            Self::PrintError(args) => args.run(io, device),
-            Self::PrintStack(args) => args.run(io, device),
-            Self::ResetLock(args) => args.run(io, device),
-            Self::Save(args) => args.run(io, device),
-            Self::Seal(args) => args.run(io, device),
-            Self::StartSession(args) => args.run(io, device),
-            Self::Unseal(args) => args.run(io, device),
+            Self::Algorithms(args) => args.run(io, cli, device),
+            Self::Convert(args) => args.run(io, cli, device),
+            Self::CreatePrimary(args) => args.run(io, cli, device),
+            Self::Delete(args) => args.run(io, cli, device),
+            Self::Import(args) => args.run(io, cli, device),
+            Self::Load(args) => args.run(io, cli, device),
+            Self::Objects(args) => args.run(io, cli, device),
+            Self::PcrEvent(args) => args.run(io, cli, device),
+            Self::PcrRead(args) => args.run(io, cli, device),
+            Self::Policy(args) => args.run(io, cli, device),
+            Self::PrintError(args) => args.run(io, cli, device),
+            Self::PrintStack(args) => args.run(io, cli, device),
+            Self::ResetLock(args) => args.run(io, cli, device),
+            Self::Save(args) => args.run(io, cli, device),
+            Self::Seal(args) => args.run(io, cli, device),
+            Self::StartSession(args) => args.run(io, cli, device),
+            Self::Unseal(args) => args.run(io, cli, device),
         }
     }
 }
@@ -265,25 +269,21 @@ pub struct CreatePrimary {
     pub hierarchy: Hierarchy,
     pub algorithm: crate::Alg,
     pub handle_uri: Option<String>,
-    pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Save {
     pub to_uri: Option<String>,
-    pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Delete {
     pub handle_uri: Option<String>,
-    pub password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
 pub struct Import {
     pub key_uri: Option<String>,
-    pub parent_password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
@@ -292,9 +292,7 @@ pub struct Algorithms {
 }
 
 #[derive(Debug, Default)]
-pub struct Load {
-    pub parent_password: PasswordArgs,
-}
+pub struct Load;
 
 #[derive(Debug, Default)]
 pub struct Objects;
@@ -308,7 +306,6 @@ pub struct PcrRead {
 pub struct PcrEvent {
     pub handle_uri: String,
     pub data_uri: String,
-    pub password: PasswordArgs,
 }
 
 #[derive(Debug)]
@@ -320,9 +317,7 @@ pub struct PrintError {
 pub struct PrintStack;
 
 #[derive(Debug, Default)]
-pub struct ResetLock {
-    pub password: PasswordArgs,
-}
+pub struct ResetLock;
 
 #[derive(Debug, Default)]
 pub struct StartSession {
@@ -333,21 +328,17 @@ pub struct StartSession {
 #[derive(Debug, Default)]
 pub struct Seal {
     pub data_uri: Option<String>,
-    pub parent_password: PasswordArgs,
     pub object_password: PasswordArgs,
 }
 
 #[derive(Debug, Default)]
-pub struct Unseal {
-    pub password: PasswordArgs,
-}
+pub struct Unseal;
 
 #[derive(Debug, Default)]
 pub struct Convert {
     pub from: KeyFormat,
     pub to: KeyFormat,
     pub input_uri: Option<String>,
-    pub parent_uri: Option<String>,
 }
 
 #[derive(Debug, Default)]

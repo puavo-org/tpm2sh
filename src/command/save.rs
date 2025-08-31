@@ -5,9 +5,10 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, Save},
-    get_auth_sessions, parse_tpm_handle_from_uri,
+    cli::{Cli, Commands, Save},
+    parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
+    session::get_sessions_from_args,
     CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
@@ -24,12 +25,6 @@ const OPTIONS: &[CommandLineOption] = &[
         "--to",
         "<HANDLE_URI>",
         "URI for the persistent object to be created (e.g., 'tpm://0x81000001')",
-    ),
-    (
-        None,
-        "--password",
-        "<PASSWORD>",
-        "Authorization value for the Owner hierarchy",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
@@ -51,9 +46,6 @@ impl Command for Save {
         arguments!(parser, arg, Self::help, {
             Long("to") => {
                 args.to_uri = Some(parser.value()?.string()?);
-            }
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
             }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
@@ -77,6 +69,7 @@ impl Command for Save {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -96,12 +89,7 @@ impl Command for Save {
             object_handle: object_handle.0.into(),
             persistent_handle,
         };
-        let sessions = get_auth_sessions(
-            &evict_cmd,
-            &handles,
-            None,
-            self.password.password.as_deref(),
-        )?;
+        let sessions = get_sessions_from_args(io, &evict_cmd, &handles, cli)?;
         let (resp, _) = {
             let mut chip = device_arc
                 .lock()

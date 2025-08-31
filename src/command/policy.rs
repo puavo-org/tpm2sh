@@ -4,10 +4,11 @@
 use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{self, Commands, Policy},
+    cli::{self, Cli, Commands, Policy},
     error::ParseError,
     get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
+    session::get_sessions_from_args,
     CliError, Command, CommandType, TpmDevice,
 };
 use pest::iterators::{Pair, Pairs};
@@ -148,13 +149,14 @@ impl PolicyExecutor<'_> {
             pcrs: pcr_selection,
         };
         let handles = [session_handle.into()];
-        let sessions = crate::get_auth_sessions(&cmd, &handles, None, None)?;
+        let sessions = get_sessions_from_args(io, &cmd, &handles, &Cli::default())?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
 
     fn execute_secret_policy(
         &mut self,
+        io: &mut CommandIo<impl Read, impl Write>,
         session_handle: TpmSession,
         auth_handle_uri: &str,
     ) -> Result<(), CliError> {
@@ -168,7 +170,15 @@ impl PolicyExecutor<'_> {
             expiration: 0,
         };
         let handles = [auth_handle, session_handle.into()];
-        let sessions = crate::get_auth_sessions(&cmd, &handles, None, Some(""))?;
+        let sessions = get_sessions_from_args(
+            io,
+            &cmd,
+            &handles,
+            &Cli {
+                password: Some(String::new()),
+                ..Default::default()
+            },
+        )?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -196,7 +206,7 @@ impl PolicyExecutor<'_> {
             p_hash_list: branch_digests,
         };
         let handles = [session_handle.into()];
-        let sessions = crate::get_auth_sessions(&cmd, &handles, None, None)?;
+        let sessions = get_sessions_from_args(io, &cmd, &handles, &Cli::default())?;
         self.chip.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -220,7 +230,7 @@ impl PolicyExecutor<'_> {
                 count.as_ref(),
             ),
             PolicyAst::Secret { auth_handle_uri } => {
-                self.execute_secret_policy(session_handle, auth_handle_uri)
+                self.execute_secret_policy(io, session_handle, auth_handle_uri)
             }
             PolicyAst::Or(branches) => self.execute_or_policy(io, session_handle, branches),
         }
@@ -310,6 +320,7 @@ impl Command for Policy {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -318,7 +329,13 @@ impl Command for Policy {
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let (mut session_obj, is_new_trial) =
+        let (mut session_obj, is_new_trial) = if let Some(uri) = &cli.session_uri {
+            let entry = io.resolve_entry_from_pipe_uri(uri)?;
+            let session = entry.as_policy_session().cloned().ok_or_else(|| {
+                CliError::Usage(format!("URI '{uri}' does not point to a policy session"))
+            })?;
+            (session, false)
+        } else {
             io.pop_policy_session()
                 .map(|s| (s, false))
                 .or_else(|_: CliError| {
@@ -334,7 +351,8 @@ impl Command for Policy {
                         },
                         true,
                     ))
-                })?;
+                })?
+        };
 
         let ast = parse_policy_expression(&self.expression)?;
         let pcr_count = get_pcr_count(&mut chip)?;

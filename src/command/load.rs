@@ -5,15 +5,19 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Load},
-    get_auth_sessions,
+    cli::{Cli, Commands, Load},
     pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
-    resolve_uri_to_bytes, util, CliError, Command, CommandType, TpmDevice,
+    resolve_uri_to_bytes,
+    session::get_sessions_from_args,
+    util, CliError, Command, CommandType, TpmDevice,
 };
+
+use std::{
+    io::{Read, Write},
+    sync::{Arc, Mutex},
+};
+
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use lexopt::prelude::*;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmContextSaveCommand, TpmLoadCommand},
@@ -22,12 +26,7 @@ use tpm2_protocol::{
 
 const ABOUT: &str = "Loads a TPM key or sealed object";
 const USAGE: &str = "tpm2sh load [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[(
-    None,
-    "--parent-password",
-    "<PASSWORD>",
-    "Authorization for the parent object",
-)];
+const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Load {
     fn command_type(&self) -> CommandType {
@@ -42,16 +41,12 @@ impl Command for Load {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Load::default();
         arguments!(parser, arg, Self::help, {
-            Long("parent-password") => {
-                args.parent_password.password = Some(parser.value()?.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
-        Ok(Commands::Load(args))
+        Ok(Commands::Load(Load))
     }
 
     /// Runs `load`.
@@ -62,6 +57,7 @@ impl Command for Load {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -71,7 +67,7 @@ impl Command for Load {
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
         let key_to_load = io.pop_key()?;
-        let parent_obj = io.pop_tpm()?;
+        let parent_obj = io.resolve_parent(cli)?;
         let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
         let parent_handle = parent_handle_guard.handle();
 
@@ -88,12 +84,7 @@ impl Command for Load {
         };
 
         let handles = [parent_handle.into()];
-        let sessions = get_auth_sessions(
-            &load_cmd,
-            &handles,
-            None,
-            self.parent_password.password.as_deref(),
-        )?;
+        let sessions = get_sessions_from_args(io, &load_cmd, &handles, cli)?;
 
         let (resp, _) = chip.execute(&load_cmd, &sessions)?;
         let load_resp = resp

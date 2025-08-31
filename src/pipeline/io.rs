@@ -3,6 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
+    cli::Cli,
     error::ParseError,
     parse_tpm_handle_from_uri,
     pipeline::{
@@ -16,7 +17,6 @@ use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tpm2_protocol::{
-    self,
     data::TpmsContext,
     message::{TpmContextLoadCommand, TpmFlushContextCommand},
     TpmParse, TpmTransient,
@@ -187,16 +187,32 @@ impl<R: Read, W: Write> CommandIo<R, W> {
         Ok(())
     }
 
-    /// Returns the active object (last on the stack) without consuming it.
+    /// Returns a reference to a pipeline entry at a given index.
     ///
     /// # Errors
     ///
     /// Returns a `CliError::Execution` if the pipeline is empty.
-    pub fn get_active_object(&mut self) -> Result<&PipelineEntry, CliError> {
+    pub fn get_object_by_index(&mut self, index: isize) -> Result<&PipelineEntry, CliError> {
         self.hydrate()?;
-        self.input_objects.last().ok_or_else(|| {
-            CliError::Execution("Required object not found in input pipeline".to_string())
-        })
+        let len = self.input_objects.len();
+
+        let actual_index = if index < 0 {
+            let offset = usize::try_from(index.abs())
+                .map_err(|_| ParseError::Custom("Invalid negative index".to_string()))?;
+            len.checked_sub(offset)
+        } else {
+            usize::try_from(index).ok()
+        };
+
+        let Some(idx) = actual_index else {
+            return Err(CliError::Execution(format!(
+                "Pipeline index out of bounds: {index}"
+            )));
+        };
+
+        self.input_objects
+            .get(idx)
+            .ok_or_else(|| CliError::Execution(format!("Pipeline index out of bounds: {index}")))
     }
 
     /// Consumes the active object (last on the stack) and returns it.
@@ -204,35 +220,56 @@ impl<R: Read, W: Write> CommandIo<R, W> {
     /// # Errors
     ///
     /// Returns a `CliError::Execution` if the pipeline is empty.
-    pub fn pop_active_object(&mut self) -> Result<PipelineEntry, CliError> {
+    pub fn pop_object(&mut self) -> Result<PipelineEntry, CliError> {
         self.hydrate()?;
         self.input_objects.pop().ok_or_else(|| {
             CliError::Execution("Required object not found in input pipeline".to_string())
         })
     }
 
-    /// Finalizes the command, writing all new and unconsumed objects to the output stream.
+    /// Resolves a `pipe://` URI to a specific pipeline entry.
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if JSON serialization or I/O fails.
-    pub fn finalize(mut self) -> Result<(), CliError> {
-        self.hydrate()?;
-        let mut final_objects = self.input_objects;
-        final_objects.append(&mut self.output_objects);
-
-        if final_objects.is_empty() {
-            return Ok(());
+    /// Returns a `CliError` if the URI is not a pipe URI or the index is invalid.
+    pub fn resolve_entry_from_pipe_uri(&mut self, uri: &str) -> Result<&PipelineEntry, CliError> {
+        if let Some(index_str) = uri.strip_prefix("pipe://") {
+            let index: isize = index_str.parse()?;
+            self.get_object_by_index(index)
+        } else {
+            Err(CliError::Usage(format!(
+                "Expected a pipe:// URI, but got '{uri}'"
+            )))
         }
+    }
 
-        let output_doc = Pipeline {
-            version: 1,
-            objects: final_objects,
-        };
-
-        let json_string = serde_json::to_string_pretty(&output_doc)?;
-        writeln!(self.writer, "{json_string}")?;
-        Ok(())
+    /// Resolves the parent object from the CLI arguments or the pipeline stack.
+    ///
+    /// This function first checks for a `--parent` URI in the `cli` arguments.
+    /// If found, it resolves that URI. If not, it falls back to popping the
+    /// topmost TPM object from the input pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the URI is invalid, the pipeline is empty, or
+    /// a `pipe://` URI points to a non-TPM object.
+    pub fn resolve_parent(&mut self, cli: &Cli) -> Result<Tpm, CliError> {
+        if let Some(uri) = &cli.parent_uri {
+            if let Some(index_str) = uri.strip_prefix("pipe://") {
+                let index: isize = index_str.parse()?;
+                let entry = self.get_object_by_index(index)?;
+                entry.as_tpm().cloned().ok_or_else(|| {
+                    CliError::Execution(format!("Object at index {index} is not a TPM object"))
+                })
+            } else {
+                Ok(Tpm {
+                    context: uri.clone(),
+                    parent: None,
+                })
+            }
+        } else {
+            self.pop_tpm()
+        }
     }
 
     /// Resolves a `Tpm` object into a transient handle that will be auto-flushed.
@@ -278,6 +315,30 @@ impl<R: Read, W: Write> CommandIo<R, W> {
                     .into(),
             )
         }
+    }
+
+    /// Finalizes the command, writing all new and unconsumed objects to the output stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if JSON serialization or I/O fails.
+    pub fn finalize(mut self) -> Result<(), CliError> {
+        self.hydrate()?;
+        let mut final_objects = self.input_objects;
+        final_objects.append(&mut self.output_objects);
+
+        if final_objects.is_empty() {
+            return Ok(());
+        }
+
+        let output_doc = Pipeline {
+            version: 1,
+            objects: final_objects,
+        };
+
+        let json_string = serde_json::to_string_pretty(&output_doc)?;
+        writeln!(self.writer, "{json_string}")?;
+        Ok(())
     }
 }
 

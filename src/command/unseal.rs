@@ -5,24 +5,18 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Unseal},
-    get_auth_sessions,
+    cli::{Cli, Commands, Unseal},
     pipeline::CommandIo,
+    session::get_sessions_from_args,
     CliError, Command, CommandType, TpmDevice,
 };
-use lexopt::prelude::*;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmUnsealCommand;
 
 const ABOUT: &str = "Unseals a secret from a loaded TPM object";
 const USAGE: &str = "tpm2sh unseal [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[(
-    None,
-    "--password",
-    "<PASSWORD>",
-    "Authorization value for the sealed object",
-)];
+const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Unseal {
     fn command_type(&self) -> CommandType {
@@ -37,11 +31,8 @@ impl Command for Unseal {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Unseal::default();
+        let args = Unseal;
         arguments!(parser, arg, Self::help, {
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
@@ -57,6 +48,7 @@ impl Command for Unseal {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -70,12 +62,7 @@ impl Command for Unseal {
             item_handle: object_handle.0.into(),
         };
         let unseal_handles = [object_handle.into()];
-        let unseal_sessions = get_auth_sessions(
-            &unseal_cmd,
-            &unseal_handles,
-            None,
-            self.password.password.as_deref(),
-        )?;
+        let unseal_sessions = get_sessions_from_args(io, &unseal_cmd, &unseal_handles, cli)?;
 
         let (unseal_resp, _) = {
             let mut chip = device_arc

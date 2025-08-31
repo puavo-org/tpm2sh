@@ -4,9 +4,10 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Commands, Delete},
-    get_auth_sessions, parse_tpm_handle_from_uri,
+    cli::{Cli, Commands, Delete},
+    parse_tpm_handle_from_uri,
     pipeline::CommandIo,
+    session::get_sessions_from_args,
     CliError, Command, CommandType, TpmDevice,
 };
 use lexopt::prelude::*;
@@ -24,10 +25,7 @@ const ARGS: &[CommandLineArgument] = &[(
     "HANDLE_URI",
     "URI of the object to delete (e.g. 'tpm://0x40000001'). If omitted, uses active object.",
 )];
-const OPTIONS: &[CommandLineOption] = &[
-    (None, "--password", "<PASSWORD>", "Authorization value"),
-    (Some("-h"), "--help", "", "Print help information"),
-];
+const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Delete {
     fn command_type(&self) -> CommandType {
@@ -44,9 +42,6 @@ impl Command for Delete {
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = Delete::default();
         arguments!(parser, arg, Self::help, {
-            Long("password") => {
-                args.password.password = Some(parser.value()?.string()?);
-            }
             Value(val) if args.handle_uri.is_none() => {
                 args.handle_uri = Some(val.string()?);
             }
@@ -65,6 +60,7 @@ impl Command for Delete {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let device_arc =
@@ -89,12 +85,7 @@ impl Command for Delete {
                 object_handle: persistent_handle.0.into(),
                 persistent_handle,
             };
-            let sessions = get_auth_sessions(
-                &evict_cmd,
-                &handles,
-                None,
-                self.password.password.as_deref(),
-            )?;
+            let sessions = get_sessions_from_args(io, &evict_cmd, &handles, cli)?;
             let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

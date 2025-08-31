@@ -5,7 +5,7 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
-    cli::{Algorithms, Commands},
+    cli::{Algorithms, Cli, Commands},
     enumerate_all,
     pipeline::CommandIo,
     CliError, Command, CommandType, TpmDevice, TPM_CAP_PROPERTY_MAX,
@@ -78,6 +78,7 @@ impl Command for Algorithms {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         let chip_algorithms = get_chip_algorithms(device)?;

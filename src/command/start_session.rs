@@ -5,7 +5,7 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, StartSession},
+    cli::{Cli, Commands, StartSession},
     key,
     pipeline::{CommandIo, Entry as PipelineEntry, HmacSession, PolicySession},
     CliError, Command, CommandType, TpmDevice,
@@ -73,6 +73,7 @@ impl Command for StartSession {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         io.clear_input()?;

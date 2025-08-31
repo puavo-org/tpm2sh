@@ -4,7 +4,7 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Commands, Objects},
+    cli::{Cli, Commands, Objects},
     pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
     CliError, Command, CommandType, TpmDevice,
 };
@@ -34,7 +34,7 @@ impl Command for Objects {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
-        Ok(Commands::Objects(Objects {}))
+        Ok(Commands::Objects(Objects))
     }
 
     /// Runs `objects`.
@@ -45,6 +45,7 @@ impl Command for Objects {
     fn run<R: Read, W: Write>(
         &self,
         io: &mut CommandIo<R, W>,
+        _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
     ) -> Result<(), CliError> {
         io.clear_input()?;
