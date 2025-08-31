@@ -6,7 +6,7 @@ use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PcrRead},
-    pcr::{get_pcr_count, parse_pcr_selection, pcr_response_to_output},
+    pcr::{pcr_get_count, pcr_parse_selection, pcr_to_values},
     pipeline::{CommandIo, Entry as PipelineEntry},
     CliError, Command, CommandType, TpmDevice,
 };
@@ -69,15 +69,15 @@ impl Command for PcrRead {
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let pcr_count = get_pcr_count(&mut chip)?;
-        let pcr_selection_in = parse_pcr_selection(&self.selection, pcr_count)?;
+        let pcr_count = pcr_get_count(&mut chip)?;
+        let pcr_selection_in = pcr_parse_selection(&self.selection, pcr_count)?;
 
         let cmd = TpmPcrReadCommand { pcr_selection_in };
         let (resp, _) = chip.execute(&cmd, &[])?;
         let pcr_read_resp = resp
             .PcrRead()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let pcr_output = pcr_response_to_output(&pcr_read_resp)?;
+        let pcr_output = pcr_to_values(&pcr_read_resp)?;
 
         io.push_object(PipelineEntry::PcrValues(pcr_output));
         Ok(())

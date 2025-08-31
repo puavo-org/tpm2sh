@@ -12,22 +12,28 @@ use pest::Parser as PestParser;
 use pest_derive::Parser;
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use tpm2_protocol::{data, message};
+use tpm2_protocol::{
+    data::{
+        TpmAlgId, TpmCap, TpmlPcrSelection, TpmsPcrSelection, TpmuCapabilities, TPM_PCR_SELECT_MAX,
+    },
+    message::TpmPcrReadResponse,
+    TpmBuffer,
+};
 
 #[derive(Parser)]
 #[grammar = "command/pcr_selection.pest"]
 pub struct PcrSelectionParser;
 
 /// Gets the number of PCRs from the TPM.
-pub(crate) fn get_pcr_count(chip: &mut TpmDevice) -> Result<usize, CliError> {
-    let cap_data = chip.get_capability(data::TpmCap::Pcrs, 0, device::TPM_CAP_PROPERTY_MAX)?;
+pub(crate) fn pcr_get_count(chip: &mut TpmDevice) -> Result<usize, CliError> {
+    let cap_data = chip.get_capability(TpmCap::Pcrs, 0, device::TPM_CAP_PROPERTY_MAX)?;
     let Some(first_cap) = cap_data.into_iter().next() else {
         return Err(CliError::Execution(
             "TPM reported no capabilities for PCRs.".to_string(),
         ));
     };
 
-    if let data::TpmuCapabilities::Pcrs(pcrs) = first_cap.data {
+    if let TpmuCapabilities::Pcrs(pcrs) = first_cap.data {
         if let Some(first_bank) = pcrs.iter().next() {
             Ok(first_bank.pcr_select.len() * 8)
         } else {
@@ -43,9 +49,7 @@ pub(crate) fn get_pcr_count(chip: &mut TpmDevice) -> Result<usize, CliError> {
 }
 
 /// Converts a `TpmPcrReadResponse` to the structured `PcrValues` format.
-pub(crate) fn pcr_response_to_output(
-    resp: &message::TpmPcrReadResponse,
-) -> Result<pipeline::PcrValues, CliError> {
+pub(crate) fn pcr_to_values(resp: &TpmPcrReadResponse) -> Result<pipeline::PcrValues, CliError> {
     let mut pcr_output = pipeline::PcrValues {
         update: resp.pcr_update_counter,
         banks: BTreeMap::new(),
@@ -80,13 +84,12 @@ pub(crate) fn pcr_response_to_output(
 pub(crate) fn pcr_values_to_selection(
     pcr_values: &pipeline::PcrValues,
     pcr_count: usize,
-) -> Result<data::TpmlPcrSelection, CliError> {
-    let mut list = data::TpmlPcrSelection::new();
+) -> Result<TpmlPcrSelection, CliError> {
+    let mut list = TpmlPcrSelection::new();
     let pcr_select_size = pcr_count.div_ceil(8);
-    if pcr_select_size > data::TPM_PCR_SELECT_MAX {
+    if pcr_select_size > TPM_PCR_SELECT_MAX {
         return Err(CliError::PcrSelection(format!(
-            "required pcr select size {pcr_select_size} exceeds maximum {}",
-            data::TPM_PCR_SELECT_MAX
+            "required pcr select size {pcr_select_size} exceeds maximum {TPM_PCR_SELECT_MAX}"
         )));
     }
 
@@ -102,25 +105,24 @@ pub(crate) fn pcr_values_to_selection(
             }
             pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
         }
-        list.try_push(data::TpmsPcrSelection {
+        list.try_push(TpmsPcrSelection {
             hash: alg,
-            pcr_select: tpm2_protocol::TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
+            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
         })?;
     }
     Ok(list)
 }
 
 /// Parses a PCR selection string (e.g., "sha256:0,7+sha1:1") into a TPM list.
-pub(crate) fn parse_pcr_selection(
+pub(crate) fn pcr_parse_selection(
     selection_str: &str,
     pcr_count: usize,
-) -> Result<data::TpmlPcrSelection, CliError> {
-    let mut list = data::TpmlPcrSelection::new();
+) -> Result<TpmlPcrSelection, CliError> {
+    let mut list = TpmlPcrSelection::new();
     let pcr_select_size = pcr_count.div_ceil(8);
-    if pcr_select_size > data::TPM_PCR_SELECT_MAX {
+    if pcr_select_size > TPM_PCR_SELECT_MAX {
         return Err(CliError::PcrSelection(format!(
-            "required pcr select size {pcr_select_size} exceeds maximum {}",
-            data::TPM_PCR_SELECT_MAX
+            "required pcr select size {pcr_select_size} exceeds maximum {TPM_PCR_SELECT_MAX}"
         )));
     }
 
@@ -151,26 +153,26 @@ pub(crate) fn parse_pcr_selection(
             pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
         }
 
-        list.try_push(data::TpmsPcrSelection {
+        list.try_push(TpmsPcrSelection {
             hash: alg,
-            pcr_select: tpm2_protocol::TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
+            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
         })?;
     }
 
     Ok(list)
 }
 
-struct PcrAlgId(data::TpmAlgId);
+struct PcrAlgId(TpmAlgId);
 
 impl FromStr for PcrAlgId {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "sha1" => Ok(Self(data::TpmAlgId::Sha1)),
-            "sha256" => Ok(Self(data::TpmAlgId::Sha256)),
-            "sha384" => Ok(Self(data::TpmAlgId::Sha384)),
-            "sha512" => Ok(Self(data::TpmAlgId::Sha512)),
+            "sha1" => Ok(Self(TpmAlgId::Sha1)),
+            "sha256" => Ok(Self(TpmAlgId::Sha256)),
+            "sha384" => Ok(Self(TpmAlgId::Sha384)),
+            "sha512" => Ok(Self(TpmAlgId::Sha512)),
             _ => Err(()),
         }
     }

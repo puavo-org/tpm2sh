@@ -7,7 +7,7 @@ use crate::{
     cli::{self, Cli, Commands, Policy},
     error::ParseError,
     key::tpm_alg_id_to_str,
-    pcr::{get_pcr_count, parse_pcr_selection},
+    pcr::{pcr_get_count, pcr_parse_selection},
     pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
     session::get_sessions_from_args,
     uri::uri_to_tpm_handle,
@@ -140,7 +140,7 @@ impl PolicyExecutor<'_> {
             let pcr_values = io.pop_pcr_values()?;
             crate::pcr::pcr_values_to_selection(&pcr_values, self.pcr_count)?
         } else {
-            parse_pcr_selection(selection_str, self.pcr_count)?
+            pcr_parse_selection(selection_str, self.pcr_count)?
         };
 
         let pcr_digest = Tpm2bDigest::try_from(pcr_digest_bytes.as_slice())?;
@@ -357,7 +357,7 @@ impl Command for Policy {
         };
 
         let ast = parse_policy_expression(&self.expression)?;
-        let pcr_count = get_pcr_count(&mut chip)?;
+        let pcr_count = pcr_get_count(&mut chip)?;
         let session_handle = TpmSession(uri_to_tpm_handle(&session_obj.context)?);
 
         {
