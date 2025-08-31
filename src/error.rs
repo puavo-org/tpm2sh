@@ -41,6 +41,9 @@ pub enum CliError {
     #[error("")]
     Help,
 
+    #[error("")]
+    HelpHandled,
+
     #[error("Handle: {0}")]
     InvalidHandle(String),
 

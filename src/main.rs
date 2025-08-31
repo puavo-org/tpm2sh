@@ -14,7 +14,7 @@ fn main() {
 
     match result {
         Ok(()) => {}
-        Err(CliError::Help) => std::process::exit(0),
+        Err(CliError::Help) | Err(CliError::HelpHandled) => std::process::exit(0),
         Err(CliError::UsageHandled) => std::process::exit(2),
         Err(err) => {
             if err.is_usage_error() {

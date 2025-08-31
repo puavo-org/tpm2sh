@@ -108,6 +108,9 @@ pub fn execute_cli() -> Result<(), CliError> {
             crate::arguments::print_main_help();
             return Err(CliError::Help);
         }
+        Err(CliError::HelpHandled) => {
+            return Err(CliError::HelpHandled);
+        }
         Err(e) => return Err(e),
     };
 

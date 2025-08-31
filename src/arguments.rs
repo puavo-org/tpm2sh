@@ -264,7 +264,7 @@ fn dispatch_subcommand(name: &OsString, parser: &mut lexopt::Parser) -> Result<C
         }
         Err(CliError::Help) => {
             (cmd.help)();
-            Err(CliError::Help)
+            Err(CliError::HelpHandled)
         }
         res => res,
     }
