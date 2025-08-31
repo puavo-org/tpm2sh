@@ -10,7 +10,7 @@ use rand::{thread_rng, RngCore};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
-    data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
+    data::{Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
     message::TpmStartAuthSessionCommand,
     tpm_hash_size,
 };
@@ -41,7 +41,7 @@ impl Command for StartSession {
             tpm_key: (TpmRh::Null as u32).into(),
             bind: (TpmRh::Null as u32).into(),
             nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice())?,
-            encrypted_salt: Tpm2b::default(),
+            encrypted_salt: Tpm2bEncryptedSecret::default(),
             session_type: self.session_type.into(),
             symmetric: TpmtSymDefObject::default(),
             auth_hash,

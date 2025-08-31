@@ -15,7 +15,10 @@ use pest_derive::Parser;
 use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
 use tpm2_protocol::{
-    data::{Tpm2b, Tpm2bDigest, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest, TpmtSymDefObject},
+    data::{
+        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest,
+        TpmtSymDefObject,
+    },
     message::{
         TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
         TpmPolicySecretCommand, TpmStartAuthSessionCommand,
@@ -224,7 +227,7 @@ fn start_trial_session(
         tpm_key: (TpmRh::Null as u32).into(),
         bind: (TpmRh::Null as u32).into(),
         nonce_caller: Tpm2bNonce::default(),
-        encrypted_salt: Tpm2b::default(),
+        encrypted_salt: Tpm2bEncryptedSecret::default(),
         session_type: session_type.into(),
         symmetric: TpmtSymDefObject::default(),
         auth_hash: hash_alg,
