@@ -4,13 +4,12 @@
 
 use crate::{
     arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrRead},
     get_pcr_count, parse_pcr_selection, pcr_response_to_output,
     pipeline::{CommandIo, Entry as PipelineEntry},
     CliError, Command, CommandType, TpmDevice,
 };
-use lexopt::prelude::*;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmPcrReadCommand;
@@ -33,17 +32,17 @@ impl Command for PcrRead {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut selection = None;
         arguments!(parser, arg, Self::help, {
-            Value(val) if selection.is_none() => {
-                selection = Some(val.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
 
-        if let Some(selection) = selection {
+        let mut values = collect_values(parser)?;
+        if values.len() == 1 {
+            let selection = values
+                .pop()
+                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
             Ok(Commands::PcrRead(PcrRead { selection }))
         } else {
             Err(CliError::Usage(

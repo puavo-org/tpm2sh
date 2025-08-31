@@ -4,7 +4,7 @@
 
 use crate::{
     arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PcrEvent},
     get_auth_sessions, parse_tpm_handle_from_uri,
     pipeline::CommandIo,
@@ -46,26 +46,23 @@ impl Command for PcrEvent {
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = PcrEvent::default();
-        let mut handle_uri_arg = None;
-        let mut data_uri_arg = None;
         arguments!(parser, arg, Self::help, {
             Long("password") => {
                 args.password.password = Some(parser.value()?.string()?);
-            }
-            Value(val) if handle_uri_arg.is_none() => {
-                handle_uri_arg = Some(val.string()?);
-            }
-            Value(val) if data_uri_arg.is_none() => {
-                data_uri_arg = Some(val.string()?);
             }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
 
-        if let (Some(handle_uri), Some(data_uri)) = (handle_uri_arg, data_uri_arg) {
-            args.handle_uri = handle_uri;
-            args.data_uri = data_uri;
+        let mut values = collect_values(parser)?;
+        if values.len() == 2 {
+            args.data_uri = values
+                .pop()
+                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+            args.handle_uri = values
+                .pop()
+                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
             Ok(Commands::PcrEvent(args))
         } else {
             Err(CliError::Usage(

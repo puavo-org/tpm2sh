@@ -9,6 +9,7 @@ use crate::{
     },
     CliError, Command,
 };
+use lexopt::ValueExt;
 use std::{ffi::OsString, fmt::Write};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -28,6 +29,21 @@ macro_rules! arguments {
             }
         }
     };
+}
+
+/// Collects all subsequent free-standing values from the parser into a vector.
+#[allow(clippy::while_let_loop)]
+pub(crate) fn collect_values(parser: &mut lexopt::Parser) -> Result<Vec<String>, lexopt::Error> {
+    let mut values = Vec::new();
+    loop {
+        match parser.clone().next()? {
+            Some(lexopt::Arg::Value(_)) => {
+                values.push(parser.value()?.string()?);
+            }
+            _ => break,
+        }
+    }
+    Ok(values)
 }
 
 fn format_help_section(title: &str, items: &[(String, &str)], max_len: usize) -> String {

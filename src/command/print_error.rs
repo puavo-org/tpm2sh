@@ -4,13 +4,12 @@
 
 use crate::{
     arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Commands, PrintError},
     parse_tpm_rc,
     pipeline::CommandIo,
     CliError, Command, CommandType, TpmDevice,
 };
-use lexopt::prelude::*;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
@@ -32,17 +31,17 @@ impl Command for PrintError {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut rc_str: Option<String> = None;
         arguments!(parser, arg, Self::help, {
-            Value(val) if rc_str.is_none() => {
-                rc_str = Some(val.string()?);
-            }
             _ => return Err(CliError::from(arg.unexpected())),
         });
 
-        if let Some(s) = rc_str {
+        let mut values = collect_values(parser)?;
+        if values.len() == 1 {
+            let rc_str = values
+                .pop()
+                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
             Ok(Commands::PrintError(PrintError {
-                rc: parse_tpm_rc(&s)?,
+                rc: parse_tpm_rc(&rc_str)?,
             }))
         } else {
             Err(CliError::Usage(

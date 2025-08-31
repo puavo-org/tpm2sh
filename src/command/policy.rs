@@ -3,14 +3,13 @@
 
 use crate::{
     arguments,
-    arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
+    arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{self, Commands, Policy},
     error::ParseError,
     get_pcr_count, key, parse_pcr_selection, parse_tpm_handle_from_uri,
     pipeline::{CommandIo, Entry as PipelineEntry, PolicySession as PipelinePolicySession},
     CliError, Command, CommandType, TpmDevice,
 };
-use lexopt::ValueExt;
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
@@ -284,21 +283,18 @@ impl Command for Policy {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let mut args = Policy::default();
-        let mut expression_arg: Option<String> = None;
-
         arguments!(parser, arg, Self::help, {
-            lexopt::Arg::Value(val) if expression_arg.is_none() => {
-                expression_arg = Some(val.string()?);
-            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
 
-        if let Some(expression) = expression_arg {
-            args.expression = expression;
-            Ok(Commands::Policy(args))
+        let mut values = collect_values(parser)?;
+        if values.len() == 1 {
+            let expression = values
+                .pop()
+                .ok_or_else(|| CliError::Execution("value missing".to_string()))?;
+            Ok(Commands::Policy(Policy { expression }))
         } else {
             Err(CliError::Usage(
                 "Missing required argument: <EXPRESSION>".to_string(),
