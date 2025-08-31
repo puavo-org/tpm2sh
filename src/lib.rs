@@ -14,7 +14,6 @@ pub mod error;
 pub mod key;
 pub mod mocktpm;
 pub mod pcr;
-pub mod pipeline;
 pub mod print;
 pub mod session;
 pub mod transport;
@@ -25,7 +24,7 @@ use crate::{arguments::parse_cli, cli::Cli, device::TpmDevice, error::CliError};
 
 use std::{
     fs::OpenOptions,
-    io::{IsTerminal, Read, Write},
+    io::{self, Write},
     sync::{Arc, Mutex},
 };
 
@@ -38,23 +37,8 @@ pub(crate) fn get_log_format() -> cli::LogFormat {
     *LOG_FORMAT.get().unwrap_or(&cli::LogFormat::default())
 }
 
-/// Describes the role a command plays in the JSON pipeline.
-pub enum CommandType {
-    /// Does not interact with the JSON pipeline. Prints human-readable text.
-    Standalone,
-    /// Creates new objects for a pipeline, but does not consume any.
-    Source,
-    /// Consumes and produces objects, acting as a pipeline transformer.
-    Pipe,
-    /// Consumes objects and terminates the pipeline with non-JSON output.
-    Sink,
-}
-
 /// A trait for parsing and executing subcommands.
 pub trait Command {
-    /// Returns the command's role in the pipeline.
-    fn command_type(&self) -> CommandType;
-
     /// Prints the help message for a subcommand.
     fn help()
     where
@@ -79,11 +63,11 @@ pub trait Command {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut pipeline::CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError>;
 }
 
@@ -120,16 +104,7 @@ pub fn execute_cli() -> Result<(), CliError> {
             Some(Arc::new(Mutex::new(TpmDevice::new(file))))
         };
 
-        let stdin = std::io::stdin();
-        let is_tty = stdin.is_terminal();
-        let mut io = pipeline::CommandIo::new(stdin, std::io::stdout(), is_tty);
-        let cmd_type = command.command_type();
-        command.run(&mut io, &cli, device_arc)?;
-
-        match cmd_type {
-            CommandType::Standalone => Ok(()),
-            _ => io.finalize(),
-        }
+        command.run(&cli, device_arc, &mut io::stdout())
     } else {
         Ok(())
     }

@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{error::ParseError, get_log_format, print::TpmPrint, CliError};
+use crate::{error::ParseError, get_log_format, print::TpmPrint, uri, CliError};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -10,18 +10,129 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
-        Arc,
+        Arc, Mutex,
     },
     time::Duration,
 };
 use tpm2_protocol::{
     self,
-    data::{self, TpmSt, TpmaCc, TpmuCapabilities},
-    message::{TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmResponseBody},
-    TpmWriter, TPM_MAX_COMMAND_SIZE,
+    data::{self, TpmCc, TpmSt, TpmaCc, TpmsContext, TpmuCapabilities},
+    message::{
+        TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
+        TpmGetCapabilityResponse, TpmResponseBody,
+    },
+    TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
+
+/// A wrapper for a transient handle that ensures it is flushed when it goes out of scope.
+#[derive(Debug)]
+pub struct ScopedHandle {
+    handle: TpmTransient,
+    device: Arc<Mutex<TpmDevice>>,
+}
+
+impl ScopedHandle {
+    /// Creates a new scoped handle.
+    #[must_use]
+    pub fn new(handle: TpmTransient, device: Arc<Mutex<TpmDevice>>) -> Self {
+        Self { handle, device }
+    }
+
+    /// Creates a new scoped handle by resolving a URI. This can load a context if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the URI is invalid or the context cannot be loaded.
+    pub fn from_uri(
+        device_arc: &Arc<Mutex<TpmDevice>>,
+        uri: &str,
+    ) -> Result<ScopedHandle, CliError> {
+        if uri.starts_with("tpm://") {
+            let handle = uri::uri_to_tpm_handle(uri)?;
+            Ok(ScopedHandle::new(TpmTransient(handle), device_arc.clone()))
+        } else if uri.starts_with("data://") || uri.starts_with("file://") {
+            let context_blob = uri::uri_to_bytes(uri, &[])?;
+            let (context, remainder) = TpmsContext::parse(&context_blob)?;
+            if !remainder.is_empty() {
+                return Err(ParseError::Custom(
+                    "Context object contains trailing data".to_string(),
+                )
+                .into());
+            }
+
+            let mut device = device_arc
+                .lock()
+                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+            let load_cmd = TpmContextLoadCommand { context };
+            let (resp, _) = device.execute(&load_cmd, &[])?;
+            let load_resp = resp
+                .ContextLoad()
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            Ok(ScopedHandle::new(
+                load_resp.loaded_handle,
+                device_arc.clone(),
+            ))
+        } else {
+            Err(
+                ParseError::Custom(format!("Unsupported URI scheme for a tpm context: '{uri}'"))
+                    .into(),
+            )
+        }
+    }
+
+    /// Returns the inner handle.
+    #[must_use]
+    pub const fn handle(&self) -> TpmTransient {
+        self.handle
+    }
+
+    /// Flushes the transient handle from the TPM.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the `TPM2_FlushContext` command fails.
+    pub fn flush(self) -> Result<(), CliError> {
+        let handle = self.handle;
+        let device_arc = self.device.clone();
+        std::mem::forget(self);
+
+        let mut device = device_arc
+            .lock()
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+
+        let cmd = TpmFlushContextCommand {
+            flush_handle: handle.into(),
+        };
+        device.execute(&cmd, &[]).map_err(|e| {
+            CliError::Execution(format!(
+                "Failed to flush transient handle {handle:#010x}: {e}"
+            ))
+        })?;
+        Ok(())
+    }
+
+    /// Consumes the guard without flushing the handle. This should be used when
+    /// the handle has been consumed by another command, such as `TPM2_EvictControl`.
+    pub fn forget(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for ScopedHandle {
+    fn drop(&mut self) {
+        warn!(
+			"ScopedHandle for handle {:#010x} was dropped without being flushed or forgotten. This is a resource leak.",
+			self.handle
+		);
+        #[cfg(debug_assertions)]
+        panic!(
+            "ScopedHandle for handle {:#010x} dropped without flush() or forget().",
+            self.handle
+        );
+    }
+}
 
 /// A trait combining the I/O and safety traits required for a TPM transport.
 pub trait TpmTransport: Read + Write + Send + Debug {}
@@ -61,7 +172,9 @@ impl TpmDevice {
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut command_buf);
-            let tag = if sessions.is_empty() {
+            let tag = if C::COMMAND == TpmCc::GetCapability {
+                TpmSt::NoSessions
+            } else if sessions.is_empty() && !C::WITH_SESSIONS {
                 TpmSt::NoSessions
             } else {
                 TpmSt::Sessions

@@ -6,23 +6,29 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Unseal},
-    pipeline::CommandIo,
-    session::get_sessions_from_args,
-    CliError, Command, CommandType, TpmDevice,
+    device::ScopedHandle,
+    session::session_from_args,
+    uri::uri_to_tpm_handle,
+    CliError, Command, TpmDevice,
 };
-use std::io::{Read, Write};
+use lexopt::prelude::*;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
-use tpm2_protocol::message::TpmUnsealCommand;
+use tpm2_protocol::{message::TpmUnsealCommand, TpmTransient};
 
 const ABOUT: &str = "Unseals a secret from a loaded TPM object";
-const USAGE: &str = "tpm2sh unseal [OPTIONS]";
-const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
+const USAGE: &str = "tpm2sh unseal [OPTIONS] --handle <HANDLE_URI>";
+const OPTIONS: &[CommandLineOption] = &[
+    (
+        None,
+        "--handle",
+        "<HANDLE_URI>",
+        "URI of the loaded sealed object to unseal (e.g., 'tpm://0x80000000')",
+    ),
+    (Some("-h"), "--help", "", "Print help information"),
+];
 
 impl Command for Unseal {
-    fn command_type(&self) -> CommandType {
-        CommandType::Sink
-    }
-
     fn help() {
         println!(
             "{}",
@@ -31,12 +37,20 @@ impl Command for Unseal {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        let args = Unseal;
+        let mut args = Unseal::default();
         arguments!(parser, arg, Self::help, {
+            Long("handle") => {
+                args.handle_uri = Some(parser.value()?.string()?);
+            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
+        if args.handle_uri.is_none() {
+            return Err(CliError::Usage(
+                "Missing required argument: --handle <HANDLE_URI>".to_string(),
+            ));
+        }
         Ok(Commands::Unseal(args))
     }
 
@@ -45,24 +59,24 @@ impl Command for Unseal {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
-        let sealed_tpm_obj = io.pop_tpm()?;
-        let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &sealed_tpm_obj)?;
+        let handle = uri_to_tpm_handle(self.handle_uri.as_ref().unwrap())?;
+        let object_handle_guard = ScopedHandle::new(TpmTransient(handle), device_arc.clone());
         let object_handle = object_handle_guard.handle();
 
         let unseal_cmd = TpmUnsealCommand {
             item_handle: object_handle.0.into(),
         };
         let unseal_handles = [object_handle.into()];
-        let unseal_sessions = get_sessions_from_args(io, &unseal_cmd, &unseal_handles, cli)?;
+        let unseal_sessions = session_from_args(&unseal_cmd, &unseal_handles, cli)?;
 
         let (unseal_resp, _) = {
             let mut chip = device_arc
@@ -76,7 +90,7 @@ impl Command for Unseal {
 
         object_handle_guard.flush()?;
 
-        io.writer().write_all(&unseal_resp.out_data)?;
+        writer.write_all(&unseal_resp.out_data)?;
         Ok(())
     }
 }

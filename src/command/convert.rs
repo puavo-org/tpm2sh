@@ -6,23 +6,22 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Convert, KeyFormat},
-    key::TpmKey,
-    pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
+    key::{JsonTpmKey, TpmKey},
     uri::{uri_to_bytes, uri_to_tpm_handle},
-    util, CliError, Command, CommandType, TpmDevice,
+    util, CliError, Command, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
 use pkcs8::der::asn1::OctetString;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data, TpmParse};
 
-const ABOUT: &str = "Converts key objects between pipeline JSON and PEM/DER formats";
+const ABOUT: &str = "Converts key objects between ASN.1 and JSON format";
 const USAGE: &str = "tpm2sh convert [OPTIONS] <INPUT_URI>";
 const ARGS: &[(&str, &str)] = &[(
     "INPUT_URI",
-    "URI of the input object (e.g., 'pipe://-1', 'file:///path/to/key.pem')",
+    "URI of the input object (e.g., 'file:///path/to/key.pem')",
 )];
 const OPTIONS: &[CommandLineOption] = &[
     (
@@ -41,10 +40,6 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Convert {
-    fn command_type(&self) -> CommandType {
-        CommandType::Pipe
-    }
-
     fn help() {
         println!(
             "{}",
@@ -85,28 +80,29 @@ impl Command for Convert {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         _device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let input_bytes = uri_to_bytes(self.input_uri.as_ref().unwrap(), &[])?;
 
         let tpm_key = match self.from {
             KeyFormat::Json => {
-                let key_obj: PipelineKey = serde_json::from_slice(&input_bytes)?;
+                let key_obj: JsonTpmKey = serde_json::from_slice(&input_bytes)?;
                 let public_bytes = uri_to_bytes(&key_obj.public, &[])?;
                 let private_bytes = uri_to_bytes(&key_obj.private, &[])?;
 
                 let (public, _) = data::Tpm2bPublic::parse(&public_bytes)?;
                 let oid = crate::crypto::ID_LOADABLE_KEY;
 
-                let parent_handle = if let Some(uri) = &cli.parent_uri {
+                let parent_handle = if let Some(uri) = &cli.parent {
                     uri_to_tpm_handle(uri)?
                 } else {
-                    let parent_obj = io.pop_tpm()?;
-                    uri_to_tpm_handle(&parent_obj.context)?
+                    return Err(CliError::Usage(
+                        "Missing required --parent argument for JSON conversion".to_string(),
+                    ));
                 };
 
                 TpmKey {
@@ -122,19 +118,20 @@ impl Command for Convert {
 
         match self.to {
             KeyFormat::Json => {
-                let key_obj = PipelineKey {
+                let key_obj = JsonTpmKey {
                     public: format!("data://base64,{}", base64_engine.encode(&tpm_key.pub_key)),
                     private: format!("data://base64,{}", base64_engine.encode(&tpm_key.priv_key)),
                 };
-                io.push_object(PipelineEntry::Key(key_obj));
+                let json_string = serde_json::to_string_pretty(&key_obj)?;
+                writeln!(writer, "{json_string}")?;
             }
             KeyFormat::Pem => {
                 let pem_string = tpm_key.to_pem()?;
-                write!(io.writer(), "{pem_string}")?;
+                write!(writer, "{pem_string}")?;
             }
             KeyFormat::Der => {
                 let der_bytes = tpm_key.to_der()?;
-                io.writer().write_all(&der_bytes)?;
+                writer.write_all(&der_bytes)?;
             }
         }
 

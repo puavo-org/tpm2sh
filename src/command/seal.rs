@@ -6,15 +6,16 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Seal},
-    pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    session::get_sessions_from_args,
+    device::ScopedHandle,
+    key::JsonTpmKey,
+    session::session_from_args,
     uri::uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
@@ -44,10 +45,6 @@ const OPTIONS: &[CommandLineOption] = &[
 ];
 
 impl Command for Seal {
-    fn command_type(&self) -> CommandType {
-        CommandType::Pipe
-    }
-
     fn help() {
         println!(
             "{}",
@@ -81,20 +78,20 @@ impl Command for Seal {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let parent_obj = io.resolve_parent(cli)?;
-        let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
+        let parent_uri = cli
+            .parent
+            .as_ref()
+            .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
+        let parent_handle_guard = ScopedHandle::from_uri(&device_arc, parent_uri)?;
         let parent_handle = parent_handle_guard.handle();
 
         let data_to_seal = uri_to_bytes(self.data_uri.as_ref().unwrap(), &[])?;
@@ -137,8 +134,13 @@ impl Command for Seal {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let handles = [parent_handle.into()];
-        let sessions = get_sessions_from_args(io, &cmd, &handles, cli)?;
-        let (resp, _) = chip.execute(&cmd, &sessions)?;
+        let sessions = session_from_args(&cmd, &handles, cli)?;
+        let (resp, _) = {
+            let mut chip = device_arc
+                .lock()
+                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+            chip.execute(&cmd, &sessions)?
+        };
 
         let create_resp = resp.Create().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Create: {e:?}"))
@@ -147,12 +149,15 @@ impl Command for Seal {
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;
 
-        let key = PipelineKey {
+        let key = JsonTpmKey {
             public: format!("data://base64,{}", base64_engine.encode(pub_bytes)),
             private: format!("data://base64,{}", base64_engine.encode(priv_bytes)),
         };
 
-        io.push_object(PipelineEntry::Key(key));
+        let json_string = serde_json::to_string_pretty(&key)?;
+        writeln!(writer, "{json_string}")?;
+
+        parent_handle_guard.flush()?;
         Ok(())
     }
 }

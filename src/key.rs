@@ -8,7 +8,8 @@ use crate::{
     session::AuthSession,
 };
 
-use std::{cmp::Ordering, fs, path::Path, str::FromStr};
+use serde::{Deserialize, Serialize};
+use std::{cmp::Ordering, collections::BTreeMap, fs, path::Path, str::FromStr};
 
 use p256::SecretKey;
 use pkcs8::{
@@ -20,6 +21,20 @@ use pkcs8::{
 use rsa::RsaPrivateKey;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct JsonTpmKey {
+    pub public: String,
+    pub private: String,
+}
+
+pub type JsonPcrBank = BTreeMap<String, String>;
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct JsonPcrValues {
+    pub update: u32,
+    pub banks: BTreeMap<String, JsonPcrBank>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgInfo {

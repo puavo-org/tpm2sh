@@ -2,13 +2,13 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{error::CliError, key::Alg, pipeline::CommandIo, Command, CommandType, TpmDevice};
+use crate::{device::TpmDevice, error::CliError, key::Alg, Command};
 use std::{
-    io::{Read, Write},
+    io::Write,
     str::FromStr,
     sync::{Arc, Mutex},
 };
-use tpm2_protocol::data::TpmRh;
+use tpm2_protocol::data::{TpmAlgId, TpmRc, TpmRh, TpmSe};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub enum LogFormat {
@@ -34,8 +34,8 @@ pub struct Cli {
     pub device: String,
     pub log_format: LogFormat,
     pub password: Option<String>,
-    pub parent_uri: Option<String>,
-    pub session_uri: Option<String>,
+    pub parent: Option<String>,
+    pub session: Option<String>,
     pub command: Option<Commands>,
 }
 
@@ -89,7 +89,7 @@ impl FromStr for SessionType {
     }
 }
 
-impl From<SessionType> for tpm2_protocol::data::TpmSe {
+impl From<SessionType> for TpmSe {
     fn from(val: SessionType) -> Self {
         match val {
             SessionType::Hmac => Self::Hmac,
@@ -121,7 +121,7 @@ impl FromStr for SessionHashAlg {
     }
 }
 
-impl From<SessionHashAlg> for tpm2_protocol::data::TpmAlgId {
+impl From<SessionHashAlg> for TpmAlgId {
     fn from(alg: SessionHashAlg) -> Self {
         match alg {
             SessionHashAlg::Sha256 => Self::Sha256,
@@ -164,7 +164,6 @@ pub enum Commands {
     PcrRead(PcrRead),
     Policy(Policy),
     PrintError(PrintError),
-    PrintStack(PrintStack),
     ResetLock(ResetLock),
     Save(Save),
     Seal(Seal),
@@ -173,28 +172,6 @@ pub enum Commands {
 }
 
 impl Command for Commands {
-    fn command_type(&self) -> CommandType {
-        match self {
-            Self::Algorithms(args) => args.command_type(),
-            Self::Convert(args) => args.command_type(),
-            Self::CreatePrimary(args) => args.command_type(),
-            Self::Delete(args) => args.command_type(),
-            Self::Import(args) => args.command_type(),
-            Self::Load(args) => args.command_type(),
-            Self::Objects(args) => args.command_type(),
-            Self::PcrEvent(args) => args.command_type(),
-            Self::PcrRead(args) => args.command_type(),
-            Self::Policy(args) => args.command_type(),
-            Self::PrintError(args) => args.command_type(),
-            Self::PrintStack(args) => args.command_type(),
-            Self::ResetLock(args) => args.command_type(),
-            Self::Save(args) => args.command_type(),
-            Self::Seal(args) => args.command_type(),
-            Self::StartSession(args) => args.command_type(),
-            Self::Unseal(args) => args.command_type(),
-        }
-    }
-
     fn help()
     where
         Self: Sized,
@@ -222,7 +199,6 @@ impl Command for Commands {
             Self::PcrRead(args) => args.is_local(),
             Self::Policy(args) => args.is_local(),
             Self::PrintError(args) => args.is_local(),
-            Self::PrintStack(args) => args.is_local(),
             Self::ResetLock(args) => args.is_local(),
             Self::Save(args) => args.is_local(),
             Self::Seal(args) => args.is_local(),
@@ -231,30 +207,29 @@ impl Command for Commands {
         }
     }
 
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         match self {
-            Self::Algorithms(args) => args.run(io, cli, device),
-            Self::Convert(args) => args.run(io, cli, device),
-            Self::CreatePrimary(args) => args.run(io, cli, device),
-            Self::Delete(args) => args.run(io, cli, device),
-            Self::Import(args) => args.run(io, cli, device),
-            Self::Load(args) => args.run(io, cli, device),
-            Self::Objects(args) => args.run(io, cli, device),
-            Self::PcrEvent(args) => args.run(io, cli, device),
-            Self::PcrRead(args) => args.run(io, cli, device),
-            Self::Policy(args) => args.run(io, cli, device),
-            Self::PrintError(args) => args.run(io, cli, device),
-            Self::PrintStack(args) => args.run(io, cli, device),
-            Self::ResetLock(args) => args.run(io, cli, device),
-            Self::Save(args) => args.run(io, cli, device),
-            Self::Seal(args) => args.run(io, cli, device),
-            Self::StartSession(args) => args.run(io, cli, device),
-            Self::Unseal(args) => args.run(io, cli, device),
+            Self::Algorithms(args) => args.run(cli, device, writer),
+            Self::Convert(args) => args.run(cli, device, writer),
+            Self::CreatePrimary(args) => args.run(cli, device, writer),
+            Self::Delete(args) => args.run(cli, device, writer),
+            Self::Import(args) => args.run(cli, device, writer),
+            Self::Load(args) => args.run(cli, device, writer),
+            Self::Objects(args) => args.run(cli, device, writer),
+            Self::PcrEvent(args) => args.run(cli, device, writer),
+            Self::PcrRead(args) => args.run(cli, device, writer),
+            Self::Policy(args) => args.run(cli, device, writer),
+            Self::PrintError(args) => args.run(cli, device, writer),
+            Self::ResetLock(args) => args.run(cli, device, writer),
+            Self::Save(args) => args.run(cli, device, writer),
+            Self::Seal(args) => args.run(cli, device, writer),
+            Self::StartSession(args) => args.run(cli, device, writer),
+            Self::Unseal(args) => args.run(cli, device, writer),
         }
     }
 }
@@ -274,6 +249,7 @@ pub struct CreatePrimary {
 #[derive(Debug, Default)]
 pub struct Save {
     pub to_uri: Option<String>,
+    pub in_uri: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -292,7 +268,10 @@ pub struct Algorithms {
 }
 
 #[derive(Debug, Default)]
-pub struct Load;
+pub struct Load {
+    pub public_uri: Option<String>,
+    pub private_uri: Option<String>,
+}
 
 #[derive(Debug, Default)]
 pub struct Objects;
@@ -304,17 +283,14 @@ pub struct PcrRead {
 
 #[derive(Debug, Default)]
 pub struct PcrEvent {
-    pub handle_uri: String,
+    pub pcr_uri: String,
     pub data_uri: String,
 }
 
 #[derive(Debug)]
 pub struct PrintError {
-    pub rc: tpm2_protocol::data::TpmRc,
+    pub rc: TpmRc,
 }
-
-#[derive(Debug, Default)]
-pub struct PrintStack;
 
 #[derive(Debug, Default)]
 pub struct ResetLock;
@@ -322,7 +298,6 @@ pub struct ResetLock;
 #[derive(Debug, Default)]
 pub struct StartSession {
     pub session_type: SessionType,
-    pub hash_alg: SessionHashAlg,
 }
 
 #[derive(Debug, Default)]
@@ -332,7 +307,9 @@ pub struct Seal {
 }
 
 #[derive(Debug, Default)]
-pub struct Unseal;
+pub struct Unseal {
+    pub handle_uri: Option<String>,
+}
 
 #[derive(Debug, Default)]
 pub struct Convert {

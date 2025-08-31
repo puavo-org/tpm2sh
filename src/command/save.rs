@@ -6,18 +6,18 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, Save},
-    pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
-    session::get_sessions_from_args,
+    device::ScopedHandle,
+    session::session_from_args,
     uri::uri_to_tpm_handle,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
 use lexopt::prelude::*;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent};
 
 const ABOUT: &str = "Saves a transient object to non-volatile memory";
-const USAGE: &str = "tpm2sh save --to <HANDLE_URI> [OPTIONS]";
+const USAGE: &str = "tpm2sh save --to <HANDLE_URI> --in <CONTEXT_URI> [OPTIONS]";
 const ARGS: &[CommandLineArgument] = &[];
 const OPTIONS: &[CommandLineOption] = &[
     (
@@ -26,14 +26,16 @@ const OPTIONS: &[CommandLineOption] = &[
         "<HANDLE_URI>",
         "URI for the persistent object to be created (e.g., 'tpm://0x81000001')",
     ),
+    (
+        None,
+        "--in",
+        "<CONTEXT_URI>",
+        "URI of the transient object context to save (e.g., 'file:///path/to/context.bin')",
+    ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
 impl Command for Save {
-    fn command_type(&self) -> CommandType {
-        CommandType::Pipe
-    }
-
     fn help() {
         println!(
             "{}",
@@ -47,14 +49,17 @@ impl Command for Save {
             Long("to") => {
                 args.to_uri = Some(parser.value()?.string()?);
             }
+            Long("in") => {
+                args.in_uri = Some(parser.value()?.string()?);
+            }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
 
-        if args.to_uri.is_none() {
+        if args.to_uri.is_none() || args.in_uri.is_none() {
             return Err(CliError::Usage(
-                "Missing required argument: --to <HANDLE_URI>".to_string(),
+                "Missing required arguments: --to and --in".to_string(),
             ));
         }
 
@@ -66,17 +71,17 @@ impl Command for Save {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
-        let object_to_save = io.pop_tpm()?;
-        let object_handle_guard = io.resolve_tpm_context(device_arc.clone(), &object_to_save)?;
+        let object_handle_guard =
+            ScopedHandle::from_uri(&device_arc, self.in_uri.as_ref().unwrap())?;
         let object_handle = object_handle_guard.handle();
 
         let persistent_handle = TpmPersistent(uri_to_tpm_handle(self.to_uri.as_ref().unwrap())?);
@@ -88,7 +93,7 @@ impl Command for Save {
             object_handle: object_handle.0.into(),
             persistent_handle,
         };
-        let sessions = get_sessions_from_args(io, &evict_cmd, &handles, cli)?;
+        let sessions = session_from_args(&evict_cmd, &handles, cli)?;
         let (resp, _) = {
             let mut chip = device_arc
                 .lock()
@@ -100,12 +105,7 @@ impl Command for Save {
 
         object_handle_guard.forget();
 
-        let pipeline_tpm = PipelineTpm {
-            context: format!("tpm://{persistent_handle:#010x}"),
-            parent: object_to_save.parent,
-        };
-
-        io.push_object(PipelineEntry::Tpm(pipeline_tpm));
+        writeln!(writer, "tpm://{persistent_handle:#010x}")?;
         Ok(())
     }
 }

@@ -6,11 +6,10 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, ResetLock},
-    pipeline::CommandIo,
-    session::get_sessions_from_args,
-    CliError, Command, CommandType, TpmDevice,
+    session::session_from_args,
+    CliError, Command, TpmDevice,
 };
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
@@ -19,10 +18,6 @@ const USAGE: &str = "tpm2sh reset-lock [OPTIONS]";
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for ResetLock {
-    fn command_type(&self) -> CommandType {
-        CommandType::Sink
-    }
-
     fn help() {
         println!(
             "{}",
@@ -45,11 +40,11 @@ impl Command for ResetLock {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
@@ -61,12 +56,12 @@ impl Command for ResetLock {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
         let handles = [TpmRh::Lockout as u32];
-        let sessions = get_sessions_from_args(io, &command, &handles, cli)?;
+        let sessions = session_from_args(&command, &handles, cli)?;
         let (resp, _) = chip.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-        writeln!(io.writer(), "Dictionary attack lockout has been reset.")?;
+        writeln!(writer, "Dictionary attack lockout has been reset.")?;
         Ok(())
     }
 }

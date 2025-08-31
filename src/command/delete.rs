@@ -5,13 +5,12 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, Delete},
-    pipeline::CommandIo,
-    session::get_sessions_from_args,
+    session::session_from_args,
     uri::uri_to_tpm_handle,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
 use lexopt::prelude::*;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::TpmRh,
@@ -20,18 +19,14 @@ use tpm2_protocol::{
 };
 
 const ABOUT: &str = "Deletes a transient or persistent object";
-const USAGE: &str = "tpm2sh delete [OPTIONS] [HANDLE_URI]";
+const USAGE: &str = "tpm2sh delete [OPTIONS] <HANDLE_URI>";
 const ARGS: &[CommandLineArgument] = &[(
     "HANDLE_URI",
-    "URI of the object to delete (e.g. 'tpm://0x40000001'). If omitted, uses active object.",
+    "URI of the object to delete (e.g. 'tpm://0x81000001').",
 )];
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Delete {
-    fn command_type(&self) -> CommandType {
-        CommandType::Sink
-    }
-
     fn help() {
         println!(
             "{}",
@@ -49,6 +44,11 @@ impl Command for Delete {
                 return Err(CliError::from(arg.unexpected()));
             }
         });
+        if args.handle_uri.is_none() {
+            return Err(CliError::Usage(
+                "Missing required argument <HANDLE_URI>".to_string(),
+            ));
+        }
         Ok(Commands::Delete(args))
     }
 
@@ -57,11 +57,11 @@ impl Command for Delete {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
@@ -69,12 +69,7 @@ impl Command for Delete {
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-        let handle = if let Some(uri) = &self.handle_uri {
-            uri_to_tpm_handle(uri)?
-        } else {
-            let tpm_obj = io.pop_tpm()?;
-            uri_to_tpm_handle(&tpm_obj.context)?
-        };
+        let handle = uri_to_tpm_handle(self.handle_uri.as_ref().unwrap())?;
 
         if handle >= TpmRh::PersistentFirst as u32 {
             let persistent_handle = TpmPersistent(handle);
@@ -85,14 +80,11 @@ impl Command for Delete {
                 object_handle: persistent_handle.0.into(),
                 persistent_handle,
             };
-            let sessions = get_sessions_from_args(io, &evict_cmd, &handles, cli)?;
+            let sessions = session_from_args(&evict_cmd, &handles, cli)?;
             let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            writeln!(
-                io.writer(),
-                "Deleted persistent handle {persistent_handle:#010x}"
-            )?;
+            writeln!(writer, "tpm://{persistent_handle:#010x}")?;
         } else if handle >= TpmRh::TransientFirst as u32 {
             let flush_handle = TpmTransient(handle);
             let flush_cmd = TpmFlushContextCommand {
@@ -101,7 +93,7 @@ impl Command for Delete {
             let (resp, _) = chip.execute(&flush_cmd, &[])?;
             resp.FlushContext()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            writeln!(io.writer(), "Flushed transient handle {flush_handle:#010x}")?;
+            writeln!(writer, "tpm://{flush_handle:#010x}")?;
         } else {
             return Err(CliError::InvalidHandle(format!(
                 "'{handle:#010x}' is not a transient or persistent handle"

@@ -6,18 +6,15 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, CreatePrimary},
+    device::ScopedHandle,
     error::CliError,
     key::{Alg, AlgInfo},
-    pipeline::{CommandIo, Entry as PipelineEntry, ScopedHandle, Tpm as PipelineTpm},
-    session::get_sessions_from_args,
+    session::session_from_args,
     uri::uri_to_tpm_handle,
-    util, Command, CommandType, TpmDevice,
+    util, Command, TpmDevice,
 };
-
-use std::{
-    io::{Read, Write},
-    sync::{Arc, Mutex},
-};
+use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::prelude::*;
@@ -114,10 +111,6 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
 }
 
 impl Command for CreatePrimary {
-    fn command_type(&self) -> CommandType {
-        CommandType::Source
-    }
-
     fn help() {
         println!(
             "{}",
@@ -157,19 +150,17 @@ impl Command for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
-        io.clear_input()?;
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -187,15 +178,13 @@ impl Command for CreatePrimary {
             outside_info: Tpm2bData::default(),
             creation_pcr: TpmlPcrSelection::default(),
         };
-        let sessions = get_sessions_from_args(io, &cmd, &handles, cli)?;
+        let sessions = session_from_args(&cmd, &handles, cli)?;
         let (resp, _) = chip.execute(&cmd, &sessions)?;
-
         let create_primary_resp = resp
             .CreatePrimary()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let object_handle = create_primary_resp.object_handle;
-
-        let final_object = if let Some(uri) = &self.handle_uri {
+        if let Some(uri) = &self.handle_uri {
             let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
             let persistent_handle = TpmPersistent(uri_to_tpm_handle(uri)?);
             let evict_cmd = TpmEvictControlCommand {
@@ -204,17 +193,14 @@ impl Command for CreatePrimary {
                 persistent_handle,
             };
             let evict_handles = [TpmRh::Owner as u32, object_handle_guard.handle().into()];
-            let evict_sessions = get_sessions_from_args(io, &evict_cmd, &evict_handles, cli)?;
+            let evict_sessions = session_from_args(&evict_cmd, &evict_handles, cli)?;
             let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
             object_handle_guard.forget();
 
-            PipelineTpm {
-                context: format!("tpm://{persistent_handle:#010x}"),
-                parent: None,
-            }
+            writeln!(writer, "tpm://{persistent_handle:#010x}")?;
         } else {
             let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
             let save_command = TpmContextSaveCommand {
@@ -228,13 +214,12 @@ impl Command for CreatePrimary {
 
             object_handle_guard.flush()?;
 
-            PipelineTpm {
-                context: format!("data://base64,{}", base64_engine.encode(context_bytes)),
-                parent: None,
-            }
-        };
-
-        io.push_object(PipelineEntry::Tpm(final_object));
+            writeln!(
+                writer,
+                "data://base64,{}",
+                base64_engine.encode(context_bytes)
+            )?;
+        }
         Ok(())
     }
 }

@@ -5,13 +5,14 @@
 use crate::{
     device,
     error::ParseError,
-    key::{self, tpm_alg_id_to_str},
-    pipeline, CliError, TpmDevice,
+    key::{tpm_alg_id_to_str, JsonPcrValues},
+    CliError, TpmDevice,
 };
+
+use std::{collections::BTreeMap, str::FromStr};
+
 use pest::Parser as PestParser;
 use pest_derive::Parser;
-use std::collections::BTreeMap;
-use std::str::FromStr;
 use tpm2_protocol::{
     data::{
         TpmAlgId, TpmCap, TpmlPcrSelection, TpmsPcrSelection, TpmuCapabilities, TPM_PCR_SELECT_MAX,
@@ -48,11 +49,11 @@ pub(crate) fn pcr_get_count(chip: &mut TpmDevice) -> Result<usize, CliError> {
     }
 }
 
-/// Converts a `TpmPcrReadResponse` to the structured `PcrValues` format.
-pub(crate) fn pcr_to_values(resp: &TpmPcrReadResponse) -> Result<pipeline::PcrValues, CliError> {
-    let mut pcr_output = pipeline::PcrValues {
+/// Converts a `TpmPcrReadResponse` to a serializable `JsonPcrValues` format.
+pub(crate) fn pcr_to_values(resp: &TpmPcrReadResponse) -> Result<JsonPcrValues, CliError> {
+    let mut pcr_output = JsonPcrValues {
         update: resp.pcr_update_counter,
-        banks: BTreeMap::new(),
+        banks: BTreeMap::default(),
     };
     let mut digest_iter = resp.pcr_values.iter();
 
@@ -78,39 +79,6 @@ pub(crate) fn pcr_to_values(resp: &TpmPcrReadResponse) -> Result<pipeline::PcrVa
         }
     }
     Ok(pcr_output)
-}
-
-/// Converts a `PcrValues` object into a `TpmlPcrSelection` list.
-pub(crate) fn pcr_values_to_selection(
-    pcr_values: &pipeline::PcrValues,
-    pcr_count: usize,
-) -> Result<TpmlPcrSelection, CliError> {
-    let mut list = TpmlPcrSelection::new();
-    let pcr_select_size = pcr_count.div_ceil(8);
-    if pcr_select_size > TPM_PCR_SELECT_MAX {
-        return Err(CliError::PcrSelection(format!(
-            "required pcr select size {pcr_select_size} exceeds maximum {TPM_PCR_SELECT_MAX}"
-        )));
-    }
-
-    for (bank_name, pcr_map) in &pcr_values.banks {
-        let alg = key::tpm_alg_id_from_str(bank_name).map_err(ParseError::Custom)?;
-        let mut pcr_select_bytes = vec![0u8; pcr_select_size];
-        for pcr_str in pcr_map.keys() {
-            let pcr_index: usize = pcr_str.parse()?;
-            if pcr_index >= pcr_count {
-                return Err(CliError::PcrSelection(format!(
-                    "pcr index {pcr_index} is out of range for a TPM with {pcr_count} PCRs"
-                )));
-            }
-            pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
-        }
-        list.try_push(TpmsPcrSelection {
-            hash: alg,
-            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
-        })?;
-    }
-    Ok(list)
 }
 
 /// Parses a PCR selection string (e.g., "sha256:0,7+sha1:1") into a TPM list.

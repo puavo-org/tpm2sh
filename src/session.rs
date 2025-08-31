@@ -2,19 +2,11 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{
-    cli::Cli,
-    key::create_auth,
-    pipeline::{CommandIo, Entry as PipelineEntry},
-    uri::uri_to_tpm_handle,
-    util::build_to_vec,
-    CliError,
-};
+use crate::{cli::Cli, key::create_auth, uri::uri_to_tpm_handle, util::build_to_vec, CliError};
 use log::debug;
 use rand::RngCore;
-use std::io::{Read, Write};
 use tpm2_protocol::{
-    data::{self, Tpm2bAuth, Tpm2bNonce, TpmRh, TpmaSession},
+    data::{self, Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmRh, TpmaSession},
     message::TpmHeader,
     tpm_hash_size, TpmSession,
 };
@@ -34,108 +26,58 @@ pub struct AuthSession {
 /// # Errors
 ///
 /// Returns `CliError` on failure.
-fn build_password_session(password: Option<&str>) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
-    match password {
-        Some(password) => {
-            debug!(target: "cli::session", "building password session: password_len = {}", password.len());
-            Ok(vec![data::TpmsAuthCommand {
-                session_handle: TpmSession(TpmRh::Password as u32),
-                nonce: Tpm2bNonce::default(),
-                session_attributes: TpmaSession::empty(),
-                hmac: Tpm2bAuth::try_from(password.as_bytes())?,
-            }])
-        }
-        None => Ok(Vec::new()),
-    }
+fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
+    debug!(target: "cli::session", "building password session: password_len = {}", password.len());
+    Ok(vec![data::TpmsAuthCommand {
+        session_handle: TpmSession(TpmRh::Password as u32),
+        nonce: Tpm2bNonce::default(),
+        session_attributes: TpmaSession::empty(),
+        hmac: Tpm2bAuth::try_from(password.as_bytes())?,
+    }])
 }
 
-/// Computes the authorization HMAC for a command session.
+/// Acquires the authorization session from the global arguments. `--password`
+/// and `--session` are mutually exclusive arguments, and using both with result
+/// an error. For the time being, `--session` support only HMAC sessions.
+///
+/// FIXME: `data://` is missing for sessions (only `tpm://` works).
 ///
 /// # Errors
 ///
-/// Returns a `CliError` if the session's hash algorithm is not
-/// supported, or if an HMAC operation fails.
-fn get_auth_for_hmac_session<C>(
-    command: &C,
-    handles: &[u32],
-    session: &AuthSession,
-) -> Result<Vec<data::TpmsAuthCommand>, CliError>
-where
-    C: TpmHeader,
-{
-    let params = build_to_vec(command)?;
-
-    let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
-        CliError::Execution(format!(
-            "session has an invalid hash algorithm: {}",
-            session.auth_hash
-        ))
-    })?;
-
-    let mut nonce_bytes = vec![0; nonce_size];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce_caller = data::Tpm2bNonce::try_from(nonce_bytes.as_slice())?;
-
-    Ok(vec![create_auth(
-        session,
-        &nonce_caller,
-        C::COMMAND,
-        handles,
-        &params,
-    )?])
-}
-
-/// Prepares the authorization sessions for a command based on the global arguments.
-///
-/// # Errors
-///
-/// Returns a `CliError` if authorization cannot be constructed.
-pub fn get_sessions_from_args<R: Read, W: Write, C: TpmHeader>(
-    io: &mut CommandIo<R, W>,
+/// Returns a `CliError::Usage` if authorization is not valid.
+pub fn session_from_args<C: TpmHeader>(
     command: &C,
     handles: &[u32],
     cli: &Cli,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
-    if cli.session_uri.is_some() && cli.password.is_some() {
-        return Err(CliError::Usage(
-            "Cannot use --session and --password at the same time".to_string(),
-        ));
-    }
-
-    if let Some(uri) = &cli.session_uri {
-        let session_entry = io.resolve_entry_from_pipe_uri(uri)?.clone();
-        if let PipelineEntry::HmacSession(s) = session_entry {
+    match (cli.session.clone(), cli.password.clone()) {
+        (Some(_), Some(_)) => Err(CliError::Usage(
+            "'--session' and '--password' are mutually exclusive".to_string(),
+        )),
+        (Some(session), None) => {
             let session = AuthSession {
-                handle: TpmSession(uri_to_tpm_handle(&s.context)?),
+                handle: TpmSession(uri_to_tpm_handle(&session)?),
                 nonce_tpm: Tpm2bNonce::default(),
                 attributes: TpmaSession::default(),
                 hmac_key: Tpm2bAuth::default(),
-                auth_hash: crate::key::tpm_alg_id_from_str(&s.algorithm)
-                    .map_err(CliError::Usage)?,
+                auth_hash: TpmAlgId::Sha256,
             };
-            return get_auth_for_hmac_session(command, handles, &session);
+            let params = build_to_vec(command)?;
+            let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
+                CliError::Usage(format!("'{}' is unknown algorithm", session.auth_hash))
+            })?;
+            let mut nonce_bytes = vec![0; nonce_size];
+            rand::thread_rng().fill_bytes(&mut nonce_bytes);
+            let nonce_caller = data::Tpm2bNonce::try_from(nonce_bytes.as_slice())?;
+            Ok(vec![create_auth(
+                &session,
+                &nonce_caller,
+                C::COMMAND,
+                handles,
+                &params,
+            )?])
         }
-        return Err(CliError::Usage(format!(
-            "URI '{uri}' does not point to a valid session object"
-        )));
-    }
-
-    if cli.password.is_some() {
-        return build_password_session(cli.password.as_deref());
-    }
-
-    match io.pop_hmac_session() {
-        Ok(s) => {
-            let session = AuthSession {
-                handle: TpmSession(uri_to_tpm_handle(&s.context)?),
-                nonce_tpm: Tpm2bNonce::default(),
-                attributes: TpmaSession::default(),
-                hmac_key: Tpm2bAuth::default(),
-                auth_hash: crate::key::tpm_alg_id_from_str(&s.algorithm)
-                    .map_err(CliError::Usage)?,
-            };
-            get_auth_for_hmac_session(command, handles, &session)
-        }
-        Err(_) => build_password_session(if C::WITH_SESSIONS { Some("") } else { None }),
+        (None, Some(password)) => build_password_session(&password),
+        (None, None) => build_password_session(""),
     }
 }

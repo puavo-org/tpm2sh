@@ -8,13 +8,12 @@ use crate::{
     cli::{Algorithms, Cli, Commands},
     device::TPM_CAP_PROPERTY_MAX,
     key::enumerate_all,
-    pipeline::CommandIo,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
 use lexopt::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::{TpmAlgId, TpmCap, TpmuCapabilities};
 
@@ -47,10 +46,6 @@ fn get_chip_algorithms(
 }
 
 impl Command for Algorithms {
-    fn command_type(&self) -> CommandType {
-        CommandType::Standalone
-    }
-
     fn help() {
         println!(
             "{}",
@@ -76,11 +71,11 @@ impl Command for Algorithms {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let chip_algorithms = get_chip_algorithms(device)?;
         let cli_algorithms = enumerate_all();
@@ -105,7 +100,7 @@ impl Command for Algorithms {
             .collect();
         sorted_names.sort();
         for name in sorted_names {
-            writeln!(io.writer(), "{name}")?;
+            writeln!(writer, "{name}")?;
         }
         Ok(())
     }

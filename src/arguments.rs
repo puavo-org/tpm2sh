@@ -5,7 +5,7 @@
 use crate::{
     cli::{
         Algorithms, Cli, Commands, Convert, CreatePrimary, Delete, Import, Load, Objects, PcrEvent,
-        PcrRead, Policy, PrintError, PrintStack, ResetLock, Save, Seal, StartSession, Unseal,
+        PcrRead, Policy, PrintError, ResetLock, Save, Seal, StartSession, Unseal,
     },
     CliError, Command,
 };
@@ -173,12 +173,6 @@ const SUBCOMMANDS: &[Subcommand] = &[
         parse: PrintError::parse,
     },
     Subcommand {
-        name: "print-stack",
-        about: "Prints a human-readable summary of the object stack to stderr",
-        help: PrintStack::help,
-        parse: PrintStack::parse,
-    },
-    Subcommand {
         name: "reset-lock",
         about: "Resets the dictionary attack lockout timer",
         help: ResetLock::help,
@@ -221,13 +215,13 @@ const GLOBAL_OPTIONS: &[CommandLineOption] = &[
         Some("-P"),
         "--parent",
         "<URI>",
-        "Parent object URI (e.g., 'tpm://0x40000001', 'pipe://-1')",
+        "Parent object URI (e.g., 'tpm://0x40000001', 'file:///.../context.bin')",
     ),
     (
         Some("-S"),
         "--session",
         "<URI>",
-        "Session object URI (e.g., 'pipe://-1')",
+        "Session object URI (e.g., 'tpm://0x03000000')",
     ),
     (
         None,
@@ -317,10 +311,10 @@ pub fn parse_cli() -> Result<Option<Cli>, CliError> {
                 cli.password = Some(parser.value()?.string()?);
             }
             Short('P') | Long("parent") => {
-                cli.parent_uri = Some(parser.value()?.string()?);
+                cli.parent = Some(parser.value()?.string()?);
             }
             Short('S') | Long("session") => {
-                cli.session_uri = Some(parser.value()?.string()?);
+                cli.session = Some(parser.value()?.string()?);
             }
             Long("log-format") => {
                 cli.log_format = parser.value()?.string()?.parse()?;

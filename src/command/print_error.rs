@@ -6,11 +6,10 @@ use crate::{
     arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PrintError},
-    pipeline::CommandIo,
     util::parse_tpm_rc,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 const ABOUT: &str = "Encodes and print a TPM error code";
@@ -19,10 +18,6 @@ const ARGS: &[CommandLineArgument] = &[("<RC>", "TPM error code (e.g., '0x100')"
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PrintError {
-    fn command_type(&self) -> CommandType {
-        CommandType::Standalone
-    }
-
     fn help() {
         println!(
             "{}",
@@ -54,13 +49,13 @@ impl Command for PrintError {
         true
     }
 
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         _cli: &Cli,
         _device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
-        writeln!(io.writer(), "{}", self.rc)?;
+        writeln!(writer, "{}", self.rc)?;
         Ok(())
     }
 }

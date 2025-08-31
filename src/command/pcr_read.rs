@@ -3,14 +3,12 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    arguments,
     arguments::{collect_values, format_subcommand_help, CommandLineArgument, CommandLineOption},
     cli::{Cli, Commands, PcrRead},
     pcr::{pcr_get_count, pcr_parse_selection, pcr_to_values},
-    pipeline::{CommandIo, Entry as PipelineEntry},
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::message::TpmPcrReadCommand;
 
@@ -20,10 +18,6 @@ const ARGS: &[CommandLineArgument] = &[("SELECTION", "e.g. 'sha256:0,1,2+sha1:0'
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for PcrRead {
-    fn command_type(&self) -> CommandType {
-        CommandType::Source
-    }
-
     fn help() {
         println!(
             "{}",
@@ -32,11 +26,6 @@ impl Command for PcrRead {
     }
 
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
-        arguments!(parser, arg, Self::help, {
-            _ => {
-                return Err(CliError::from(arg.unexpected()));
-            }
-        });
         let values = collect_values(parser)?;
         if values.len() != 1 {
             return Err(CliError::Usage(format!(
@@ -56,30 +45,30 @@ impl Command for PcrRead {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
-        io.clear_input()?;
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
         let pcr_count = pcr_get_count(&mut chip)?;
         let pcr_selection_in = pcr_parse_selection(&self.selection, pcr_count)?;
-
         let cmd = TpmPcrReadCommand { pcr_selection_in };
         let (resp, _) = chip.execute(&cmd, &[])?;
         let pcr_read_resp = resp
             .PcrRead()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let pcr_output = pcr_to_values(&pcr_read_resp)?;
-
-        io.push_object(PipelineEntry::PcrValues(pcr_output));
+        let pcr_values = pcr_to_values(&pcr_read_resp)?;
+        for (pcr_alg, pcr_bank_values) in &pcr_values.banks {
+            for (pcr_index, pcr_value) in pcr_bank_values {
+                writeln!(writer, "pcr://{pcr_alg},{pcr_index},{pcr_value}")?;
+            }
+        }
         Ok(())
     }
 }

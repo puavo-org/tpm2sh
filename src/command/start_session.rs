@@ -5,43 +5,32 @@
 use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
-    cli::{Cli, Commands, StartSession},
-    key,
-    pipeline::{CommandIo, Entry as PipelineEntry, HmacSession, PolicySession},
-    CliError, Command, CommandType, TpmDevice,
+    cli::{Cli, Commands, SessionType, StartSession},
+    CliError, Command, TpmDevice,
 };
 use lexopt::prelude::*;
 use rand::{thread_rng, RngCore};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{Tpm2b, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject},
     message::TpmStartAuthSessionCommand,
+    tpm_hash_size,
 };
 
 const ABOUT: &str = "Starts an authorization session";
 const USAGE: &str = "tpm2sh start-session [OPTIONS]";
 const OPTIONS: &[CommandLineOption] = &[
     (
-        None,
-        "--session-type",
+        Some("-t"),
+        "--type",
         "<TYPE>",
         "[default: hmac, possible: hmac, policy, trial]",
-    ),
-    (
-        None,
-        "--hash-alg",
-        "<ALG>",
-        "[default: sha256, possible: sha256, sha384, sha512]",
     ),
     (Some("-h"), "--help", "", "Print help information"),
 ];
 
 impl Command for StartSession {
-    fn command_type(&self) -> CommandType {
-        CommandType::Source
-    }
-
     fn help() {
         println!(
             "{}",
@@ -52,11 +41,8 @@ impl Command for StartSession {
     fn parse(parser: &mut lexopt::Parser) -> Result<Commands, CliError> {
         let mut args = StartSession::default();
         arguments!(parser, arg, Self::help, {
-            Long("session-type") => {
+            Short('t') | Long("type") => {
                 args.session_type = parser.value()?.string()?.parse()?;
-            }
-            Long("hash-alg") => {
-                args.hash_alg = parser.value()?.string()?.parse()?;
             }
             _ => {
                 return Err(CliError::from(arg.unexpected()));
@@ -70,25 +56,22 @@ impl Command for StartSession {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
-        io.clear_input()?;
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut chip = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-        let auth_hash = TpmAlgId::from(self.hash_alg);
-        let digest_len = tpm2_protocol::tpm_hash_size(&auth_hash)
+        let auth_hash = TpmAlgId::Sha256;
+        let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;
         let mut nonce_bytes = vec![0; digest_len];
         thread_rng().fill_bytes(&mut nonce_bytes);
-
         let cmd = TpmStartAuthSessionCommand {
             tpm_key: (TpmRh::Null as u32).into(),
             bind: (TpmRh::Null as u32).into(),
@@ -102,24 +85,12 @@ impl Command for StartSession {
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-
         let handle = start_auth_session_resp.session_handle;
-        let algorithm = key::tpm_alg_id_to_str(auth_hash).to_string();
-
-        let session_obj = if self.session_type == crate::cli::SessionType::Policy {
-            PipelineEntry::PolicySession(PolicySession {
-                context: format!("tpm://{handle:#010x}"),
-                algorithm,
-                digest: hex::encode(vec![0; digest_len]),
-            })
-        } else {
-            PipelineEntry::HmacSession(HmacSession {
-                context: format!("tpm://{handle:#010x}"),
-                algorithm,
-            })
-        };
-
-        io.push_object(session_obj);
+        if self.session_type == SessionType::Policy {
+            let digest = hex::encode(vec![0; digest_len]);
+            writeln!(writer, "digest://sha256,{digest}")?;
+        }
+        writeln!(writer, "tpm://{handle:#010x}")?;
         Ok(())
     }
 }

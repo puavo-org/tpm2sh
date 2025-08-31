@@ -7,12 +7,12 @@ use crate::{
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Import},
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
-    key::private_key_from_pem_bytes,
-    pipeline::{CommandIo, Entry as PipelineEntry, Key as PipelineKey},
-    session::get_sessions_from_args,
-    uri::uri_to_bytes,
+    device::ScopedHandle,
+    key::{private_key_from_pem_bytes, JsonTpmKey},
+    session::session_from_args,
+    uri::{uri_to_bytes, uri_to_tpm_handle},
     util::build_to_vec,
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -25,7 +25,7 @@ use rand::{thread_rng, RngCore};
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
@@ -55,9 +55,9 @@ const KDF_STORAGE: &str = "STORAGE";
 
 macro_rules! ecdh {
     (
-        $fn_name:ident,
-        $pk_ty:ty, $sk_ty:ty, $affine_ty:ty, $dh_fn:path, $encoded_point_ty:ty
-    ) => {
+		$fn_name:ident,
+		$pk_ty:ty, $sk_ty:ty, $affine_ty:ty, $dh_fn:path, $encoded_point_ty:ty
+	) => {
         fn $fn_name(
             parent_point: &TpmsEccPoint,
             name_alg: TpmAlgId,
@@ -359,10 +359,6 @@ fn create_import_blob(
 }
 
 impl Command for Import {
-    fn command_type(&self) -> CommandType {
-        CommandType::Pipe
-    }
-
     fn help() {
         println!(
             "{}",
@@ -394,20 +390,33 @@ impl Command for Import {
     ///
     /// Returns a `CliError`.
     #[allow(clippy::too_many_lines)]
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
-        let parent_obj = io.resolve_parent(cli)?;
-        let parent_handle_guard = io.resolve_tpm_context(device_arc.clone(), &parent_obj)?;
-        let parent_handle = parent_handle_guard.handle();
+        let parent_uri = cli
+            .parent
+            .as_ref()
+            .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
 
-        let (parent_public, parent_name) = read_public(Some(device_arc.clone()), parent_handle)?;
+        let parent_handle = if parent_uri.starts_with("tpm://") {
+            ScopedHandle::new(
+                TpmTransient(uri_to_tpm_handle(parent_uri)?),
+                device_arc.clone(),
+            )
+        } else {
+            return Err(CliError::Usage(
+                "--parent for import must be a tpm:// handle URI".to_string(),
+            ));
+        };
+
+        let (parent_public, parent_name) =
+            read_public(Some(device_arc.clone()), parent_handle.handle())?;
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = self.key_uri.as_ref().unwrap();
@@ -436,15 +445,15 @@ impl Command for Import {
         };
 
         let import_cmd = TpmImportCommand {
-            parent_handle: parent_handle.0.into(),
+            parent_handle: parent_handle.handle().0.into(),
             encryption_key,
             object_public: public_bytes_struct,
             duplicate,
             in_sym_seed,
             symmetric_alg,
         };
-        let handles = [parent_handle.into()];
-        let sessions = get_sessions_from_args(io, &import_cmd, &handles, cli)?;
+        let handles = [parent_handle.handle().into()];
+        let sessions = session_from_args(&import_cmd, &handles, cli)?;
 
         let (resp, _) = {
             let mut chip = device_arc
@@ -456,17 +465,16 @@ impl Command for Import {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;
 
-        parent_handle_guard.flush()?;
-
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
 
-        let new_key = PipelineKey {
+        let new_key = JsonTpmKey {
             public: format!("data://base64,{}", base64_engine.encode(pub_key_bytes)),
             private: format!("data://base64,{}", base64_engine.encode(priv_key_bytes)),
         };
 
-        io.push_object(PipelineEntry::Key(new_key));
+        let json_string = serde_json::to_string_pretty(&new_key)?;
+        writeln!(writer, "{json_string}")?;
         Ok(())
     }
 }

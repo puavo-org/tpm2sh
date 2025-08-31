@@ -5,10 +5,9 @@ use crate::{
     arguments,
     arguments::{format_subcommand_help, CommandLineOption},
     cli::{Cli, Commands, Objects},
-    pipeline::{CommandIo, Entry as PipelineEntry, Tpm as PipelineTpm},
-    CliError, Command, CommandType, TpmDevice,
+    CliError, Command, TpmDevice,
 };
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::data::TpmRh;
 
@@ -17,10 +16,6 @@ const USAGE: &str = "tpm2sh objects";
 const OPTIONS: &[CommandLineOption] = &[(Some("-h"), "--help", "", "Print help information")];
 
 impl Command for Objects {
-    fn command_type(&self) -> CommandType {
-        CommandType::Source
-    }
-
     fn help() {
         println!(
             "{}",
@@ -42,37 +37,25 @@ impl Command for Objects {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<R: Read, W: Write>(
+    fn run<W: Write>(
         &self,
-        io: &mut CommandIo<R, W>,
         _cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
+        writer: &mut W,
     ) -> Result<(), CliError> {
-        io.clear_input()?;
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
         let mut locked_device = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
         let transient_handles = locked_device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
-            let tpm_obj = PipelineTpm {
-                context: format!("tpm://{handle:#010x}"),
-                parent: None,
-            };
-            io.push_object(PipelineEntry::Tpm(tpm_obj));
+            writeln!(writer, "tpm://{handle:#010x}")?;
         }
-
         let persistent_handles = locked_device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
-            let tpm_obj = PipelineTpm {
-                context: format!("tpm://{handle:#010x}"),
-                parent: None,
-            };
-            io.push_object(PipelineEntry::Tpm(tpm_obj));
+            writeln!(writer, "tpm://{handle:#010x}")?;
         }
-
         Ok(())
     }
 }
