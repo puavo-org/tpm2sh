@@ -109,12 +109,12 @@ fn parse_policy_expression(input: &str) -> Result<PolicyAst, CliError> {
     parse_policy_internal(root_pairs.next().unwrap().into_inner())
 }
 
-struct PolicyExecutor<'a> {
+struct PolicyExecutor<'a, 'b> {
     pcr_count: usize,
-    chip: MutexGuard<'a, TpmDevice>,
+    chip: &'b mut MutexGuard<'a, TpmDevice>,
 }
 
-impl PolicyExecutor<'_> {
+impl PolicyExecutor<'_, '_> {
     fn execute_pcr_policy(
         &mut self,
         session_handle: TpmSession,
@@ -175,13 +175,13 @@ impl PolicyExecutor<'_> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
-                start_trial_session(&mut self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
+                start_trial_session(self.chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
             self.execute_policy_ast(branch_handle, branch_ast)?;
 
-            let digest = get_policy_digest(&mut self.chip, branch_handle)?;
+            let digest = get_policy_digest(self.chip, branch_handle)?;
             branch_digests.try_push(digest)?;
 
-            flush_session(&mut self.chip, branch_handle)?;
+            flush_session(self.chip, branch_handle)?;
         }
 
         let cmd = TpmPolicyOrCommand {
@@ -281,14 +281,11 @@ impl Command for Policy {
         let session_handle =
             start_trial_session(&mut chip, cli::SessionType::Trial, TpmAlgId::Sha256)?;
 
-        {
-            let mut executor = PolicyExecutor { pcr_count, chip };
-            executor.execute_policy_ast(session_handle, &ast)?;
-        }
-
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+        let mut executor = PolicyExecutor {
+            pcr_count,
+            chip: &mut chip,
+        };
+        executor.execute_policy_ast(session_handle, &ast)?;
 
         let final_digest = get_policy_digest(&mut chip, session_handle)?;
         flush_session(&mut chip, session_handle)?;
