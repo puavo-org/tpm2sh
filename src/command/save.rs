@@ -111,6 +111,8 @@ impl Command for Save {
         resp.EvictControl()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
+        object_handle_guard.forget();
+
         let pipeline_tpm = PipelineTpm {
             context: format!("tpm://{persistent_handle:#010x}"),
             parent: object_to_save.parent,

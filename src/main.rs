@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use cli::{execute_cli, CliError, POOL};
+use cli::{execute_cli, CliError};
 use log::error;
 
 fn main() {
@@ -11,8 +11,6 @@ fn main() {
         .init();
 
     let result = execute_cli();
-
-    POOL.join();
 
     match result {
         Ok(()) => {}

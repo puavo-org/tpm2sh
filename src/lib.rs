@@ -38,10 +38,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use once_cell::sync::{Lazy, OnceCell};
-use threadpool::ThreadPool;
+use once_cell::sync::OnceCell;
 
-pub static POOL: Lazy<ThreadPool> = Lazy::new(|| ThreadPool::new(4));
 pub static LOG_FORMAT: OnceCell<cli::LogFormat> = OnceCell::new();
 
 /// Safely accesses the global `LOG_FORMAT` static, falling back to the default.

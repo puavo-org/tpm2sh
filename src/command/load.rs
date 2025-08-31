@@ -101,7 +101,7 @@ impl Command for Load {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         let save_handle = load_resp.object_handle;
-        let _ = ScopedHandle::new(save_handle, device_arc.clone());
+        let save_handle_guard = ScopedHandle::new(save_handle, device_arc.clone());
 
         let save_cmd = TpmContextSaveCommand { save_handle };
         let (resp, _) = chip.execute(&save_cmd, &[])?;
@@ -116,6 +116,10 @@ impl Command for Load {
         };
 
         io.push_object(PipelineEntry::Tpm(new_tpm_obj));
+
+        save_handle_guard.flush()?;
+        parent_handle_guard.flush()?;
+
         Ok(())
     }
 }

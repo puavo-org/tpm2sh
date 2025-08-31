@@ -473,6 +473,8 @@ impl Command for Import {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;
 
+        parent_handle_guard.flush()?;
+
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
 

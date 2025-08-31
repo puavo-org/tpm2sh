@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{error::ParseError, get_log_format, print::TpmPrint, CliError, POOL};
+use crate::{error::ParseError, get_log_format, print::TpmPrint, CliError};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -75,7 +75,7 @@ impl TpmDevice {
         let spinner_started = Arc::new(AtomicBool::new(false));
         if std::io::stderr().is_terminal() && C::COMMAND != data::TpmCc::FlushContext {
             let spinner_started = spinner_started.clone();
-            POOL.execute(move || {
+            std::thread::spawn(move || {
                 if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
                     spinner_started.store(true, Ordering::Relaxed);
                     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

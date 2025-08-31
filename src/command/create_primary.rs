@@ -211,14 +211,14 @@ impl Command for CreatePrimary {
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-            std::mem::forget(object_handle_guard);
+            object_handle_guard.forget();
 
             PipelineTpm {
                 context: format!("tpm://{persistent_handle:#010x}"),
                 parent: None,
             }
         } else {
-            let _ = ScopedHandle::new(object_handle, device_arc.clone());
+            let object_handle_guard = ScopedHandle::new(object_handle, device_arc.clone());
             let save_command = TpmContextSaveCommand {
                 save_handle: object_handle,
             };
@@ -227,6 +227,8 @@ impl Command for CreatePrimary {
                 .ContextSave()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             let context_bytes = util::build_to_vec(&save_resp.context)?;
+
+            object_handle_guard.flush()?;
 
             PipelineTpm {
                 context: format!("data://base64,{}", base64_engine.encode(context_bytes)),

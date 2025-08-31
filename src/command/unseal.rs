@@ -87,6 +87,8 @@ impl Command for Unseal {
             .Unseal()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
+        object_handle_guard.flush()?;
+
         io.writer().write_all(&unseal_resp.out_data)?;
         Ok(())
     }
