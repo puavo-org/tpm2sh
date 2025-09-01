@@ -4,7 +4,6 @@
 
 use crate::{
     cli::{Cli, DeviceCommand, Seal},
-    key::JsonTpmKey,
     session::session_from_args,
     uri::uri_to_bytes,
     util::build_to_vec,
@@ -89,13 +88,8 @@ impl DeviceCommand for Seal {
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;
 
-        let key = JsonTpmKey {
-            public: format!("data://base64,{}", base64_engine.encode(pub_bytes)),
-            private: format!("data://base64,{}", base64_engine.encode(priv_bytes)),
-        };
-
-        let json_string = serde_json::to_string_pretty(&key)?;
-        writeln!(writer, "{json_string}")?;
+        writeln!(writer, "data://base64,{}", base64_engine.encode(pub_bytes))?;
+        writeln!(writer, "data://base64,{}", base64_engine.encode(priv_bytes))?;
 
         Ok(handles_to_flush)
     }

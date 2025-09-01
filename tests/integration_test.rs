@@ -4,8 +4,7 @@
 use cli::{
     cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects},
     device::TpmDevice,
-    key::{self, JsonTpmKey},
-    Command,
+    key, Command,
 };
 use std::{
     collections::HashSet,
@@ -177,16 +176,16 @@ fn test_subcommand_import(test_context: TestFixture) {
             &mut import_output_buf,
         )
         .unwrap();
-    let output_json = String::from_utf8(import_output_buf).unwrap();
+    let output_text = String::from_utf8(import_output_buf).unwrap();
+    let lines: Vec<&str> = output_text.trim().lines().collect();
 
-    let key: JsonTpmKey =
-        serde_json::from_str(&output_json).expect("Import command did not output valid JSON");
+    assert_eq!(lines.len(), 2, "Expected two lines of output");
     assert!(
-        key.public.starts_with("data://base64,"),
+        lines[0].starts_with("data://base64,"),
         "Public part should be a base64 data URI"
     );
     assert!(
-        key.private.starts_with("data://base64,"),
+        lines[1].starts_with("data://base64,"),
         "Private part should be a base64 data URI"
     );
 }

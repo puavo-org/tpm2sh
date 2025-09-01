@@ -5,7 +5,7 @@
 use crate::{
     cli::{Cli, DeviceCommand, Import},
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
-    key::{private_key_from_pem_bytes, JsonTpmKey},
+    key::private_key_from_pem_bytes,
     session::session_from_args,
     uri::{uri_to_bytes, uri_to_tpm_handle},
     util::build_to_vec,
@@ -389,13 +389,16 @@ impl DeviceCommand for Import {
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
 
-        let new_key = JsonTpmKey {
-            public: format!("data://base64,{}", base64_engine.encode(pub_key_bytes)),
-            private: format!("data://base64,{}", base64_engine.encode(priv_key_bytes)),
-        };
-
-        let json_string = serde_json::to_string_pretty(&new_key)?;
-        writeln!(writer, "{json_string}")?;
+        writeln!(
+            writer,
+            "data://base64,{}",
+            base64_engine.encode(pub_key_bytes)
+        )?;
+        writeln!(
+            writer,
+            "data://base64,{}",
+            base64_engine.encode(priv_key_bytes)
+        )?;
         Ok(Vec::new())
     }
 }

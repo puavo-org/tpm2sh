@@ -22,12 +22,6 @@ use rsa::RsaPrivateKey;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct JsonTpmKey {
-    pub public: String,
-    pub private: String,
-}
-
 pub type JsonPcrBank = BTreeMap<String, String>;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]

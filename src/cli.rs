@@ -167,7 +167,6 @@ impl From<SessionType> for TpmSe {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum KeyFormat {
     #[default]
-    Json,
     Pem,
     Der,
 }
@@ -268,14 +267,14 @@ pub struct Algorithms {
     pub filter: Option<String>,
 }
 
-/// Converts keys between ASN.1 and JSON format
+/// Converts keys between ASN.1 formats
 #[derive(Args, Debug, Default)]
 pub struct Convert {
     /// Input format
-    #[arg(long, value_enum, default_value_t = KeyFormat::Json)]
+    #[arg(long, value_enum, default_value_t = KeyFormat::Pem)]
     pub from: KeyFormat,
     /// Output format
-    #[arg(long, value_enum, default_value_t = KeyFormat::Json)]
+    #[arg(long, value_enum, default_value_t = KeyFormat::Der)]
     pub to: KeyFormat,
     /// URI of the input object (e.g., '<file:///path/to/key.pem>')
     pub input_uri: String,
