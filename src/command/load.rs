@@ -30,11 +30,7 @@ impl DeviceCommand for Load {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let parent_uri = cli
-            .parent
-            .as_ref()
-            .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
-        let (parent_handle, parent_needs_flush) = device.load_context(parent_uri)?;
+        let (parent_handle, parent_needs_flush) = device.load_context(&self.parent.parent)?;
 
         let mut handles_to_flush = Vec::new();
         if parent_needs_flush {

@@ -98,10 +98,6 @@ pub struct Cli {
     #[arg(short = 'p', long, global = true)]
     pub password: Option<String>,
 
-    /// Parent object URI (e.g., '<tpm://0x40000001>', '<file:///.../context.bin>')
-    #[arg(short = 'P', long, global = true, value_name = "URI")]
-    pub parent: Option<Uri>,
-
     /// Session object URI (e.g., '<tpm://0x03000000>')
     #[arg(short = 'S', long, global = true, value_name = "URI")]
     pub session: Option<Uri>,
@@ -302,9 +298,19 @@ pub struct Delete {
     pub handle_uri: Uri,
 }
 
+/// Arguments for commands requiring a parent object.
+#[derive(Args, Debug, Default)]
+pub struct ParentArgs {
+    /// Parent object URI (e.g., '<tpm://0x80000001>', '<file:///context.bin>')
+    #[arg(short = 'P', long, required = true, value_name = "URI")]
+    pub parent: Uri,
+}
+
 /// Imports an external key
 #[derive(Args, Debug, Default)]
 pub struct Import {
+    #[command(flatten)]
+    pub parent: ParentArgs,
     /// URI of the external private key to import (e.g., '<file:///path/to/key.pem>')
     #[arg(long, value_name = "KEY_URI")]
     pub key_uri: Uri,
@@ -313,6 +319,8 @@ pub struct Import {
 /// Loads a TPM key
 #[derive(Args, Debug, Default)]
 pub struct Load {
+    #[command(flatten)]
+    pub parent: ParentArgs,
     /// URI of the public part of the key
     #[arg(long, value_name = "URI")]
     pub public_uri: Uri,
@@ -375,14 +383,11 @@ pub struct Save {
     pub in_uri: Uri,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct PasswordArgs {
-    pub password: Option<String>,
-}
-
 /// Seals a keyedhash object
 #[derive(Args, Debug, Default)]
 pub struct Seal {
+    #[command(flatten)]
+    pub parent: ParentArgs,
     /// URI of the secret to seal (e.g., '<data://utf8,mysecret>')
     #[arg(long, value_name = "URI")]
     pub data_uri: Uri,
