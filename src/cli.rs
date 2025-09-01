@@ -75,10 +75,10 @@ pub enum LogFormat {
 
 impl fmt::Display for LogFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
+        match self {
+            Self::Plain => write!(f, "Plain"),
+            Self::Pretty => write!(f, "Pretty"),
+        }
     }
 }
 
@@ -116,10 +116,11 @@ pub enum Hierarchy {
 
 impl fmt::Display for Hierarchy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
+        match self {
+            Self::Owner => write!(f, "Owner"),
+            Self::Platform => write!(f, "Platform"),
+            Self::Endorsement => write!(f, "Endorsement"),
+        }
     }
 }
 
@@ -143,10 +144,11 @@ pub enum SessionType {
 
 impl fmt::Display for SessionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
+        match self {
+            Self::Hmac => write!(f, "Hmac"),
+            Self::Policy => write!(f, "Policy"),
+            Self::Trial => write!(f, "Trial"),
+        }
     }
 }
 
@@ -169,10 +171,10 @@ pub enum KeyFormat {
 
 impl fmt::Display for KeyFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.to_possible_value()
-            .expect("no values are skipped")
-            .get_name()
-            .fmt(f)
+        match self {
+            Self::Pem => write!(f, "Pem"),
+            Self::Der => write!(f, "Der"),
+        }
     }
 }
 
