@@ -28,6 +28,11 @@ name = "integration-test"
 path = "tests/integration_test.rs"
 harness = true
 
+[[test]]
+name = "uri"
+path = "tests/uri.rs"
+harness = true
+
 [dependencies]
 aes = "0.8"
 base64 = "0.22"
