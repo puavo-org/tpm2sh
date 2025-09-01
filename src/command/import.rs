@@ -4,7 +4,10 @@
 
 use crate::{
     cli::{Cli, DeviceCommand, Import},
-    crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, PrivateKey, UNCOMPRESSED_POINT_TAG},
+    crypto::{
+        crypto_hmac, crypto_kdfa, crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE,
+        KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE, UNCOMPRESSED_POINT_TAG,
+    },
     key::private_key_from_pem_bytes,
     session::session_from_args,
     uri::Uri,
@@ -31,10 +34,6 @@ use tpm2_protocol::{
     message::TpmImportCommand,
     TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
-
-const KDF_DUPLICATE: &str = "DUPLICATE";
-const KDF_INTEGRITY: &str = "INTEGRITY";
-const KDF_STORAGE: &str = "STORAGE";
 
 macro_rules! ecdh {
     (
@@ -80,8 +79,9 @@ macro_rules! ecdh {
 
             let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
             let z = shared_secret.raw_secret_bytes();
-            let sym_material = crypto_kdfa(name_alg, z, KDF_STORAGE, context_a, &context_b, 256)
-                .map_err(CliError::TpmRc)?;
+            let sym_material =
+                crypto_kdfa(name_alg, z, KDF_LABEL_STORAGE, context_a, &context_b, 256)
+                    .map_err(CliError::TpmRc)?;
             let (aes_key, iv) = sym_material.split_at(16);
             let mut encrypted_seed_buf = *seed;
             let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
@@ -148,22 +148,22 @@ fn protect_seed_with_rsa(
     let encrypted_seed_result = match parent_name_alg {
         TpmAlgId::Sha1 => rsa_pub_key.encrypt(
             &mut rng,
-            Oaep::new_with_label::<Sha1, _>(KDF_DUPLICATE),
+            Oaep::new_with_label::<Sha1, _>(KDF_LABEL_DUPLICATE),
             seed,
         ),
         TpmAlgId::Sha256 => rsa_pub_key.encrypt(
             &mut rng,
-            Oaep::new_with_label::<Sha256, _>(KDF_DUPLICATE),
+            Oaep::new_with_label::<Sha256, _>(KDF_LABEL_DUPLICATE),
             seed,
         ),
         TpmAlgId::Sha384 => rsa_pub_key.encrypt(
             &mut rng,
-            Oaep::new_with_label::<Sha384, _>(KDF_DUPLICATE),
+            Oaep::new_with_label::<Sha384, _>(KDF_LABEL_DUPLICATE),
             seed,
         ),
         TpmAlgId::Sha512 => rsa_pub_key.encrypt(
             &mut rng,
-            Oaep::new_with_label::<Sha512, _>(KDF_DUPLICATE),
+            Oaep::new_with_label::<Sha512, _>(KDF_LABEL_DUPLICATE),
             seed,
         ),
         _ => {
@@ -259,7 +259,7 @@ fn create_import_blob(
     let sym_key = crypto_kdfa(
         parent_name_alg,
         &seed,
-        KDF_STORAGE,
+        KDF_LABEL_STORAGE,
         &object_name,
         parent_name,
         128,
@@ -276,7 +276,7 @@ fn create_import_blob(
     let hmac_key = crypto_kdfa(
         parent_name_alg,
         &seed,
-        KDF_INTEGRITY,
+        KDF_LABEL_INTEGRITY,
         parent_name,
         &[],
         integrity_key_bits,

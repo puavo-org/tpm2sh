@@ -30,6 +30,10 @@ pub const ID_IMPORTABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.
 pub const ID_SEALED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.5");
 pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 
+pub const KDF_LABEL_DUPLICATE: &str = "DUPLICATE";
+pub const KDF_LABEL_INTEGRITY: &str = "INTEGRITY";
+pub const KDF_LABEL_STORAGE: &str = "STORAGE";
+
 /// Computes an HMAC digest over a series of data chunks.
 ///
 /// # Errors

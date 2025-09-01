@@ -6,7 +6,10 @@
 #![deny(clippy::pedantic)]
 
 use crate::{
-    crypto::{crypto_hmac_verify, crypto_kdfa, crypto_make_name, PrivateKey},
+    crypto::{
+        crypto_hmac_verify, crypto_kdfa, crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE,
+        KDF_LABEL_INTEGRITY,
+    },
     device::TpmTransport,
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
 };
@@ -38,8 +41,6 @@ use tpm2_protocol::{
     TpmBuffer, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
-const KDF_DUPLICATE: &str = "DUPLICATE";
-const KDF_INTEGRITY: &str = "INTEGRITY";
 const TPM_HEADER_SIZE: usize = 10;
 
 type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
@@ -382,19 +383,19 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
         (PrivateKey::Rsa(rsa_priv), TpmtPublic { name_alg, .. }) => {
             let decrypt_result = match name_alg {
                 TpmAlgId::Sha1 => rsa_priv.decrypt(
-                    Oaep::new_with_label::<Sha1, _>(KDF_DUPLICATE),
+                    Oaep::new_with_label::<Sha1, _>(KDF_LABEL_DUPLICATE),
                     &cmd.in_sym_seed,
                 ),
                 TpmAlgId::Sha256 => rsa_priv.decrypt(
-                    Oaep::new_with_label::<Sha256, _>(KDF_DUPLICATE),
+                    Oaep::new_with_label::<Sha256, _>(KDF_LABEL_DUPLICATE),
                     &cmd.in_sym_seed,
                 ),
                 TpmAlgId::Sha384 => rsa_priv.decrypt(
-                    Oaep::new_with_label::<Sha384, _>(KDF_DUPLICATE),
+                    Oaep::new_with_label::<Sha384, _>(KDF_LABEL_DUPLICATE),
                     &cmd.in_sym_seed,
                 ),
                 TpmAlgId::Sha512 => rsa_priv.decrypt(
-                    Oaep::new_with_label::<Sha512, _>(KDF_DUPLICATE),
+                    Oaep::new_with_label::<Sha512, _>(KDF_LABEL_DUPLICATE),
                     &cmd.in_sym_seed,
                 ),
                 _ => return Err(TpmRc::from(TpmRcBase::Scheme)),
@@ -421,7 +422,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     let hmac_key = crypto_kdfa(
         parent_name_alg,
         &seed,
-        KDF_INTEGRITY,
+        KDF_LABEL_INTEGRITY,
         &parent_name,
         &[],
         integrity_key_bits,
