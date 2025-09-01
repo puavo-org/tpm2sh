@@ -48,14 +48,18 @@ impl DeviceCommand for PcrEvent {
             )));
         }
 
-        let mut pcr_index = 0;
-        for (byte_idx, &byte) in pcr_selection.pcr_select.iter().enumerate() {
-            if byte != 0 {
-                let bit_idx = byte.trailing_zeros();
-                pcr_index = u32::try_from(byte_idx * 8).unwrap() + bit_idx;
-                break;
-            }
-        }
+        let pcr_index = pcr_selection
+            .pcr_select
+            .iter()
+            .enumerate()
+            .find_map(|(byte_idx, &byte)| {
+                if byte != 0 {
+                    Some(u32::try_from(byte_idx * 8).unwrap() + byte.trailing_zeros())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
