@@ -2,8 +2,10 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli::LogFormat, error::ParseError, print::TpmPrint, uri::Uri, CliError};
-
+use crate::{
+    cli::LogFormat, error::ParseError, print::TpmPrint, uri::Uri, util::build_to_vec, CliError,
+};
+use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::{
     collections::HashSet,
     fmt::Debug,
@@ -19,12 +21,13 @@ use std::{
 use log::{trace, warn};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmRh, TpmSt, TpmaCc, TpmsAuthCommand,
-        TpmsCapabilityData, TpmsContext, TpmtPublic, TpmuCapabilities,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmRh, TpmSt, TpmaCc, TpmlPcrSelection,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmtPublic, TpmuCapabilities,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
+        TpmContextLoadCommand, TpmContextSaveCommand, TpmGetCapabilityCommand,
+        TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand, TpmPcrReadResponse,
         TpmReadPublicCommand, TpmResponseBody,
     },
     TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
@@ -185,6 +188,50 @@ impl TpmDevice {
         }
     }
 
+    /// Saves a transient object context and writes it to a writer as a data URI.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the TPM command or I/O fails.
+    pub fn context_save<W: Write>(
+        &mut self,
+        handle: TpmTransient,
+        writer: &mut W,
+    ) -> Result<(), CliError> {
+        let save_cmd = TpmContextSaveCommand {
+            save_handle: handle,
+        };
+        let (resp, _) = self.execute(&save_cmd, &[])?;
+        let save_resp = resp
+            .ContextSave()
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+        let context_bytes = build_to_vec(&save_resp.context)?;
+
+        writeln!(
+            writer,
+            "data://base64,{}",
+            base64_engine.encode(context_bytes)
+        )?;
+        Ok(())
+    }
+
+    /// Reads PCR values from the TPM.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the TPM command fails.
+    pub fn pcr_read(
+        &mut self,
+        pcr_selection_in: &TpmlPcrSelection,
+    ) -> Result<TpmPcrReadResponse, CliError> {
+        let cmd = TpmPcrReadCommand {
+            pcr_selection_in: *pcr_selection_in,
+        };
+        let (resp, _) = self.execute(&cmd, &[])?;
+        resp.PcrRead()
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))
+    }
+
     /// Retrieves all algorithms from the TPM.
     ///
     /// # Errors
@@ -235,7 +282,7 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` on parsing or TPM command failure.
-    pub fn load_context(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
+    pub fn context_load(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
         if uri.starts_with("tpm://") {
             let handle = uri.to_tpm_handle()?;
             Ok((TpmTransient(handle), false))

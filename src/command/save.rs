@@ -22,7 +22,7 @@ impl DeviceCommand for Save {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let (object_handle, needs_flush) = device.load_context(&self.in_uri)?;
+        let (object_handle, needs_flush) = device.context_load(&self.in_uri)?;
         let mut handles_to_flush = Vec::new();
         if needs_flush {
             handles_to_flush.push(object_handle);

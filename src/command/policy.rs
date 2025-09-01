@@ -4,7 +4,7 @@
 use crate::{
     cli::{self, Cli, DeviceCommand, Policy, SessionType},
     error::ParseError,
-    pcr::{pcr_get_count, pcr_to_values},
+    pcr::{pcr_composite_digest, pcr_get_count},
     session::session_from_args,
     uri::{pcr_parse_selection, Uri},
     CliError, TpmDevice,
@@ -12,7 +12,6 @@ use crate::{
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
-use sha2::{Digest, Sha256};
 use std::io::Write;
 use tpm2_protocol::{
     data::{
@@ -20,8 +19,8 @@ use tpm2_protocol::{
         TpmtSymDefObject,
     },
     message::{
-        TpmFlushContextCommand, TpmPcrReadCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand,
-        TpmPolicyPcrCommand, TpmPolicySecretCommand, TpmStartAuthSessionCommand,
+        TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
+        TpmPolicySecretCommand, TpmStartAuthSessionCommand,
     },
     TpmSession, TpmTransient,
 };
@@ -140,20 +139,8 @@ impl PolicyExecutor<'_> {
             hex::decode(digest_hex)?
         } else {
             let pcr_selection_in = pcr_parse_selection(selection_str, self.pcr_count)?;
-            let read_cmd = TpmPcrReadCommand { pcr_selection_in };
-            let (resp, _) = self.device.execute(&read_cmd, &[])?;
-            let pcr_read_resp = resp
-                .PcrRead()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-
-            let pcr_values = pcr_to_values(&pcr_read_resp)?;
-            let mut concatenated_digests = Vec::new();
-            for bank_values in pcr_values.banks.values() {
-                for digest_hex in bank_values.values() {
-                    concatenated_digests.extend(hex::decode(digest_hex)?);
-                }
-            }
-            Sha256::digest(&concatenated_digests).to_vec()
+            let read_resp = self.device.pcr_read(&pcr_selection_in)?;
+            pcr_composite_digest(&read_resp)
         };
 
         let pcr_selection = pcr_parse_selection(selection_str, self.pcr_count)?;

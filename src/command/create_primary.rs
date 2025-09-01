@@ -7,11 +7,10 @@ use crate::{
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
-    util, TpmDevice,
+    TpmDevice,
 };
 use std::io::Write;
 
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -19,7 +18,7 @@ use tpm2_protocol::{
         TpmsKeyedhashParms, TpmsRsaParms, TpmsSensitiveCreate, TpmtKdfScheme, TpmtPublic,
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
-    message::{TpmContextSaveCommand, TpmCreatePrimaryCommand, TpmEvictControlCommand},
+    message::{TpmCreatePrimaryCommand, TpmEvictControlCommand},
     TpmPersistent, TpmTransient,
 };
 
@@ -132,21 +131,7 @@ impl DeviceCommand for CreatePrimary {
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
             Ok(Vec::new())
         } else {
-            let save_command = TpmContextSaveCommand {
-                save_handle: object_handle,
-            };
-            let (resp, _) = device.execute(&save_command, &[])?;
-            let save_resp = resp
-                .ContextSave()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            let context_bytes = util::build_to_vec(&save_resp.context)?;
-
-            writeln!(
-                writer,
-                "data://base64,{}",
-                base64_engine.encode(context_bytes)
-            )?;
-
+            device.context_save(object_handle, writer)?;
             Ok(vec![object_handle])
         }
     }

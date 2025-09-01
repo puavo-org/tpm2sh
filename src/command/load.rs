@@ -5,16 +5,14 @@
 use crate::{
     cli::{Cli, DeviceCommand, Load},
     session::session_from_args,
-    util::build_to_vec,
     CliError, TpmDevice,
 };
 
 use std::io::Write;
 
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
-    message::{TpmContextSaveCommand, TpmLoadCommand},
+    message::TpmLoadCommand,
     TpmParse, TpmTransient,
 };
 
@@ -30,7 +28,7 @@ impl DeviceCommand for Load {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let (parent_handle, parent_needs_flush) = device.load_context(&self.parent.parent)?;
+        let (parent_handle, parent_needs_flush) = device.context_load(&self.parent.parent)?;
 
         let mut handles_to_flush = Vec::new();
         if parent_needs_flush {
@@ -59,18 +57,7 @@ impl DeviceCommand for Load {
         let save_handle = load_resp.object_handle;
         handles_to_flush.push(save_handle);
 
-        let save_cmd = TpmContextSaveCommand { save_handle };
-        let (resp, _) = device.execute(&save_cmd, &[])?;
-        let save_resp = resp
-            .ContextSave()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let context_bytes = build_to_vec(&save_resp.context)?;
-
-        writeln!(
-            writer,
-            "data://base64,{}",
-            base64_engine.encode(context_bytes)
-        )?;
+        device.context_save(save_handle, writer)?;
 
         Ok(handles_to_flush)
     }
