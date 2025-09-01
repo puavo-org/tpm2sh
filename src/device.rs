@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{error::ParseError, get_log_format, print::TpmPrint, uri, CliError};
+use crate::{cli::LogFormat, error::ParseError, get_log_format, print::TpmPrint, uri, CliError};
 use log::{trace, warn};
 use std::{
     fmt::Debug,
@@ -16,9 +16,13 @@ use std::{
 };
 use tpm2_protocol::{
     self,
-    data::{self, TpmSt, TpmaCc, TpmsContext, TpmuCapabilities},
+    data::{
+        TpmCap, TpmCc, TpmRh, TpmSt, TpmaCc, TpmsAuthCommand, TpmsCapabilityData, TpmsContext,
+        TpmuCapabilities,
+    },
     message::{
-        TpmCommandBuild, TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
+        tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
+        TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
         TpmGetCapabilityResponse, TpmHeader, TpmResponseBody,
     },
     TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
@@ -140,8 +144,8 @@ impl TpmDevice {
     pub fn execute<C>(
         &mut self,
         command: &C,
-        sessions: &[tpm2_protocol::data::TpmsAuthCommand],
-    ) -> Result<(TpmResponseBody, tpm2_protocol::message::TpmAuthResponses), CliError>
+        sessions: &[TpmsAuthCommand],
+    ) -> Result<(TpmResponseBody, TpmAuthResponses), CliError>
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
@@ -154,14 +158,14 @@ impl TpmDevice {
             } else {
                 TpmSt::Sessions
             };
-            tpm2_protocol::message::tpm_build_command(command, tag, sessions, &mut writer)?;
+            tpm_build_command(command, tag, sessions, &mut writer)?;
             writer.len()
         };
         let command_bytes = &command_buf[..len];
 
         let (tx, rx) = mpsc::channel::<()>();
         let spinner_started = Arc::new(AtomicBool::new(false));
-        if std::io::stderr().is_terminal() && C::COMMAND != data::TpmCc::FlushContext {
+        if std::io::stderr().is_terminal() && C::COMMAND != TpmCc::FlushContext {
             let spinner_started = spinner_started.clone();
             std::thread::spawn(move || {
                 if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
@@ -187,11 +191,11 @@ impl TpmDevice {
         }
 
         match log_format {
-            crate::cli::LogFormat::Pretty => {
+            LogFormat::Pretty => {
                 trace!(target: "cli::device", "{}", C::COMMAND);
                 command.print("", 1);
             }
-            crate::cli::LogFormat::Plain => {
+            LogFormat::Plain => {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
             }
         }
@@ -228,15 +232,14 @@ impl TpmDevice {
             let _ = stderr.flush();
         }
 
-        let result = tpm2_protocol::message::tpm_parse_response(C::COMMAND, &resp_buf)?;
-
+        let result = tpm_parse_response(C::COMMAND, &resp_buf)?;
         match &result {
             Ok((rc, response_body, _)) => match log_format {
-                crate::cli::LogFormat::Pretty => {
+                LogFormat::Pretty => {
                     trace!(target: "cli::device", "Response (rc={rc})");
                     response_body.print("", 1);
                 }
-                crate::cli::LogFormat::Plain => {
+                LogFormat::Plain => {
                     trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
                 }
             },
@@ -262,12 +265,9 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(&mut self, handle_type: data::TpmRh) -> Result<Vec<u32>, CliError> {
-        let cap_data_vec = self.get_capability(
-            data::TpmCap::Handles,
-            handle_type as u32,
-            TPM_CAP_PROPERTY_MAX,
-        )?;
+    pub fn get_all_handles(&mut self, handle_type: TpmRh) -> Result<Vec<u32>, CliError> {
+        let cap_data_vec =
+            self.get_capability(TpmCap::Handles, handle_type as u32, TPM_CAP_PROPERTY_MAX)?;
         let handles: Vec<u32> = cap_data_vec
             .into_iter()
             .flat_map(|cap_data| {
@@ -289,10 +289,10 @@ impl TpmDevice {
     /// or if the TPM returns a response of an unexpected type.
     pub fn get_capability(
         &mut self,
-        cap: data::TpmCap,
+        cap: TpmCap,
         mut property: u32,
         count: u32,
-    ) -> Result<Vec<data::TpmsCapabilityData>, CliError> {
+    ) -> Result<Vec<TpmsCapabilityData>, CliError> {
         let mut all_caps = Vec::new();
         loop {
             let cmd = TpmGetCapabilityCommand {
