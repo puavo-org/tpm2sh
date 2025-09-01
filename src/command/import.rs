@@ -4,10 +4,10 @@
 
 use crate::{
     cli::{Cli, DeviceCommand, Import},
-    crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
+    crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, PrivateKey, UNCOMPRESSED_POINT_TAG},
     key::private_key_from_pem_bytes,
     session::session_from_args,
-    uri::{uri_to_bytes, uri_to_tpm_handle},
+    uri::Uri,
     util::build_to_vec,
     CliError, TpmDevice,
 };
@@ -316,13 +316,28 @@ fn create_import_blob(
     ))
 }
 
+/// Parses an external key from a URI and prepares it for TPM import.
+fn prepare_key_for_import(
+    key_uri: &Uri,
+    parent_name_alg: TpmAlgId,
+) -> Result<(PrivateKey, TpmtPublic, Vec<u8>), CliError> {
+    let pem_bytes = key_uri.to_bytes()?;
+    let private_key = private_key_from_pem_bytes(&pem_bytes)?;
+
+    let public = private_key
+        .to_public(parent_name_alg)
+        .map_err(CliError::TpmRc)?;
+    let sensitive_blob = private_key.sensitive_blob();
+
+    Ok((private_key, public, sensitive_blob))
+}
+
 impl DeviceCommand for Import {
     /// Runs `import`.
     ///
     /// # Errors
     ///
     /// Returns a `CliError`.
-    #[allow(clippy::too_many_lines)]
     fn run<W: Write>(
         &self,
         cli: &Cli,
@@ -334,31 +349,23 @@ impl DeviceCommand for Import {
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
 
-        let parent_handle = if parent_uri.starts_with("tpm://") {
-            TpmTransient(uri_to_tpm_handle(parent_uri)?)
+        let (parent_handle, needs_flush) = device.load_context(parent_uri)?;
+        let handles_to_flush = if needs_flush {
+            vec![parent_handle]
         } else {
-            return Err(CliError::Usage(
-                "--parent for import must be a tpm:// handle URI".to_string(),
-            ));
+            Vec::new()
         };
 
         let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
-        let key_uri_str = &self.key_uri;
-        let pem_bytes = uri_to_bytes(key_uri_str, &[])?;
-        let private_key = private_key_from_pem_bytes(&pem_bytes)?;
-
-        let public = private_key
-            .to_public(parent_name_alg)
-            .map_err(CliError::TpmRc)?;
+        let (_, public, sensitive_blob) = prepare_key_for_import(&self.key_uri, parent_name_alg)?;
         let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
         };
-        let private_bytes_blob = private_key.sensitive_blob();
 
         let (duplicate, in_sym_seed, encryption_key) =
-            create_import_blob(&parent_public, &public, &private_bytes_blob, &parent_name)?;
+            create_import_blob(&parent_public, &public, &sensitive_blob, &parent_name)?;
 
         let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
             TpmtSymDef::default()
@@ -399,6 +406,6 @@ impl DeviceCommand for Import {
             "data://base64,{}",
             base64_engine.encode(priv_key_bytes)
         )?;
-        Ok(Vec::new())
+        Ok(handles_to_flush)
     }
 }

@@ -7,7 +7,6 @@ use crate::{
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
-    uri::uri_to_tpm_handle,
     util, TpmDevice,
 };
 use std::io::Write;
@@ -118,7 +117,7 @@ impl DeviceCommand for CreatePrimary {
         let object_handle = create_primary_resp.object_handle;
 
         if let Some(uri) = &self.handle_uri {
-            let persistent_handle = TpmPersistent(uri_to_tpm_handle(uri)?);
+            let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
             let evict_cmd = TpmEvictControlCommand {
                 auth: (TpmRh::Owner as u32).into(),
                 object_handle: object_handle.0.into(),

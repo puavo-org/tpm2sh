@@ -5,7 +5,6 @@
 use crate::{
     cli::{Cli, DeviceCommand, Load},
     session::session_from_args,
-    uri::uri_to_bytes,
     util::build_to_vec,
     CliError, TpmDevice,
 };
@@ -42,8 +41,8 @@ impl DeviceCommand for Load {
             handles_to_flush.push(parent_handle);
         }
 
-        let pub_bytes = uri_to_bytes(&self.public_uri, &[])?;
-        let priv_bytes = uri_to_bytes(&self.private_uri, &[])?;
+        let pub_bytes = self.public_uri.to_bytes()?;
+        let priv_bytes = self.private_uri.to_bytes()?;
 
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;

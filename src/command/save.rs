@@ -5,7 +5,6 @@
 use crate::{
     cli::{Cli, DeviceCommand, Save},
     session::session_from_args,
-    uri::uri_to_tpm_handle,
     CliError, TpmDevice,
 };
 use std::io::Write;
@@ -29,7 +28,7 @@ impl DeviceCommand for Save {
             handles_to_flush.push(object_handle);
         }
 
-        let persistent_handle = TpmPersistent(uri_to_tpm_handle(&self.to_uri)?);
+        let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
         let auth_handle = TpmRh::Owner;
         let handles = [auth_handle as u32, object_handle.into()];
 

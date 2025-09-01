@@ -5,7 +5,6 @@
 use crate::{
     cli::{Cli, Convert, KeyFormat, LocalCommand},
     key::TpmKey,
-    uri::uri_to_bytes,
     CliError,
 };
 use std::io::Write;
@@ -23,7 +22,7 @@ impl LocalCommand for Convert {
             ));
         }
 
-        let input_bytes = uri_to_bytes(&self.input_uri, &[])?;
+        let input_bytes = self.input_uri.to_bytes()?;
 
         let tpm_key = match self.from {
             KeyFormat::Pem => TpmKey::from_pem(&input_bytes)?,

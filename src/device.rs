@@ -2,13 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{
-    cli::LogFormat,
-    error::ParseError,
-    print::TpmPrint,
-    uri::{uri_to_bytes, uri_to_tpm_handle},
-    CliError,
-};
+use crate::{cli::LogFormat, error::ParseError, print::TpmPrint, uri::Uri, CliError};
 
 use std::{
     collections::HashSet,
@@ -241,12 +235,12 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` on parsing or TPM command failure.
-    pub fn load_context(&mut self, uri: &str) -> Result<(TpmTransient, bool), CliError> {
+    pub fn load_context(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
         if uri.starts_with("tpm://") {
-            let handle = uri_to_tpm_handle(uri)?;
+            let handle = uri.to_tpm_handle()?;
             Ok((TpmTransient(handle), false))
         } else if uri.starts_with("data://") || uri.starts_with("file://") {
-            let context_blob = uri_to_bytes(uri, &[])?;
+            let context_blob = uri.to_bytes()?;
             let (context, remainder) = TpmsContext::parse(&context_blob)?;
             if !remainder.is_empty() {
                 return Err(ParseError::Custom("trailing data".to_string()).into());

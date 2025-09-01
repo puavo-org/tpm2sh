@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device::TpmDevice, error::CliError, key::Alg, Command};
+use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command};
 use clap::{
     builder::styling::{AnsiColor, Color, Style, Styles},
     Args, Parser, Subcommand, ValueEnum,
@@ -100,11 +100,11 @@ pub struct Cli {
 
     /// Parent object URI (e.g., '<tpm://0x40000001>', '<file:///.../context.bin>')
     #[arg(short = 'P', long, global = true, value_name = "URI")]
-    pub parent: Option<String>,
+    pub parent: Option<Uri>,
 
     /// Session object URI (e.g., '<tpm://0x03000000>')
     #[arg(short = 'S', long, global = true, value_name = "URI")]
-    pub session: Option<String>,
+    pub session: Option<Uri>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -277,7 +277,7 @@ pub struct Convert {
     #[arg(long, value_enum, default_value_t = KeyFormat::Der)]
     pub to: KeyFormat,
     /// URI of the input object (e.g., '<file:///path/to/key.pem>')
-    pub input_uri: String,
+    pub input_uri: Uri,
 }
 
 /// Creates a primary key
@@ -290,8 +290,8 @@ pub struct CreatePrimary {
     #[arg(long)]
     pub algorithm: Alg,
     /// Store object to non-volatile memory (e.g., '<tpm://0x81000001>')
-    #[arg(long, value_name = "HANDLE_URI")]
-    pub handle_uri: Option<String>,
+    #[arg(long, value_name = "HANDLEURI")]
+    pub handle_uri: Option<Uri>,
 }
 
 /// Deletes a transient or persistent object
@@ -299,7 +299,7 @@ pub struct CreatePrimary {
 pub struct Delete {
     /// URI of the object to delete (e.g. '<tpm://0x81000001>')
     #[arg(value_name = "HANDLE_URI")]
-    pub handle_uri: String,
+    pub handle_uri: Uri,
 }
 
 /// Imports an external key
@@ -307,7 +307,7 @@ pub struct Delete {
 pub struct Import {
     /// URI of the external private key to import (e.g., '<file:///path/to/key.pem>')
     #[arg(long, value_name = "KEY_URI")]
-    pub key_uri: String,
+    pub key_uri: Uri,
 }
 
 /// Loads a TPM key
@@ -315,10 +315,10 @@ pub struct Import {
 pub struct Load {
     /// URI of the public part of the key
     #[arg(long, value_name = "URI")]
-    pub public_uri: String,
+    pub public_uri: Uri,
     /// URI of the private part of the key
     #[arg(long, value_name = "URI")]
-    pub private_uri: String,
+    pub private_uri: Uri,
 }
 
 /// Lists objects in volatile and non-volatile memory
@@ -330,10 +330,10 @@ pub struct Objects;
 pub struct PcrEvent {
     /// PCR to extend (e.g., '<pcr://sha256,7>')
     #[arg(value_name = "PCR_URI")]
-    pub pcr_uri: String,
+    pub pcr_uri: Uri,
     /// URI of the data (e.g., '<data://hex,deadbeef>')
     #[arg(value_name = "DATA_URI")]
-    pub data_uri: String,
+    pub data_uri: Uri,
 }
 
 /// Reads PCRs
@@ -369,10 +369,10 @@ pub struct ResetLock;
 pub struct Save {
     /// URI for the persistent object to be created (e.g., '<tpm://0x81000001>')
     #[arg(long, value_name = "HANDLE_URI")]
-    pub to_uri: String,
+    pub to_uri: Uri,
     /// URI of the transient object context to save (e.g., '<file:///path/to/context.bin>')
     #[arg(long = "in", value_name = "CONTEXT_URI")]
-    pub in_uri: String,
+    pub in_uri: Uri,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -385,7 +385,7 @@ pub struct PasswordArgs {
 pub struct Seal {
     /// URI of the secret to seal (e.g., '<data://utf8,mysecret>')
     #[arg(long, value_name = "URI")]
-    pub data_uri: String,
+    pub data_uri: Uri,
     /// Authorization for the new sealed object
     #[arg(long, value_name = "PASSWORD")]
     pub object_password: Option<String>,
@@ -404,5 +404,5 @@ pub struct StartSession {
 pub struct Unseal {
     /// URI of the loaded sealed object to unseal (e.g., '<tpm://0x80000000>')
     #[arg(long, value_name = "HANDLE_URI")]
-    pub handle_uri: String,
+    pub handle_uri: Uri,
 }

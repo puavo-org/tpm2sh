@@ -5,7 +5,6 @@
 use crate::{
     cli::{Cli, DeviceCommand, Unseal},
     session::session_from_args,
-    uri::uri_to_tpm_handle,
     CliError, TpmDevice,
 };
 use std::io::Write;
@@ -23,7 +22,7 @@ impl DeviceCommand for Unseal {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let handle = uri_to_tpm_handle(&self.handle_uri)?;
+        let handle = self.handle_uri.to_tpm_handle()?;
         let object_handle = TpmTransient(handle);
 
         let unseal_cmd = TpmUnsealCommand {

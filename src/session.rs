@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{cli::Cli, key::create_auth, uri::uri_to_tpm_handle, util::build_to_vec, CliError};
+use crate::{cli::Cli, key::create_auth, util::build_to_vec, CliError};
 use log::debug;
 use rand::RngCore;
 use tpm2_protocol::{
@@ -54,9 +54,9 @@ pub fn session_from_args<C: TpmHeader>(
         (Some(_), Some(_)) => Err(CliError::Usage(
             "'--session' and '--password' are mutually exclusive".to_string(),
         )),
-        (Some(session), None) => {
+        (Some(uri), None) => {
             let session = AuthSession {
-                handle: TpmSession(uri_to_tpm_handle(&session)?),
+                handle: TpmSession(uri.to_tpm_handle()?),
                 nonce_tpm: Tpm2bNonce::default(),
                 attributes: TpmaSession::default(),
                 hmac_key: Tpm2bAuth::default(),

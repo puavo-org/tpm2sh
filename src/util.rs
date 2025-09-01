@@ -28,30 +28,6 @@ pub fn parse_pcr_index(s: &str) -> Result<u32, CliError> {
     }
 }
 
-/// Parses a PCR URI string (e.g., `pcr://sha256,7`) into a bank name and index.
-///
-/// # Errors
-///
-/// Returns a `CliError::Parse` if the URI is malformed.
-pub fn parse_pcr_uri(uri_str: &str) -> Result<(String, u32), CliError> {
-    let Some(path) = uri_str.strip_prefix("pcr://") else {
-        return Err(crate::error::ParseError::Custom(format!(
-            "Invalid PCR URI scheme: '{uri_str}'"
-        ))
-        .into());
-    };
-
-    let Some((bank, index_str)) = path.split_once(',') else {
-        return Err(crate::error::ParseError::Custom(format!(
-            "Invalid PCR URI format, expected 'pcr://bank,index': '{uri_str}'"
-        ))
-        .into());
-    };
-
-    let index = parse_pcr_index(index_str)?;
-    Ok((bank.to_string(), index))
-}
-
 /// Parses a hex string into a `TpmPersistent` handle.
 ///
 /// # Errors

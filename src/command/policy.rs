@@ -6,7 +6,7 @@ use crate::{
     error::ParseError,
     pcr::{pcr_get_count, pcr_parse_selection},
     session::session_from_args,
-    uri::uri_to_tpm_handle,
+    uri::Uri,
     CliError, TpmDevice,
 };
 use pest::iterators::{Pair, Pairs};
@@ -37,7 +37,7 @@ enum PolicyAst {
         count: Option<u32>,
     },
     Secret {
-        auth_handle_uri: String,
+        auth_handle_uri: Uri,
     },
     Or(Vec<PolicyAst>),
 }
@@ -78,7 +78,8 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
             }
         }
         Rule::secret_expression => {
-            let auth_handle_uri = parse_quoted_string(&pair.into_inner().next().unwrap())?;
+            let uri_str = parse_quoted_string(&pair.into_inner().next().unwrap())?;
+            let auth_handle_uri = uri_str.parse()?;
             PolicyAst::Secret { auth_handle_uri }
         }
         Rule::or_expression => {
@@ -147,9 +148,9 @@ impl PolicyExecutor<'_> {
         &mut self,
         _cli: &Cli,
         session_handle: TpmSession,
-        auth_handle_uri: &str,
+        auth_handle_uri: &Uri,
     ) -> Result<(), CliError> {
-        let auth_handle = uri_to_tpm_handle(auth_handle_uri)?;
+        let auth_handle = auth_handle_uri.to_tpm_handle()?;
         let cmd = TpmPolicySecretCommand {
             auth_handle: auth_handle.into(),
             policy_session: session_handle.0.into(),

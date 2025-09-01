@@ -5,8 +5,6 @@
 use crate::{
     cli::{Cli, DeviceCommand, PcrEvent},
     session::session_from_args,
-    uri::uri_to_bytes,
-    util::parse_pcr_uri,
     CliError, TpmDevice,
 };
 
@@ -26,10 +24,10 @@ impl DeviceCommand for PcrEvent {
         device: &mut TpmDevice,
         _writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let (_bank, pcr_index) = parse_pcr_uri(&self.pcr_uri)?;
+        let (_bank, pcr_index) = self.pcr_uri.to_pcr_spec()?;
 
         let handles = [pcr_index];
-        let data_bytes = uri_to_bytes(&self.data_uri, &[])?;
+        let data_bytes = self.data_uri.to_bytes()?;
         let event_data = Tpm2bEvent::try_from(data_bytes.as_slice())?;
         let command = TpmPcrEventCommand {
             pcr_handle: handles[0],
