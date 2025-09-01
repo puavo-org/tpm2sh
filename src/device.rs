@@ -159,6 +159,11 @@ impl TpmDevice {
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
+        if let LogFormat::Pretty = log_format {
+            trace!(target: "cli::device", "{}", C::COMMAND);
+            command.print("", 1);
+        }
+
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut command_buf);
@@ -199,14 +204,8 @@ impl TpmDevice {
             });
         }
 
-        match log_format {
-            LogFormat::Pretty => {
-                trace!(target: "cli::device", "{}", C::COMMAND);
-                command.print("", 1);
-            }
-            LogFormat::Plain => {
-                trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
-            }
+        if let LogFormat::Plain = log_format {
+            trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
         }
         self.transport.write_all(command_bytes)?;
         self.transport.flush()?;
@@ -239,20 +238,23 @@ impl TpmDevice {
             let _ = stderr.flush();
         }
 
+        if let LogFormat::Plain = log_format {
+            trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
+        }
+
         let result = tpm_parse_response(C::COMMAND, &resp_buf)?;
         match &result {
-            Ok((rc, response_body, _)) => match log_format {
-                LogFormat::Pretty => {
+            Ok((rc, response_body, _)) => {
+                if let LogFormat::Pretty = log_format {
                     trace!(target: "cli::device", "Response (rc={rc})");
                     response_body.print("", 1);
                 }
-                LogFormat::Plain => {
-                    trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
-                }
-            },
+            }
             Err((rc, _)) => {
                 trace!(target: "cli::device", "Error Response (rc={rc})");
-                trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
+                if let LogFormat::Pretty = log_format {
+                    trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
+                }
             }
         }
 
