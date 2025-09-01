@@ -3,15 +3,14 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, ResetLock},
+    cli::{Cli, DeviceCommand, ResetLock},
     session::session_from_args,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use std::io::Write;
-use std::sync::{Arc, Mutex};
-use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
+use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand, TpmTransient};
 
-impl Command for ResetLock {
+impl DeviceCommand for ResetLock {
     /// Runs `reset-lock`.
     ///
     /// # Errors
@@ -20,25 +19,19 @@ impl Command for ResetLock {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
         let handles = [TpmRh::Lockout as u32];
         let sessions = session_from_args(&command, &handles, cli)?;
-        let (resp, _) = chip.execute(cli.log_format, &command, &sessions)?;
+        let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         writeln!(writer, "Dictionary attack lockout has been reset.")?;
-        Ok(())
+        Ok(Vec::new())
     }
 }

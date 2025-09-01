@@ -30,10 +30,10 @@ fn test_context() -> TestFixture {
         .format_timestamp_micros()
         .try_init();
     let (handle, transport) = cli::mocktpm::mocktpm_start();
-    let device = Arc::new(Mutex::new(TpmDevice::new(transport)));
     let mut cli = Cli::default();
-
     cli.log_format = LogFormat::Pretty;
+
+    let device = Arc::new(Mutex::new(TpmDevice::new(transport, cli.log_format)));
 
     TestFixture {
         _handle: handle,
@@ -134,10 +134,14 @@ fn test_subcommand_objects(test_context: TestFixture) {
 
 #[rstest]
 fn test_subcommand_import(test_context: TestFixture) {
+    let parent_context_uri = "tpm://0x81000001".to_string();
+
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
+        handle_uri: Some(parent_context_uri.clone()),
         ..Default::default()
     });
+
     let mut parent_context_uri_buf = Vec::new();
     create_cmd
         .run(
@@ -146,10 +150,11 @@ fn test_subcommand_import(test_context: TestFixture) {
             &mut parent_context_uri_buf,
         )
         .unwrap();
-    let parent_context_uri = String::from_utf8(parent_context_uri_buf)
+    let returned_parent_uri = String::from_utf8(parent_context_uri_buf)
         .unwrap()
         .trim()
         .to_string();
+    assert_eq!(returned_parent_uri, parent_context_uri);
 
     let key_dir = tempdir().unwrap();
     let key_path = key_dir.path().join("import-key.pem");

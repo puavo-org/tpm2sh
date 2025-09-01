@@ -3,14 +3,13 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Import},
+    cli::{Cli, DeviceCommand, Import},
     crypto::{crypto_hmac, crypto_kdfa, crypto_make_name, UNCOMPRESSED_POINT_TAG},
-    device::ScopedHandle,
     key::{private_key_from_pem_bytes, JsonTpmKey},
     session::session_from_args,
     uri::{uri_to_bytes, uri_to_tpm_handle},
     util::build_to_vec,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -23,7 +22,6 @@ use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
@@ -318,7 +316,7 @@ fn create_import_blob(
     ))
 }
 
-impl Command for Import {
+impl DeviceCommand for Import {
     /// Runs `import`.
     ///
     /// # Errors
@@ -328,33 +326,23 @@ impl Command for Import {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let parent_uri = cli
             .parent
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
 
         let parent_handle = if parent_uri.starts_with("tpm://") {
-            ScopedHandle::new(
-                TpmTransient(uri_to_tpm_handle(parent_uri)?),
-                device_arc.clone(),
-            )
+            TpmTransient(uri_to_tpm_handle(parent_uri)?)
         } else {
             return Err(CliError::Usage(
                 "--parent for import must be a tpm:// handle URI".to_string(),
             ));
         };
 
-        let mut device = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-        let (parent_public, parent_name) =
-            device.read_public(cli.log_format, parent_handle.handle())?;
+        let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = &self.key_uri;
@@ -383,22 +371,17 @@ impl Command for Import {
         };
 
         let import_cmd = TpmImportCommand {
-            parent_handle: parent_handle.handle().0.into(),
+            parent_handle: parent_handle.0.into(),
             encryption_key,
             object_public: public_bytes_struct,
             duplicate,
             in_sym_seed,
             symmetric_alg,
         };
-        let handles = [parent_handle.handle().into()];
+        let handles = [parent_handle.into()];
         let sessions = session_from_args(&import_cmd, &handles, cli)?;
 
-        let (resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(cli.log_format, &import_cmd, &sessions)?
-        };
+        let (resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;
@@ -413,6 +396,6 @@ impl Command for Import {
 
         let json_string = serde_json::to_string_pretty(&new_key)?;
         writeln!(writer, "{json_string}")?;
-        Ok(())
+        Ok(Vec::new())
     }
 }

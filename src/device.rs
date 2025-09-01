@@ -3,10 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Cli, LogFormat},
+    cli::LogFormat,
     error::ParseError,
     print::TpmPrint,
-    uri, CliError,
+    uri::{uri_to_bytes, uri_to_tpm_handle},
+    CliError,
 };
 
 use std::{
@@ -16,106 +17,26 @@ use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
 
 use log::{trace, warn};
 use tpm2_protocol::{
-    self,
     data::{
         Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmRh, TpmSt, TpmaCc, TpmsAuthCommand,
         TpmsCapabilityData, TpmsContext, TpmtPublic, TpmuCapabilities,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
-        TpmGetCapabilityResponse, TpmHeader, TpmReadPublicCommand, TpmResponseBody,
+        TpmContextLoadCommand, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
+        TpmReadPublicCommand, TpmResponseBody,
     },
     TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
-
-/// A wrapper for a transient handle that ensures it is flushed when it goes out of scope.
-#[derive(Debug)]
-pub struct ScopedHandle {
-    handle: TpmTransient,
-    device: Arc<Mutex<TpmDevice>>,
-}
-
-impl ScopedHandle {
-    /// Creates a new scoped handle.
-    #[must_use]
-    pub fn new(handle: TpmTransient, device: Arc<Mutex<TpmDevice>>) -> Self {
-        Self { handle, device }
-    }
-
-    /// Creates a new scoped handle by resolving a URI. This can load a context if needed.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the URI is invalid or the context cannot be loaded.
-    pub fn from_uri(
-        device_arc: &Arc<Mutex<TpmDevice>>,
-        log_format: LogFormat,
-        uri: &str,
-    ) -> Result<ScopedHandle, CliError> {
-        if uri.starts_with("tpm://") {
-            let handle = uri::uri_to_tpm_handle(uri)?;
-            Ok(ScopedHandle::new(TpmTransient(handle), device_arc.clone()))
-        } else if uri.starts_with("data://") || uri.starts_with("file://") {
-            let context_blob = uri::uri_to_bytes(uri, &[])?;
-            let (context, remainder) = TpmsContext::parse(&context_blob)?;
-            if !remainder.is_empty() {
-                return Err(ParseError::Custom("trailing data".to_string()).into());
-            }
-            let mut device = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("no transport".to_string()))?;
-            let load_cmd = TpmContextLoadCommand { context };
-            let (resp, _) = device.execute(log_format, &load_cmd, &[])?;
-            let load_resp = resp
-                .ContextLoad()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            Ok(ScopedHandle::new(
-                load_resp.loaded_handle,
-                device_arc.clone(),
-            ))
-        } else {
-            Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into())
-        }
-    }
-
-    /// Returns the inner handle.
-    #[must_use]
-    pub const fn handle(&self) -> TpmTransient {
-        self.handle
-    }
-
-    /// Consumes the guard without flushing the handle. This should be used when
-    /// the handle has been consumed by another command, such as `TPM2_EvictControl`.
-    pub fn forget(self) {
-        std::mem::forget(self);
-    }
-}
-
-impl Drop for ScopedHandle {
-    fn drop(&mut self) {
-        let handle = self.handle;
-        if let Ok(mut device) = self.device.lock() {
-            let cmd = TpmFlushContextCommand {
-                flush_handle: handle.into(),
-            };
-            if let Err(err) = device.execute(LogFormat::Plain, &cmd, &[]) {
-                warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
-            }
-        } else {
-            warn!(target: "cli::device", "tpm://{handle:#010x}: no transport");
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum TpmDeviceErrorKind {
@@ -132,13 +53,15 @@ impl<T: Read + Write + Send + Debug> TpmTransport for T {}
 #[derive(Debug)]
 pub struct TpmDevice {
     transport: Box<dyn TpmTransport>,
+    log_format: LogFormat,
 }
 
 impl TpmDevice {
     /// Creates a new TPM device from an owned transport.
-    pub fn new<T: TpmTransport + 'static>(transport: T) -> Self {
+    pub fn new<T: TpmTransport + 'static>(transport: T, log_format: LogFormat) -> Self {
         Self {
             transport: Box::new(transport),
+            log_format,
         }
     }
 
@@ -152,14 +75,13 @@ impl TpmDevice {
     /// with the device fails, or the TPM itself returns an error.
     pub fn execute<C>(
         &mut self,
-        log_format: LogFormat,
         command: &C,
         sessions: &[TpmsAuthCommand],
     ) -> Result<(TpmResponseBody, TpmAuthResponses), CliError>
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
-        if let LogFormat::Pretty = log_format {
+        if let LogFormat::Pretty = self.log_format {
             trace!(target: "cli::device", "{}", C::COMMAND);
             command.print("", 1);
         }
@@ -204,7 +126,7 @@ impl TpmDevice {
             });
         }
 
-        if let LogFormat::Plain = log_format {
+        if let LogFormat::Plain = self.log_format {
             trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
         }
         self.transport.write_all(command_bytes)?;
@@ -238,21 +160,21 @@ impl TpmDevice {
             let _ = stderr.flush();
         }
 
-        if let LogFormat::Plain = log_format {
+        if let LogFormat::Plain = self.log_format {
             trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
         }
 
         let result = tpm_parse_response(C::COMMAND, &resp_buf)?;
         match &result {
             Ok((rc, response_body, _)) => {
-                if let LogFormat::Pretty = log_format {
+                if let LogFormat::Pretty = self.log_format {
                     trace!(target: "cli::device", "Response (rc={rc})");
                     response_body.print("", 1);
                 }
             }
             Err((rc, _)) => {
                 trace!(target: "cli::device", "Error Response (rc={rc})");
-                if let LogFormat::Pretty = log_format {
+                if let LogFormat::Pretty = self.log_format {
                     trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
                 }
             }
@@ -274,8 +196,8 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_algorithms(&mut self, cli: &Cli) -> Result<HashSet<TpmAlgId>, CliError> {
-        let cap_data_vec = self.get_capability(cli, TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
+    pub fn get_all_algorithms(&mut self) -> Result<HashSet<TpmAlgId>, CliError> {
+        let cap_data_vec = self.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
         let algorithms: HashSet<TpmAlgId> = cap_data_vec
             .into_iter()
             .flat_map(|cap_data| {
@@ -294,13 +216,9 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(&mut self, cli: &Cli, handle_type: TpmRh) -> Result<Vec<u32>, CliError> {
-        let cap_data_vec = self.get_capability(
-            cli,
-            TpmCap::Handles,
-            handle_type as u32,
-            TPM_CAP_PROPERTY_MAX,
-        )?;
+    pub fn get_all_handles(&mut self, handle_type: TpmRh) -> Result<Vec<u32>, CliError> {
+        let cap_data_vec =
+            self.get_capability(TpmCap::Handles, handle_type as u32, TPM_CAP_PROPERTY_MAX)?;
         let handles: Vec<u32> = cap_data_vec
             .into_iter()
             .flat_map(|cap_data| {
@@ -314,6 +232,36 @@ impl TpmDevice {
         Ok(handles)
     }
 
+    /// Loads a TPM context from URI, and return a pair, where the boolean flag
+    /// tells whether the context needs to be cleaned up or not.
+    ///
+    /// `tpm://` URIs are considered to be managed by the caller, and thus they are
+    /// paired with `false`. Other types of URIs are paired with `true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` on parsing or TPM command failure.
+    pub fn load_context(&mut self, uri: &str) -> Result<(TpmTransient, bool), CliError> {
+        if uri.starts_with("tpm://") {
+            let handle = uri_to_tpm_handle(uri)?;
+            Ok((TpmTransient(handle), false))
+        } else if uri.starts_with("data://") || uri.starts_with("file://") {
+            let context_blob = uri_to_bytes(uri, &[])?;
+            let (context, remainder) = TpmsContext::parse(&context_blob)?;
+            if !remainder.is_empty() {
+                return Err(ParseError::Custom("trailing data".to_string()).into());
+            }
+            let cmd = TpmContextLoadCommand { context };
+            let (resp, _) = self.execute(&cmd, &[])?;
+            let resp = resp
+                .ContextLoad()
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            Ok((resp.loaded_handle, true))
+        } else {
+            Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into())
+        }
+    }
+
     /// Fetches and returns all capabilities of a certain type from the TPM.
     ///
     /// # Errors
@@ -322,7 +270,6 @@ impl TpmDevice {
     /// or if the TPM returns a response of an unexpected type.
     pub fn get_capability(
         &mut self,
-        cli: &Cli,
         cap: TpmCap,
         mut property: u32,
         count: u32,
@@ -335,7 +282,7 @@ impl TpmDevice {
                 property_count: count,
             };
 
-            let (resp, _) = self.execute(cli.log_format, &cmd, &[])?;
+            let (resp, _) = self.execute(&cmd, &[])?;
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
@@ -374,13 +321,12 @@ impl TpmDevice {
     /// Returns `CliError` if the `ReadPublic` command fails.
     pub fn read_public(
         &mut self,
-        log_format: LogFormat,
         handle: TpmTransient,
     ) -> Result<(TpmtPublic, Tpm2bName), CliError> {
         let cmd = TpmReadPublicCommand {
             object_handle: handle.0.into(),
         };
-        let (resp, _) = self.execute(log_format, &cmd, &[])?;
+        let (resp, _) = self.execute(&cmd, &[])?;
         let read_public_resp = resp
             .ReadPublic()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

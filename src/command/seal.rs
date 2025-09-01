@@ -3,17 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Seal},
-    device::ScopedHandle,
+    cli::{Cli, DeviceCommand, Seal},
     key::JsonTpmKey,
     session::session_from_args,
     uri::uri_to_bytes,
     util::build_to_vec,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -21,9 +19,10 @@ use tpm2_protocol::{
         TpmtPublic, TpmtScheme, TpmuPublicId, TpmuPublicParms,
     },
     message::TpmCreateCommand,
+    TpmTransient,
 };
 
-impl Command for Seal {
+impl DeviceCommand for Seal {
     /// Runs `seal`.
     ///
     /// # Errors
@@ -32,18 +31,18 @@ impl Command for Seal {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let parent_uri = cli
             .parent
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
-        let parent_handle_guard = ScopedHandle::from_uri(&device_arc, cli.log_format, parent_uri)?;
-        let parent_handle = parent_handle_guard.handle();
+        let (parent_handle, needs_flush) = device.load_context(parent_uri)?;
+        let mut handles_to_flush = Vec::new();
+        if needs_flush {
+            handles_to_flush.push(parent_handle);
+        }
 
         let data_to_seal = uri_to_bytes(&self.data_uri, &[])?;
 
@@ -81,12 +80,7 @@ impl Command for Seal {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&cmd, &handles, cli)?;
-        let (resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(cli.log_format, &cmd, &sessions)?
-        };
+        let (resp, _) = device.execute(&cmd, &sessions)?;
 
         let create_resp = resp.Create().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Create: {e:?}"))
@@ -103,6 +97,6 @@ impl Command for Seal {
         let json_string = serde_json::to_string_pretty(&key)?;
         writeln!(writer, "{json_string}")?;
 
-        Ok(())
+        Ok(handles_to_flush)
     }
 }

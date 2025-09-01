@@ -3,17 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Unseal},
-    device::ScopedHandle,
+    cli::{Cli, DeviceCommand, Unseal},
     session::session_from_args,
     uri::uri_to_tpm_handle,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{message::TpmUnsealCommand, TpmTransient};
 
-impl Command for Unseal {
+impl DeviceCommand for Unseal {
     /// Runs `unseal`.
     ///
     /// # Errors
@@ -22,15 +20,11 @@ impl Command for Unseal {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let handle = uri_to_tpm_handle(&self.handle_uri)?;
-        let object_handle_guard = ScopedHandle::new(TpmTransient(handle), device_arc.clone());
-        let object_handle = object_handle_guard.handle();
+        let object_handle = TpmTransient(handle);
 
         let unseal_cmd = TpmUnsealCommand {
             item_handle: object_handle.0.into(),
@@ -38,17 +32,13 @@ impl Command for Unseal {
         let unseal_handles = [object_handle.into()];
         let unseal_sessions = session_from_args(&unseal_cmd, &unseal_handles, cli)?;
 
-        let (unseal_resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(cli.log_format, &unseal_cmd, &unseal_sessions)?
-        };
+        let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp
             .Unseal()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         writer.write_all(&unseal_resp.out_data)?;
-        Ok(())
+
+        Ok(Vec::new())
     }
 }

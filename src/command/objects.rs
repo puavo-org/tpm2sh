@@ -2,14 +2,13 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Objects},
-    CliError, Command, TpmDevice,
+    cli::{Cli, DeviceCommand, Objects},
+    CliError, TpmDevice,
 };
 use std::io::Write;
-use std::sync::{Arc, Mutex};
-use tpm2_protocol::data::TpmRh;
+use tpm2_protocol::{data::TpmRh, TpmTransient};
 
-impl Command for Objects {
+impl DeviceCommand for Objects {
     /// Runs `objects`.
     ///
     /// # Errors
@@ -17,23 +16,18 @@ impl Command for Objects {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        _cli: &Cli,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut device = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-        let transient_handles = device.get_all_handles(cli, TpmRh::TransientFirst)?;
+    ) -> Result<Vec<TpmTransient>, CliError> {
+        let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
         }
-        let persistent_handles = device.get_all_handles(cli, TpmRh::PersistentFirst)?;
+        let persistent_handles = device.get_all_handles(TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
         }
-        Ok(())
+        Ok(Vec::new())
     }
 }

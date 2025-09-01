@@ -3,8 +3,6 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::Cli,
-    device::TPM_CAP_PROPERTY_MAX,
     error::ParseError,
     key::{tpm_alg_id_to_str, JsonPcrValues},
     CliError, TpmDevice,
@@ -27,8 +25,8 @@ use tpm2_protocol::{
 pub struct PcrSelectionParser;
 
 /// Gets the number of PCRs from the TPM.
-pub(crate) fn pcr_get_count(chip: &mut TpmDevice, cli: &Cli) -> Result<usize, CliError> {
-    let cap_data = chip.get_capability(cli, TpmCap::Pcrs, 0, TPM_CAP_PROPERTY_MAX)?;
+pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, CliError> {
+    let cap_data = device.get_capability(TpmCap::Pcrs, 0, crate::device::TPM_CAP_PROPERTY_MAX)?;
     let Some(first_cap) = cap_data.into_iter().next() else {
         return Err(CliError::Execution(
             "TPM reported no capabilities for PCRs.".to_string(),

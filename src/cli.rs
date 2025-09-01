@@ -7,12 +7,39 @@ use clap::{
     builder::styling::{AnsiColor, Color, Style, Styles},
     Args, Parser, Subcommand, ValueEnum,
 };
+use log::warn;
 use std::{
     fmt,
     io::Write,
     sync::{Arc, Mutex},
 };
 use tpm2_protocol::data::{TpmRc, TpmRh, TpmSe};
+use tpm2_protocol::{message::TpmFlushContextCommand, TpmTransient};
+
+/// Subcommand not requiring TPM device access.
+pub trait LocalCommand {
+    /// Runs a command.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the execution fails
+    fn run<W: Write>(&self, cli: &Cli, writer: &mut W) -> Result<(), CliError>;
+}
+
+/// Subcommand requiring TPM device access.
+pub trait DeviceCommand {
+    /// Runs a command.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the execution fails
+    fn run<W: Write>(
+        &self,
+        cli: &Cli,
+        device: &mut TpmDevice,
+        writer: &mut W,
+    ) -> Result<Vec<TpmTransient>, CliError>;
+}
 
 const STYLES: Styles = Styles::styled()
     .header(Style::new().bold())
@@ -20,7 +47,7 @@ const STYLES: Styles = Styles::styled()
     .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
     .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))));
 
-pub(crate) const USAGE_TEMPLATE: &str = "\
+pub(crate) const USAGE_TEMPLATE: &str = "
 {about-with-newline}
 {usage-heading} {usage}
 
@@ -28,7 +55,7 @@ pub(crate) const USAGE_TEMPLATE: &str = "\
 {options}
 ";
 
-const HELP_TEMPLATE: &str = "\
+const HELP_TEMPLATE: &str = "
 {about-with-newline}
 {usage-heading} {usage}
 
@@ -155,20 +182,22 @@ impl fmt::Display for KeyFormat {
 }
 
 macro_rules! tpm2sh_command {
-    ($($command:ident),* $(,)?) => {
+    (
+        local: [$($local_command:ident),* $(,)?],
+        device: [$($device_command:ident),* $(,)?]
+        $(,)?
+    ) => {
         #[derive(Subcommand, Debug)]
         pub enum Commands {
-            $(
-                $command($command),
-            )*
+            $($local_command($local_command),)*
+            $($device_command($device_command),)*
         }
 
         impl Command for Commands {
             fn is_local(&self) -> bool {
                 match self {
-                    $(
-                        Self::$command(args) => args.is_local(),
-                    )*
+                    $(Self::$local_command(_) => true,)*
+                    $(Self::$device_command(_) => false,)*
                 }
             }
 
@@ -180,8 +209,32 @@ macro_rules! tpm2sh_command {
             ) -> Result<(), CliError> {
                 match self {
                     $(
-                        Self::$command(args) => args.run(cli, device, writer),
-                    )*
+                        Self::$local_command(args) => {
+                            args.run(cli, writer)
+                        }
+                    ,)*
+                    $(
+                        Self::$device_command(args) => {
+                            let device_arc = device.ok_or_else(|| {
+                                CliError::Execution("TPM device not provided".to_string())
+                            })?;
+                            let mut guard = device_arc
+                                .lock()
+                                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+
+                            let handles_to_flush = args.run(cli, &mut guard, writer)?;
+
+                            for handle in handles_to_flush {
+                                let cmd = TpmFlushContextCommand {
+                                    flush_handle: handle.into(),
+                                };
+                                if let Err(err) = guard.execute(&cmd, &[]) {
+                                    warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
+                                }
+                            }
+                            Ok(())
+                        }
+                    ,)*
                 }
             }
         }
@@ -189,22 +242,23 @@ macro_rules! tpm2sh_command {
 }
 
 tpm2sh_command!(
-    Algorithms,
-    Convert,
-    CreatePrimary,
-    Delete,
-    Import,
-    Load,
-    Objects,
-    PcrEvent,
-    PcrRead,
-    Policy,
-    PrintError,
-    ResetLock,
-    Save,
-    Seal,
-    StartSession,
-    Unseal,
+    local: [Convert, PrintError],
+    device: [
+        Algorithms,
+        CreatePrimary,
+        Delete,
+        Import,
+        Load,
+        Objects,
+        PcrEvent,
+        PcrRead,
+        Policy,
+        ResetLock,
+        Save,
+        Seal,
+        StartSession,
+        Unseal,
+    ],
 );
 
 /// Lists available algorithms

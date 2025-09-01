@@ -3,22 +3,21 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, SessionType, StartSession},
-    CliError, Command, TpmDevice,
+    cli::{Cli, DeviceCommand, SessionType, StartSession},
+    CliError, TpmDevice,
 };
 use rand::{thread_rng, RngCore};
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
         Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject, TpmuSymKeyBits,
         TpmuSymMode,
     },
     message::TpmStartAuthSessionCommand,
-    tpm_hash_size,
+    tpm_hash_size, TpmTransient,
 };
 
-impl Command for StartSession {
+impl DeviceCommand for StartSession {
     /// Runs `start-session`.
     ///
     /// # Errors
@@ -26,15 +25,10 @@ impl Command for StartSession {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        _cli: &Cli,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;
@@ -53,7 +47,7 @@ impl Command for StartSession {
             },
             auth_hash,
         };
-        let (response, _) = chip.execute(cli.log_format, &cmd, &[])?;
+        let (response, _) = device.execute(&cmd, &[])?;
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
@@ -63,6 +57,6 @@ impl Command for StartSession {
             writeln!(writer, "digest://sha256,{digest}")?;
         }
         writeln!(writer, "tpm://{handle:#010x}")?;
-        Ok(())
+        Ok(Vec::new())
     }
 }

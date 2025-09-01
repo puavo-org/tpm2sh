@@ -27,12 +27,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-/// A trait for executing subcommands.
+/// A trait for executing the top-level Commands enum.
 pub trait Command {
     /// Returns `true` if the command does not require TPM device access.
-    fn is_local(&self) -> bool {
-        false
-    }
+    fn is_local(&self) -> bool;
 
     /// Runs a command.
     ///
@@ -64,7 +62,8 @@ pub fn execute_cli() -> Result<(), CliError> {
                 .write(true)
                 .open(&cli.device)
                 .map_err(|e| CliError::File(cli.device.to_string(), e))?;
-            Some(Arc::new(Mutex::new(TpmDevice::new(file))))
+            let device = TpmDevice::new(file, cli.log_format);
+            Some(Arc::new(Mutex::new(device)))
         };
         command.run(&cli, device_arc, &mut io::stdout())
     } else {

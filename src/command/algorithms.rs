@@ -3,15 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Algorithms, Cli},
+    cli::{Algorithms, Cli, DeviceCommand},
     key::enumerate_all,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use regex::Regex;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use tpm2_protocol::TpmTransient;
 
-impl Command for Algorithms {
+impl DeviceCommand for Algorithms {
     /// Runs `algorithms`.
     ///
     /// # Errors
@@ -19,17 +19,11 @@ impl Command for Algorithms {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        _cli: &Cli,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut device = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-        let chip_algorithms = device.get_all_algorithms(cli)?;
+    ) -> Result<Vec<TpmTransient>, CliError> {
+        let chip_algorithms = device.get_all_algorithms()?;
         let cli_algorithms = enumerate_all();
 
         let supported_algorithms: Vec<_> = cli_algorithms
@@ -54,6 +48,6 @@ impl Command for Algorithms {
         for name in sorted_names {
             writeln!(writer, "{name}")?;
         }
-        Ok(())
+        Ok(Vec::new())
     }
 }

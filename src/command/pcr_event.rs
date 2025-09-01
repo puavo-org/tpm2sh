@@ -3,19 +3,18 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, PcrEvent},
+    cli::{Cli, DeviceCommand, PcrEvent},
     session::session_from_args,
     uri::uri_to_bytes,
     util::parse_pcr_uri,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 
-use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
+use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand, TpmTransient};
 
-impl Command for PcrEvent {
+impl DeviceCommand for PcrEvent {
     /// Runs `pcr-event`.
     ///
     /// # Errors
@@ -24,15 +23,9 @@ impl Command for PcrEvent {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         _writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let (_bank, pcr_index) = parse_pcr_uri(&self.pcr_uri)?;
 
         let handles = [pcr_index];
@@ -43,9 +36,9 @@ impl Command for PcrEvent {
             event_data,
         };
         let sessions = session_from_args(&command, &handles, cli)?;
-        let (resp, _) = chip.execute(cli.log_format, &command, &sessions)?;
+        let (resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        Ok(())
+        Ok(Vec::new())
     }
 }

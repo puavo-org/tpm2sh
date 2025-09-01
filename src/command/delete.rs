@@ -2,20 +2,19 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Delete},
+    cli::{Cli, Delete, DeviceCommand},
     session::session_from_args,
     uri::uri_to_tpm_handle,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::TpmRh,
     message::{TpmEvictControlCommand, TpmFlushContextCommand},
     TpmPersistent, TpmTransient,
 };
 
-impl Command for Delete {
+impl DeviceCommand for Delete {
     /// Runs `delete`.
     ///
     /// # Errors
@@ -24,15 +23,9 @@ impl Command for Delete {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut chip = device_arc
-            .lock()
-            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let handle = uri_to_tpm_handle(&self.handle_uri)?;
 
         if handle >= TpmRh::PersistentFirst as u32 {
@@ -45,7 +38,7 @@ impl Command for Delete {
                 persistent_handle,
             };
             let sessions = session_from_args(&evict_cmd, &handles, cli)?;
-            let (resp, _) = chip.execute(cli.log_format, &evict_cmd, &sessions)?;
+            let (resp, _) = device.execute(&evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
@@ -54,7 +47,7 @@ impl Command for Delete {
             let flush_cmd = TpmFlushContextCommand {
                 flush_handle: flush_handle.into(),
             };
-            let (resp, _) = chip.execute(cli.log_format, &flush_cmd, &[])?;
+            let (resp, _) = device.execute(&flush_cmd, &[])?;
             resp.FlushContext()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             writeln!(writer, "tpm://{flush_handle:#010x}")?;
@@ -63,6 +56,6 @@ impl Command for Delete {
                 "'{handle:#010x}' is not a transient or persistent handle"
             )));
         }
-        Ok(())
+        Ok(Vec::new())
     }
 }

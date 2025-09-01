@@ -3,17 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Save},
-    device::ScopedHandle,
+    cli::{Cli, DeviceCommand, Save},
     session::session_from_args,
     uri::uri_to_tpm_handle,
-    CliError, Command, TpmDevice,
+    CliError, TpmDevice,
 };
 use std::io::Write;
-use std::sync::{Arc, Mutex};
-use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent};
+use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent, TpmTransient};
 
-impl Command for Save {
+impl DeviceCommand for Save {
     /// Runs `save`.
     ///
     /// # Errors
@@ -22,15 +20,14 @@ impl Command for Save {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-
-        let object_handle_guard =
-            ScopedHandle::from_uri(&device_arc, cli.log_format, &self.in_uri)?;
-        let object_handle = object_handle_guard.handle();
+    ) -> Result<Vec<TpmTransient>, CliError> {
+        let (object_handle, needs_flush) = device.load_context(&self.in_uri)?;
+        let mut handles_to_flush = Vec::new();
+        if needs_flush {
+            handles_to_flush.push(object_handle);
+        }
 
         let persistent_handle = TpmPersistent(uri_to_tpm_handle(&self.to_uri)?);
         let auth_handle = TpmRh::Owner;
@@ -42,18 +39,13 @@ impl Command for Save {
             persistent_handle,
         };
         let sessions = session_from_args(&evict_cmd, &handles, cli)?;
-        let (resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(cli.log_format, &evict_cmd, &sessions)?
-        };
+        let (resp, _) = device.execute(&evict_cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
-        object_handle_guard.forget();
+        handles_to_flush.retain(|&h| h != object_handle);
 
         writeln!(writer, "tpm://{persistent_handle:#010x}")?;
-        Ok(())
+        Ok(handles_to_flush)
     }
 }

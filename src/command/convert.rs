@@ -3,33 +3,23 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Cli, Convert, KeyFormat},
+    cli::{Cli, Convert, KeyFormat, LocalCommand},
     key::{JsonTpmKey, TpmKey},
     uri::{uri_to_bytes, uri_to_tpm_handle},
-    util, CliError, Command, TpmDevice,
+    util, CliError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use pkcs8::der::asn1::OctetString;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 use tpm2_protocol::{data, TpmParse};
 
-impl Command for Convert {
-    fn is_local(&self) -> bool {
-        true
-    }
-
+impl LocalCommand for Convert {
     /// Runs `convert`.
     ///
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        cli: &Cli,
-        _device: Option<Arc<Mutex<TpmDevice>>>,
-        writer: &mut W,
-    ) -> Result<(), CliError> {
+    fn run<W: Write>(&self, cli: &Cli, writer: &mut W) -> Result<(), CliError> {
         let input_bytes = uri_to_bytes(&self.input_uri, &[])?;
 
         let tpm_key = match self.from {

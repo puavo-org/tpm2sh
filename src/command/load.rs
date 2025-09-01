@@ -3,24 +3,23 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, Load},
-    device::ScopedHandle,
+    cli::{Cli, DeviceCommand, Load},
     session::session_from_args,
     uri::uri_to_bytes,
-    util, CliError, Command, TpmDevice,
+    util::build_to_vec,
+    CliError, TpmDevice,
 };
 
 use std::io::Write;
-use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::{TpmContextSaveCommand, TpmLoadCommand},
-    TpmParse,
+    TpmParse, TpmTransient,
 };
 
-impl Command for Load {
+impl DeviceCommand for Load {
     /// Runs `load`.
     ///
     /// # Errors
@@ -29,17 +28,19 @@ impl Command for Load {
     fn run<W: Write>(
         &self,
         cli: &Cli,
-        device: Option<Arc<Mutex<TpmDevice>>>,
+        device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<(), CliError> {
-        let device_arc =
-            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-
+    ) -> Result<Vec<TpmTransient>, CliError> {
         let parent_uri = cli
             .parent
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
-        let parent_handle = ScopedHandle::from_uri(&device_arc, cli.log_format, parent_uri)?;
+        let (parent_handle, parent_needs_flush) = device.load_context(parent_uri)?;
+
+        let mut handles_to_flush = Vec::new();
+        if parent_needs_flush {
+            handles_to_flush.push(parent_handle);
+        }
 
         let pub_bytes = uri_to_bytes(&self.public_uri, &[])?;
         let priv_bytes = uri_to_bytes(&self.private_uri, &[])?;
@@ -48,36 +49,27 @@ impl Command for Load {
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;
 
         let load_cmd = TpmLoadCommand {
-            parent_handle: parent_handle.handle().0.into(),
+            parent_handle: parent_handle.0.into(),
             in_private,
             in_public,
         };
 
-        let handles = [parent_handle.handle().into()];
+        let handles = [parent_handle.into()];
         let sessions = session_from_args(&load_cmd, &handles, cli)?;
-        let (resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(cli.log_format, &load_cmd, &sessions)?
-        };
+        let (resp, _) = device.execute(&load_cmd, &sessions)?;
         let load_resp = resp
             .Load()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
         let save_handle = load_resp.object_handle;
-        let _ = ScopedHandle::new(save_handle, device_arc.clone());
-        let (resp, _) = {
-            let mut chip = device_arc
-                .lock()
-                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            let save_cmd = TpmContextSaveCommand { save_handle };
-            chip.execute(cli.log_format, &save_cmd, &[])?
-        };
+        handles_to_flush.push(save_handle);
+
+        let save_cmd = TpmContextSaveCommand { save_handle };
+        let (resp, _) = device.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let context_bytes = util::build_to_vec(&save_resp.context)?;
+        let context_bytes = build_to_vec(&save_resp.context)?;
 
         writeln!(
             writer,
@@ -85,6 +77,6 @@ impl Command for Load {
             base64_engine.encode(context_bytes)
         )?;
 
-        Ok(())
+        Ok(handles_to_flush)
     }
 }
