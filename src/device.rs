@@ -16,7 +16,7 @@ use std::{
 };
 use tpm2_protocol::{
     self,
-    data::{self, TpmCc, TpmSt, TpmaCc, TpmsContext, TpmuCapabilities},
+    data::{self, TpmSt, TpmaCc, TpmsContext, TpmuCapabilities},
     message::{
         TpmCommandBuild, TpmContextLoadCommand, TpmFlushContextCommand, TpmGetCapabilityCommand,
         TpmGetCapabilityResponse, TpmHeader, TpmResponseBody,
@@ -149,9 +149,7 @@ impl TpmDevice {
         let mut command_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut command_buf);
-            let tag = if C::COMMAND == TpmCc::GetCapability
-                || (sessions.is_empty() && !C::WITH_SESSIONS)
-            {
+            let tag = if sessions.is_empty() {
                 TpmSt::NoSessions
             } else {
                 TpmSt::Sessions
