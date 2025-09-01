@@ -1422,9 +1422,9 @@ dependencies = [
 
 [[package]]
 name = "tpm2-protocol"
-version = "0.10.16"
+version = "0.10.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e15f63a05c84861a7e4b7d41dbebd0b0b047f601d6a177fda2198dd2be82ca2e"
+checksum = "e4585490549eb00f73d7b20fde3e3217c6809368a12975452c3ab7d50a8c6f45"
 
 [[package]]
 name = "tpm2sh"
@@ -1442,7 +1442,6 @@ dependencies = [
  "hmac",
  "log",
  "num-traits",
- "once_cell",
  "p256",
  "p384",
  "p521",

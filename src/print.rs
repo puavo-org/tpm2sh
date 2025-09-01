@@ -220,6 +220,7 @@ impl TpmPrint for TpmuHa {
     fn print(&self, name: &str, indent: usize) {
         let prefix = " ".repeat(indent * INDENT);
         let (variant, bytes): (&str, &[u8]) = match self {
+            Self::Null => ("Null", &[]),
             Self::Sha1(d) => ("Sha1", d),
             Self::Sha256(d) => ("Sha256", d),
             Self::Sha384(d) => ("Sha384", d),
