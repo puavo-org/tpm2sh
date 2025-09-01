@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-uri = { SOI ~ (tpm | file | data | pcr) ~ EOI }
+uri = { SOI ~ (tpm | file | data | pcr | session) ~ EOI }
 
 tpm = { "tpm://" ~ "0x" ~ ASCII_HEX_DIGIT+ }
 
@@ -12,6 +12,7 @@ data = { "data://" ~ encoding ~ "," ~ ANY* }
 encoding = { "utf8" | "hex" | "base64" }
 
 pcr = { "pcr://" ~ selection_body }
+session = { "session://" ~ ANY* }
 
 selection_body = { bank ~ ("+" ~ bank)* }
 bank = { alg ~ colon_and_list }

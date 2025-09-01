@@ -130,7 +130,8 @@ pub(crate) fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, String> {
 }
 
 /// Converts a `TpmAlgId` to its user-friendly string representation.
-pub(crate) fn tpm_alg_id_to_str(alg: TpmAlgId) -> &'static str {
+#[must_use]
+pub fn tpm_alg_id_to_str(alg: TpmAlgId) -> &'static str {
     match alg {
         TpmAlgId::Sha1 => "sha1",
         TpmAlgId::Sha256 => "sha256",

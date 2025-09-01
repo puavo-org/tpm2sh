@@ -29,6 +29,11 @@ path = "tests/integration_test.rs"
 harness = true
 
 [[test]]
+name = "session"
+path = "tests/session.rs"
+harness = true
+
+[[test]]
 name = "uri"
 path = "tests/uri.rs"
 harness = true
