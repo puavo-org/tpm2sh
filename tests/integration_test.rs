@@ -5,7 +5,7 @@ use cli::{
     cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects},
     device::TpmDevice,
     key::{self, JsonTpmKey},
-    Command, LOG_FORMAT,
+    Command,
 };
 use std::{
     collections::HashSet,
@@ -21,37 +21,35 @@ use tpm2_protocol::data::TpmAlgId;
 struct TestFixture {
     _handle: JoinHandle<()>,
     device: Arc<Mutex<TpmDevice>>,
-}
-
-fn setup_logging() {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
-        .format_timestamp_micros()
-        .try_init();
-
-    let _ = LOG_FORMAT.set(LogFormat::Pretty);
+    cli: Cli,
 }
 
 #[fixture]
-fn tpm_device() -> TestFixture {
-    setup_logging();
-
+fn test_context() -> TestFixture {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
+        .format_timestamp_micros()
+        .try_init();
     let (handle, transport) = cli::mocktpm::mocktpm_start();
     let device = Arc::new(Mutex::new(TpmDevice::new(transport)));
+    let mut cli = Cli::default();
+
+    cli.log_format = LogFormat::Pretty;
 
     TestFixture {
         _handle: handle,
         device,
+        cli,
     }
 }
 
 #[rstest]
-fn test_subcommand_algorithms(tpm_device: TestFixture) {
+fn test_subcommand_algorithms(test_context: TestFixture) {
     let algorithms_cmd = Commands::Algorithms(Algorithms { filter: None });
     let mut out_buf = Vec::new();
     algorithms_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut out_buf,
         )
         .unwrap();
@@ -77,8 +75,8 @@ fn test_subcommand_algorithms(tpm_device: TestFixture) {
     let mut out_buf = Vec::new();
     filtered_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut out_buf,
         )
         .unwrap();
@@ -92,7 +90,7 @@ fn test_subcommand_algorithms(tpm_device: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_objects(tpm_device: TestFixture) {
+fn test_subcommand_objects(test_context: TestFixture) {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
         ..Default::default()
@@ -100,15 +98,15 @@ fn test_subcommand_objects(tpm_device: TestFixture) {
 
     create_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut Vec::new(),
         )
         .unwrap();
     create_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut Vec::new(),
         )
         .unwrap();
@@ -117,8 +115,8 @@ fn test_subcommand_objects(tpm_device: TestFixture) {
     let mut out_buf = Vec::new();
     objects_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut out_buf,
         )
         .unwrap();
@@ -135,7 +133,7 @@ fn test_subcommand_objects(tpm_device: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_import(tpm_device: TestFixture) {
+fn test_subcommand_import(test_context: TestFixture) {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
         ..Default::default()
@@ -143,8 +141,8 @@ fn test_subcommand_import(tpm_device: TestFixture) {
     let mut parent_context_uri_buf = Vec::new();
     create_cmd
         .run(
-            &Cli::default(),
-            Some(tpm_device.device.clone()),
+            &test_context.cli,
+            Some(test_context.device.clone()),
             &mut parent_context_uri_buf,
         )
         .unwrap();
@@ -170,7 +168,7 @@ fn test_subcommand_import(tpm_device: TestFixture) {
     import_cmd
         .run(
             &cli_with_parent,
-            Some(tpm_device.device.clone()),
+            Some(test_context.device.clone()),
             &mut import_output_buf,
         )
         .unwrap();

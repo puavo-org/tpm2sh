@@ -39,7 +39,7 @@ impl Command for Load {
             .parent
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
-        let parent_handle = ScopedHandle::from_uri(&device_arc, parent_uri)?;
+        let parent_handle = ScopedHandle::from_uri(&device_arc, cli.log_format, parent_uri)?;
 
         let pub_bytes = uri_to_bytes(&self.public_uri, &[])?;
         let priv_bytes = uri_to_bytes(&self.private_uri, &[])?;
@@ -59,7 +59,7 @@ impl Command for Load {
             let mut chip = device_arc
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(&load_cmd, &sessions)?
+            chip.execute(cli.log_format, &load_cmd, &sessions)?
         };
         let load_resp = resp
             .Load()
@@ -72,7 +72,7 @@ impl Command for Load {
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
             let save_cmd = TpmContextSaveCommand { save_handle };
-            chip.execute(&save_cmd, &[])?
+            chip.execute(cli.log_format, &save_cmd, &[])?
         };
         let save_resp = resp
             .ContextSave()

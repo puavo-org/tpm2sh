@@ -118,7 +118,7 @@ impl Command for CreatePrimary {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let sessions = session_from_args(&cmd, &handles, cli)?;
-        let (resp, _) = chip.execute(&cmd, &sessions)?;
+        let (resp, _) = chip.execute(cli.log_format, &cmd, &sessions)?;
         let create_primary_resp = resp
             .CreatePrimary()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
@@ -133,7 +133,7 @@ impl Command for CreatePrimary {
             };
             let evict_handles = [TpmRh::Owner as u32, object_handle_guard.handle().into()];
             let evict_sessions = session_from_args(&evict_cmd, &evict_handles, cli)?;
-            let (resp, _) = chip.execute(&evict_cmd, &evict_sessions)?;
+            let (resp, _) = chip.execute(cli.log_format, &evict_cmd, &evict_sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 
@@ -145,7 +145,7 @@ impl Command for CreatePrimary {
             let save_command = TpmContextSaveCommand {
                 save_handle: object_handle,
             };
-            let (resp, _) = chip.execute(&save_command, &[])?;
+            let (resp, _) = chip.execute(cli.log_format, &save_command, &[])?;
             let save_resp = resp
                 .ContextSave()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

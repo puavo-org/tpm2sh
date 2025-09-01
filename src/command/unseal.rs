@@ -42,7 +42,7 @@ impl Command for Unseal {
             let mut chip = device_arc
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(&unseal_cmd, &unseal_sessions)?
+            chip.execute(cli.log_format, &unseal_cmd, &unseal_sessions)?
         };
         let unseal_resp = unseal_resp
             .Unseal()

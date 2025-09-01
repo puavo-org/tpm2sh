@@ -4,38 +4,12 @@
 
 use crate::{
     cli::{Algorithms, Cli},
-    device::TPM_CAP_PROPERTY_MAX,
     key::enumerate_all,
     CliError, Command, TpmDevice,
 };
 use regex::Regex;
-use std::collections::HashSet;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use tpm2_protocol::data::{TpmAlgId, TpmCap, TpmuCapabilities};
-
-fn get_chip_algorithms(
-    device: Option<Arc<Mutex<TpmDevice>>>,
-) -> Result<HashSet<TpmAlgId>, CliError> {
-    let device_arc =
-        device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-    let mut locked_device = device_arc
-        .lock()
-        .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-    let cap_data_vec = locked_device.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
-    let algs: HashSet<TpmAlgId> = cap_data_vec
-        .into_iter()
-        .flat_map(|cap_data| {
-            if let TpmuCapabilities::Algs(p) = cap_data.data {
-                p.iter().map(|prop| prop.alg).collect::<Vec<_>>()
-            } else {
-                Vec::new()
-            }
-        })
-        .collect();
-    Ok(algs)
-}
 
 impl Command for Algorithms {
     /// Runs `algorithms`.
@@ -45,11 +19,17 @@ impl Command for Algorithms {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        _cli: &Cli,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
     ) -> Result<(), CliError> {
-        let chip_algorithms = get_chip_algorithms(device)?;
+        let device_arc =
+            device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
+        let mut device = device_arc
+            .lock()
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+
+        let chip_algorithms = device.get_all_algorithms(cli)?;
         let cli_algorithms = enumerate_all();
 
         let supported_algorithms: Vec<_> = cli_algorithms

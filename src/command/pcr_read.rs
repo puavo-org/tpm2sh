@@ -19,7 +19,7 @@ impl Command for PcrRead {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        _cli: &Cli,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
     ) -> Result<(), CliError> {
@@ -28,10 +28,10 @@ impl Command for PcrRead {
         let mut chip = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-        let pcr_count = pcr_get_count(&mut chip)?;
+        let pcr_count = pcr_get_count(&mut chip, cli)?;
         let pcr_selection_in = pcr_parse_selection(&self.selection, pcr_count)?;
         let cmd = TpmPcrReadCommand { pcr_selection_in };
-        let (resp, _) = chip.execute(&cmd, &[])?;
+        let (resp, _) = chip.execute(cli.log_format, &cmd, &[])?;
         let pcr_read_resp = resp
             .PcrRead()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

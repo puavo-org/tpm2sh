@@ -42,7 +42,7 @@ impl Command for Seal {
             .parent
             .as_ref()
             .ok_or_else(|| CliError::Usage("Missing required --parent argument".to_string()))?;
-        let parent_handle_guard = ScopedHandle::from_uri(&device_arc, parent_uri)?;
+        let parent_handle_guard = ScopedHandle::from_uri(&device_arc, cli.log_format, parent_uri)?;
         let parent_handle = parent_handle_guard.handle();
 
         let data_to_seal = uri_to_bytes(&self.data_uri, &[])?;
@@ -85,7 +85,7 @@ impl Command for Seal {
             let mut chip = device_arc
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(&cmd, &sessions)?
+            chip.execute(cli.log_format, &cmd, &sessions)?
         };
 
         let create_resp = resp.Create().map_err(|e| {

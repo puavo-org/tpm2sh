@@ -45,7 +45,7 @@ impl Command for Delete {
                 persistent_handle,
             };
             let sessions = session_from_args(&evict_cmd, &handles, cli)?;
-            let (resp, _) = chip.execute(&evict_cmd, &sessions)?;
+            let (resp, _) = chip.execute(cli.log_format, &evict_cmd, &sessions)?;
             resp.EvictControl()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
@@ -54,7 +54,7 @@ impl Command for Delete {
             let flush_cmd = TpmFlushContextCommand {
                 flush_handle: flush_handle.into(),
             };
-            let (resp, _) = chip.execute(&flush_cmd, &[])?;
+            let (resp, _) = chip.execute(cli.log_format, &flush_cmd, &[])?;
             resp.FlushContext()
                 .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
             writeln!(writer, "tpm://{flush_handle:#010x}")?;

@@ -43,7 +43,7 @@ impl Command for PcrEvent {
             event_data,
         };
         let sessions = session_from_args(&command, &handles, cli)?;
-        let (resp, _) = chip.execute(&command, &sessions)?;
+        let (resp, _) = chip.execute(cli.log_format, &command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         Ok(())

@@ -26,7 +26,7 @@ impl Command for StartSession {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        _cli: &Cli,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
     ) -> Result<(), CliError> {
@@ -53,7 +53,7 @@ impl Command for StartSession {
             },
             auth_hash,
         };
-        let (response, _) = chip.execute(&cmd, &[])?;
+        let (response, _) = chip.execute(cli.log_format, &cmd, &[])?;
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;

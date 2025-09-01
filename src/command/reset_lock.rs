@@ -34,7 +34,7 @@ impl Command for ResetLock {
         };
         let handles = [TpmRh::Lockout as u32];
         let sessions = session_from_args(&command, &handles, cli)?;
-        let (resp, _) = chip.execute(&command, &sessions)?;
+        let (resp, _) = chip.execute(cli.log_format, &command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
 

@@ -17,20 +17,20 @@ impl Command for Objects {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        _cli: &Cli,
+        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-        let mut locked_device = device_arc
+        let mut device = device_arc
             .lock()
             .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-        let transient_handles = locked_device.get_all_handles(TpmRh::TransientFirst)?;
+        let transient_handles = device.get_all_handles(cli, TpmRh::TransientFirst)?;
         for handle in transient_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
         }
-        let persistent_handles = locked_device.get_all_handles(TpmRh::PersistentFirst)?;
+        let persistent_handles = device.get_all_handles(cli, TpmRh::PersistentFirst)?;
         for handle in persistent_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
         }

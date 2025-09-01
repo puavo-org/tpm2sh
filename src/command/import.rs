@@ -26,11 +26,11 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
     data::{
-        self, Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
+        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
         TpmsEccPoint, TpmtPublic, TpmtSymDef, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits,
         TpmuSymMode,
     },
-    message::{TpmImportCommand, TpmReadPublicCommand},
+    message::TpmImportCommand,
     TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
@@ -120,31 +120,6 @@ ecdh!(
     p521::ecdh::diffie_hellman,
     p521::EncodedPoint
 );
-
-/// Reads the public area and name of a TPM object.
-///
-/// # Errors
-///
-/// Returns `CliError` if the `ReadPublic` command fails.
-fn read_public(
-    device: Option<Arc<Mutex<TpmDevice>>>,
-    handle: TpmTransient,
-) -> Result<(TpmtPublic, data::Tpm2bName), CliError> {
-    let cmd = TpmReadPublicCommand {
-        object_handle: handle.0.into(),
-    };
-    let device_arc =
-        device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-    let mut locked_device = device_arc
-        .lock()
-        .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-
-    let (resp, _) = locked_device.execute(&cmd, &[])?;
-    let read_public_resp = resp
-        .ReadPublic()
-        .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-    Ok((read_public_resp.out_public.inner, read_public_resp.name))
-}
 
 /// Encrypts the import seed using the parent's RSA public key.
 ///
@@ -358,7 +333,6 @@ impl Command for Import {
     ) -> Result<(), CliError> {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
-
         let parent_uri = cli
             .parent
             .as_ref()
@@ -375,8 +349,12 @@ impl Command for Import {
             ));
         };
 
+        let mut device = device_arc
+            .lock()
+            .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+
         let (parent_public, parent_name) =
-            read_public(Some(device_arc.clone()), parent_handle.handle())?;
+            device.read_public(cli.log_format, parent_handle.handle())?;
         let parent_name_alg = parent_public.name_alg;
 
         let key_uri_str = &self.key_uri;
@@ -419,7 +397,7 @@ impl Command for Import {
             let mut chip = device_arc
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(&import_cmd, &sessions)?
+            chip.execute(cli.log_format, &import_cmd, &sessions)?
         };
         let import_resp = resp.Import().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))

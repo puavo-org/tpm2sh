@@ -27,15 +27,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use once_cell::sync::OnceCell;
-
-pub static LOG_FORMAT: OnceCell<cli::LogFormat> = OnceCell::new();
-
-/// Safely accesses the global `LOG_FORMAT` static, falling back to the default.
-pub(crate) fn get_log_format() -> cli::LogFormat {
-    *LOG_FORMAT.get().unwrap_or(&cli::LogFormat::default())
-}
-
 /// A trait for executing subcommands.
 pub trait Command {
     /// Returns `true` if the command does not require TPM device access.
@@ -65,8 +56,6 @@ pub fn execute_cli() -> Result<(), CliError> {
     let cli = Cli::parse();
 
     if let Some(command) = &cli.command {
-        let _ = LOG_FORMAT.set(cli.log_format);
-
         let device_arc = if command.is_local() {
             None
         } else {
@@ -77,7 +66,6 @@ pub fn execute_cli() -> Result<(), CliError> {
                 .map_err(|e| CliError::File(cli.device.to_string(), e))?;
             Some(Arc::new(Mutex::new(TpmDevice::new(file))))
         };
-
         command.run(&cli, device_arc, &mut io::stdout())
     } else {
         Cli::command()

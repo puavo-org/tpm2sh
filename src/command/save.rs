@@ -28,7 +28,8 @@ impl Command for Save {
         let device_arc =
             device.ok_or_else(|| CliError::Execution("TPM device not provided".to_string()))?;
 
-        let object_handle_guard = ScopedHandle::from_uri(&device_arc, &self.in_uri)?;
+        let object_handle_guard =
+            ScopedHandle::from_uri(&device_arc, cli.log_format, &self.in_uri)?;
         let object_handle = object_handle_guard.handle();
 
         let persistent_handle = TpmPersistent(uri_to_tpm_handle(&self.to_uri)?);
@@ -45,7 +46,7 @@ impl Command for Save {
             let mut chip = device_arc
                 .lock()
                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
-            chip.execute(&evict_cmd, &sessions)?
+            chip.execute(cli.log_format, &evict_cmd, &sessions)?
         };
         resp.EvictControl()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
