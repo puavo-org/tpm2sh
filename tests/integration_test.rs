@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use cli::{
-    cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects},
+    cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects, ParentArgs},
     device::TpmDevice,
     key, Command,
 };
@@ -137,7 +137,7 @@ fn test_subcommand_import(test_context: TestFixture) {
 
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
-        handle_uri: Some(parent_context_uri.clone()),
+        handle_uri: Some(parent_context_uri.parse().unwrap()),
         ..Default::default()
     });
 
@@ -162,16 +162,17 @@ fn test_subcommand_import(test_context: TestFixture) {
     std::fs::write(&key_path, pem_doc.as_bytes()).unwrap();
 
     let import_cmd = Commands::Import(Import {
-        key_uri: format!("file://{}", key_path.to_str().unwrap()),
+        parent: ParentArgs {
+            parent: parent_context_uri.parse().unwrap(),
+        },
+        key_uri: format!("file://{}", key_path.to_str().unwrap())
+            .parse()
+            .unwrap(),
     });
-    let cli_with_parent = Cli {
-        parent: Some(parent_context_uri),
-        ..Default::default()
-    };
     let mut import_output_buf = Vec::new();
     import_cmd
         .run(
-            &cli_with_parent,
+            &test_context.cli,
             Some(test_context.device.clone()),
             &mut import_output_buf,
         )

@@ -25,7 +25,7 @@ impl DeviceCommand for Delete {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let handle = self.handle_uri.to_tpm_handle()?;
+        let handle = self.handle.to_tpm_handle()?;
 
         if handle >= TpmRh::PersistentFirst as u32 {
             let persistent_handle = TpmPersistent(handle);

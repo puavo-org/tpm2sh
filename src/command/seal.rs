@@ -38,7 +38,7 @@ impl DeviceCommand for Seal {
             handles_to_flush.push(parent_handle);
         }
 
-        let data_to_seal = self.data_uri.to_bytes()?;
+        let data_to_seal = self.data.to_bytes()?;
 
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
         if self.object_password.is_some() {

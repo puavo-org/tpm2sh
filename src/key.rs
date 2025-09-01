@@ -8,7 +8,6 @@ use crate::{
     session::AuthSession,
 };
 
-use serde::{Deserialize, Serialize};
 use std::{cmp::Ordering, collections::BTreeMap, fs, path::Path, str::FromStr};
 
 use p256::SecretKey;
@@ -22,12 +21,12 @@ use rsa::RsaPrivateKey;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
 
-pub type JsonPcrBank = BTreeMap<String, String>;
+pub type PcrBank = BTreeMap<String, String>;
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
-pub struct JsonPcrValues {
+#[derive(Debug, Clone, Default)]
+pub struct PcrValues {
     pub update: u32,
-    pub banks: BTreeMap<String, JsonPcrBank>,
+    pub banks: BTreeMap<String, PcrBank>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

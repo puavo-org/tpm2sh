@@ -22,7 +22,7 @@ impl LocalCommand for Convert {
             ));
         }
 
-        let input_bytes = self.input_uri.to_bytes()?;
+        let input_bytes = self.input.to_bytes()?;
 
         let tpm_key = match self.from {
             KeyFormat::Pem => TpmKey::from_pem(&input_bytes)?,

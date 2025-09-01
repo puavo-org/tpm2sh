@@ -4,14 +4,15 @@
 use crate::{
     cli::{self, Cli, DeviceCommand, Policy, SessionType},
     error::ParseError,
-    pcr::{pcr_get_count, pcr_parse_selection},
+    pcr::{pcr_get_count, pcr_to_values},
     session::session_from_args,
-    uri::Uri,
+    uri::{pcr_parse_selection, Uri},
     CliError, TpmDevice,
 };
 use pest::iterators::{Pair, Pairs};
 use pest::Parser;
 use pest_derive::Parser;
+use sha2::{Digest, Sha256};
 use std::io::Write;
 use tpm2_protocol::{
     data::{
@@ -19,8 +20,8 @@ use tpm2_protocol::{
         TpmtSymDefObject,
     },
     message::{
-        TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
-        TpmPolicySecretCommand, TpmStartAuthSessionCommand,
+        TpmFlushContextCommand, TpmPcrReadCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand,
+        TpmPolicyPcrCommand, TpmPolicySecretCommand, TpmStartAuthSessionCommand,
     },
     TpmSession, TpmTransient,
 };
@@ -38,6 +39,7 @@ enum PolicyAst {
     },
     Secret {
         auth_handle_uri: Uri,
+        password: Option<String>,
     },
     Or(Vec<PolicyAst>),
 }
@@ -57,7 +59,7 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
     let ast = match pair.as_rule() {
         Rule::pcr_expression => {
             let mut inner_pairs = pair.into_inner();
-            let selection = parse_quoted_string(&inner_pairs.next().unwrap())?;
+            let selection = inner_pairs.next().unwrap().as_str().to_string();
             let digest = inner_pairs
                 .next()
                 .map(|p| parse_quoted_string(&p))
@@ -78,9 +80,17 @@ fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliErr
             }
         }
         Rule::secret_expression => {
-            let uri_str = parse_quoted_string(&pair.into_inner().next().unwrap())?;
+            let mut inner_pairs = pair.into_inner();
+            let uri_str = parse_quoted_string(&inner_pairs.next().unwrap())?;
             let auth_handle_uri = uri_str.parse()?;
-            PolicyAst::Secret { auth_handle_uri }
+            let password = inner_pairs
+                .next()
+                .map(|p| parse_quoted_string(&p))
+                .transpose()?;
+            PolicyAst::Secret {
+                auth_handle_uri,
+                password,
+            }
         }
         Rule::or_expression => {
             let mut or_pairs = pair.into_inner();
@@ -126,9 +136,25 @@ impl PolicyExecutor<'_> {
         digest: Option<&String>,
         _count: Option<&u32>,
     ) -> Result<(), CliError> {
-        let pcr_digest_bytes = hex::decode(digest.ok_or_else(|| {
-            CliError::Usage("PCR digest must be provided as an argument".to_string())
-        })?)?;
+        let pcr_digest_bytes = if let Some(digest_hex) = digest {
+            hex::decode(digest_hex)?
+        } else {
+            let pcr_selection_in = pcr_parse_selection(selection_str, self.pcr_count)?;
+            let read_cmd = TpmPcrReadCommand { pcr_selection_in };
+            let (resp, _) = self.device.execute(&read_cmd, &[])?;
+            let pcr_read_resp = resp
+                .PcrRead()
+                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+
+            let pcr_values = pcr_to_values(&pcr_read_resp)?;
+            let mut concatenated_digests = Vec::new();
+            for bank_values in pcr_values.banks.values() {
+                for digest_hex in bank_values.values() {
+                    concatenated_digests.extend(hex::decode(digest_hex)?);
+                }
+            }
+            Sha256::digest(&concatenated_digests).to_vec()
+        };
 
         let pcr_selection = pcr_parse_selection(selection_str, self.pcr_count)?;
         let pcr_digest = Tpm2bDigest::try_from(pcr_digest_bytes.as_slice())?;
@@ -149,6 +175,7 @@ impl PolicyExecutor<'_> {
         _cli: &Cli,
         session_handle: TpmSession,
         auth_handle_uri: &Uri,
+        password: Option<&String>,
     ) -> Result<(), CliError> {
         let auth_handle = auth_handle_uri.to_tpm_handle()?;
         let cmd = TpmPolicySecretCommand {
@@ -160,14 +187,11 @@ impl PolicyExecutor<'_> {
             expiration: 0,
         };
         let handles = [auth_handle, session_handle.into()];
-        let sessions = session_from_args(
-            &cmd,
-            &handles,
-            &Cli {
-                password: Some(String::new()),
-                ..Default::default()
-            },
-        )?;
+        let temp_cli = Cli {
+            password: password.cloned(),
+            ..Default::default()
+        };
+        let sessions = session_from_args(&cmd, &handles, &temp_cli)?;
         self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
@@ -218,8 +242,11 @@ impl PolicyExecutor<'_> {
                 digest.as_ref(),
                 count.as_ref(),
             ),
-            PolicyAst::Secret { auth_handle_uri } => {
-                self.execute_secret_policy(cli, session_handle, auth_handle_uri)
+            PolicyAst::Secret {
+                auth_handle_uri,
+                password,
+            } => {
+                self.execute_secret_policy(cli, session_handle, auth_handle_uri, password.as_ref())
             }
             PolicyAst::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
         }

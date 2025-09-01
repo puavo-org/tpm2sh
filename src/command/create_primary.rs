@@ -116,7 +116,7 @@ impl DeviceCommand for CreatePrimary {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let object_handle = create_primary_resp.object_handle;
 
-        if let Some(uri) = &self.handle_uri {
+        if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
             let evict_cmd = TpmEvictControlCommand {
                 auth: (TpmRh::Owner as u32).into(),

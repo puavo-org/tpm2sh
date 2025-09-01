@@ -318,10 +318,10 @@ fn create_import_blob(
 
 /// Parses an external key from a URI and prepares it for TPM import.
 fn prepare_key_for_import(
-    key_uri: &Uri,
+    key: &Uri,
     parent_name_alg: TpmAlgId,
 ) -> Result<(PrivateKey, TpmtPublic, Vec<u8>), CliError> {
-    let pem_bytes = key_uri.to_bytes()?;
+    let pem_bytes = key.to_bytes()?;
     let private_key = private_key_from_pem_bytes(&pem_bytes)?;
 
     let public = private_key
@@ -354,7 +354,7 @@ impl DeviceCommand for Import {
         let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
-        let (_, public, sensitive_blob) = prepare_key_for_import(&self.key_uri, parent_name_alg)?;
+        let (_, public, sensitive_blob) = prepare_key_for_import(&self.key, parent_name_alg)?;
         let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
         };

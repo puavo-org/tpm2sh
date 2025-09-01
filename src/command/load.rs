@@ -37,8 +37,8 @@ impl DeviceCommand for Load {
             handles_to_flush.push(parent_handle);
         }
 
-        let pub_bytes = self.public_uri.to_bytes()?;
-        let priv_bytes = self.private_uri.to_bytes()?;
+        let pub_bytes = self.public.to_bytes()?;
+        let priv_bytes = self.private.to_bytes()?;
 
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
         let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;

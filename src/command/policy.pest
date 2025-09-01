@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
+// Copyright (c) 2024-2025 Jarkko Sakkinen
 
 WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
 
@@ -7,19 +9,19 @@ policy_expression = {
     | secret_expression
     | or_expression
 }
-
 policy_list = { policy_expression ~ ("," ~ policy_expression)* }
-
 pcr_expression = {
-    "pcr" ~ "(" ~ quoted_string ~ ("," ~ quoted_string)? ~ ("," ~ count_parameter)? ~ ")"
+    "pcr" ~ "(" ~ "\"" ~ selection_body ~ "\"" ~ ("," ~ quoted_string)? ~ ("," ~ count_parameter)? ~ ")"
 }
-
-secret_expression = { "secret" ~ "(" ~ quoted_string ~ ")" }
-
+secret_expression = { "secret" ~ "(" ~ quoted_string ~ ("," ~ quoted_string)? ~ ")" }
 or_expression = { "or" ~ "(" ~ policy_expression ~ ("," ~ policy_expression)+ ~ ")" }
-
 quoted_string = @{ "\"" ~ inner ~ "\"" }
-
 inner = @{ (!"\"" ~ ANY)* }
-
 count_parameter = { "count=" ~ ASCII_DIGIT+ }
+
+selection_body = { bank ~ ("+" ~ bank)* }
+bank = { alg ~ colon_and_list }
+colon_and_list = { ":" ~ pcr_list }
+alg = { "sha1" | "sha256" | "sha384" | "sha512" }
+pcr_list = { pcr_index ~ ("," ~ pcr_index)* }
+pcr_index = { ASCII_DIGIT+ }

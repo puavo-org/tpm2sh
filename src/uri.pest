@@ -2,16 +2,23 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-uri = { SOI ~ (tpm_uri | file_uri | data_uri | pcr_uri) ~ EOI }
+uri = { SOI ~ (tpm | file | data | pcr) ~ EOI }
 
-tpm_uri = { "tpm://" ~ "0x" ~ ASCII_HEX_DIGIT+ }
+tpm = { "tpm://" ~ "0x" ~ ASCII_HEX_DIGIT+ }
 
-// A file path can contain almost any character, so we match greedily.
-file_uri = { "file://" ~ ANY+ }
+file = { "file://" ~ ANY+ }
 
-data_uri = { "data://" ~ encoding ~ "," ~ ANY* }
+data = { "data://" ~ encoding ~ "," ~ ANY* }
 encoding = { "utf8" | "hex" | "base64" }
 
-pcr_uri = { "pcr://" ~ pcr_alg ~ "," ~ pcr_index }
-pcr_alg = { "sha1" | "sha256" | "sha384" | "sha512" }
+pcr = { "pcr://" ~ selection_body }
+
+selection_body = { bank ~ ("+" ~ bank)* }
+bank = { alg ~ colon_and_list }
+colon_and_list = { ":" ~ pcr_list }
+alg = { "sha1" | "sha256" | "sha384" | "sha512" }
+pcr_list = { pcr_index ~ ("," ~ pcr_index)* }
 pcr_index = { ("0x" ~ ASCII_HEX_DIGIT+) | ASCII_DIGIT+ }
+
+// Rule for testing to ensure the entire input is consumed.
+selection_test = { SOI ~ selection_body ~ EOI }

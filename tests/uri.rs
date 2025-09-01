@@ -11,8 +11,8 @@ use std::str::FromStr;
 #[case("data://utf8,some string data")]
 #[case("data://hex,deadbeef")]
 #[case("data://base64,aGVsbG8gd29ybGQ=")]
-#[case("pcr://sha256,7")]
-#[case("pcr://sha1,0x10")]
+#[case("pcr://sha256:7")]
+#[case("pcr://sha1:0x10")]
 fn test_uri_from_str_valid(#[case] input: &str) {
     let uri = Uri::from_str(input);
     assert!(uri.is_ok(), "Parsing failed for valid input: {input}");
@@ -33,8 +33,8 @@ fn test_uri_from_str_valid(#[case] input: &str) {
 #[case("data://utf8")]
 #[case("data://unsupported,data")]
 #[case("pcr://sha256,")]
-#[case("pcr://sha256,xyz")]
-#[case("pcr://unsupported,7")]
+#[case("pcr://sha256:xyz")]
+#[case("pcr://unsupported:7")]
 fn test_uri_from_str_invalid(#[case] input: &str) {
     let uri = Uri::from_str(input);
     assert!(
