@@ -267,6 +267,7 @@ impl TpmPrint for TpmuCapabilities {
             Self::Handles(handles) => handles.print(name, indent),
             Self::Commands(commands) => commands.print(name, indent),
             Self::Pcrs(pcrs) => pcrs.print(name, indent),
+            Self::EccCurves(curves) => curves.print(name, indent),
         }
     }
 }

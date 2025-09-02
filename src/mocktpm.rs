@@ -33,8 +33,9 @@ use tpm2_protocol::{
     data::{
         Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
         TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc,
-        TpmlAlgProperty, TpmlCca, TpmlHandle, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmtPublic,
-        TpmtSensitive, TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms,
+        TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle, TpmsAlgProperty,
+        TpmsAlgorithmDetailEcc, TpmtPublic, TpmtSensitive, TpmtTkCreation, TpmuCapabilities,
+        TpmuPublicId, TpmuPublicParms,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,
@@ -590,6 +591,13 @@ fn mocktpm_get_capability(tpm: &mut MockTpm, cmd: &TpmGetCapabilityCommand) -> M
                     .map_err(|_| TpmRc::from(TpmRcBase::Failure))?;
             }
             TpmuCapabilities::Handles(list)
+        }
+        TpmCap::EccCurves => {
+            let mut list = TpmlEccCurve::new();
+            list.try_push(TpmEccCurve::NistP256).unwrap();
+            list.try_push(TpmEccCurve::NistP384).unwrap();
+            list.try_push(TpmEccCurve::NistP521).unwrap();
+            TpmuCapabilities::EccCurves(list)
         }
         TpmCap::Pcrs => {
             return Err(TpmRc::from(TpmRcBase::Value));

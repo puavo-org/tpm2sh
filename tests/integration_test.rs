@@ -27,7 +27,7 @@ fn test_context() -> TestFixture {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .format_timestamp_micros()
         .try_init();
-    let (handle, transport) = cli::mocktpm::mocktpm_start();
+    let (handle, transport) = cli::mocktpm::mocktpm_start(None);
     let mut cli = Cli::default();
     cli.log_format = LogFormat::Pretty;
 

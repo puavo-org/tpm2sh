@@ -35,10 +35,9 @@ use tpm2_protocol::{
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmContextSaveCommand, TpmEccParametersCommand,
-        TpmEvictControlCommand, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
-        TpmPcrReadCommand, TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody,
-        TpmTestParmsCommand,
+        TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
+        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand,
+        TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody, TpmTestParmsCommand,
     },
     TpmParse, TpmPersistent, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -74,12 +73,6 @@ fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<(), CliError>
             }),
         },
     };
-    device.execute(&cmd, &[]).map(|_| ())
-}
-
-/// Checks if the TPM supports a given ECC curve.
-fn test_ecc_parms(device: &mut TpmDevice, curve_id: TpmEccCurve) -> Result<(), CliError> {
-    let cmd = TpmEccParametersCommand { curve_id };
     device.execute(&cmd, &[]).map(|_| ())
 }
 
@@ -339,23 +332,28 @@ impl TpmDevice {
         }
 
         if all_algs.contains(&TpmAlgId::Ecc) {
-            let ecc_curves = [
-                TpmEccCurve::NistP256,
-                TpmEccCurve::NistP384,
-                TpmEccCurve::NistP521,
-            ];
-            for curve_id in ecc_curves {
-                if test_ecc_parms(self, curve_id).is_ok() {
-                    for &name_alg in &name_algs {
-                        supported_algs.push((
-                            TpmAlgId::Ecc,
-                            format!(
-                                "ecc:{}:{}",
-                                tpm_ecc_curve_to_str(curve_id),
-                                tpm_alg_id_to_str(name_alg)
-                            ),
-                        ));
+            let ecc_caps = self.get_capability(TpmCap::EccCurves, 0, TPM_CAP_PROPERTY_MAX)?;
+            let supported_curves: Vec<TpmEccCurve> = ecc_caps
+                .iter()
+                .flat_map(|cap_data| {
+                    if let TpmuCapabilities::EccCurves(curves) = &cap_data.data {
+                        curves.iter().copied().collect()
+                    } else {
+                        Vec::new()
                     }
+                })
+                .collect();
+
+            for curve_id in supported_curves {
+                for &name_alg in &name_algs {
+                    supported_algs.push((
+                        TpmAlgId::Ecc,
+                        format!(
+                            "ecc:{}:{}",
+                            tpm_ecc_curve_to_str(curve_id),
+                            tpm_alg_id_to_str(name_alg)
+                        ),
+                    ));
                 }
             }
         }
@@ -429,6 +427,7 @@ impl TpmDevice {
                         .last()
                         .map(|c| (c.bits() & TpmaCc::COMMAND_INDEX.bits()) + 1),
                     TpmuCapabilities::Pcrs(_) => None,
+                    TpmuCapabilities::EccCurves(curves) => curves.last().map(|&c| c as u32 + 1),
                 }
             } else {
                 None
