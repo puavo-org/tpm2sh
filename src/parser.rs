@@ -113,7 +113,7 @@ fn pcr_selection_body(input: &str) -> IResult<&str, String> {
 
 fn quoted_string(input: &str) -> IResult<&str, String> {
     map(
-        delimited(char('"'), recognize(many0(is_not("\""))), char('"')),
+        delimited(char('\"'), recognize(many0(is_not("\""))), char('\"')),
         |s: &str| s.to_string(),
     )(input)
 }
@@ -251,7 +251,12 @@ fn session_body(input: &str) -> IResult<&str, PolicyExpr> {
         let mut alg = None;
         for (k, v) in pairs {
             match k {
-                "handle" => handle = Some(from_hex_str_u32(v).map_err(|e| e.to_string())?),
+                "handle" => {
+                    let stripped_v = v
+                        .strip_prefix("0x")
+                        .ok_or_else(|| "handle value must start with 0x".to_string())?;
+                    handle = Some(from_hex_str_u32(stripped_v).map_err(|e| e.to_string())?);
+                }
                 "nonce" => nonce = Some(hex::decode(v).map_err(|e| e.to_string())?),
                 "attrs" => attrs = Some(from_hex_str_u8(v).map_err(|e| e.to_string())?),
                 "key" => key = Some(hex::decode(v).map_err(|e| e.to_string())?),
