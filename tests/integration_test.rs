@@ -138,7 +138,7 @@ fn test_subcommand_import(test_context: TestFixture) {
 
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
-        handle_uri: Some(parent_context_uri.parse().unwrap()),
+        handle: Some(parent_context_uri.parse().unwrap()),
         ..Default::default()
     });
 
@@ -166,7 +166,7 @@ fn test_subcommand_import(test_context: TestFixture) {
         parent: ParentArgs {
             parent: parent_context_uri.parse().unwrap(),
         },
-        key_uri: format!("file://{}", key_path.to_str().unwrap())
+        key: format!("file://{}", key_path.to_str().unwrap())
             .parse()
             .unwrap(),
     });
