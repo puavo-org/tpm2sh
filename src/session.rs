@@ -96,7 +96,7 @@ pub fn session_from_args<C: TpmHeader>(
     handles: &[u32],
     cli: &Cli,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
-    match (cli.session.clone(), cli.password.clone()) {
+    match (&cli.session, &cli.password) {
         (Some(_), Some(_)) => Err(CliError::Usage(
             "'--session' and '--password' are mutually exclusive".to_string(),
         )),
@@ -132,7 +132,7 @@ pub fn session_from_args<C: TpmHeader>(
                 &params,
             )?])
         }
-        (None, Some(password)) => build_password_session(&password),
+        (None, Some(password)) => build_password_session(password),
         (None, None) => build_password_session(""),
     }
 }
