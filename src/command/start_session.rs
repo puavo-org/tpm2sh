@@ -53,7 +53,7 @@ impl DeviceCommand for StartSession {
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let handle = start_auth_session_resp.session_handle;
         if self.session_type == SessionType::Policy {
-            let digest = hex::encode(vec![0; digest_len]);
+            let digest = hex::encode(Vec::<u8>::new());
             writeln!(writer, "digest://sha256,{digest}")?;
         }
         writeln!(writer, "tpm://{handle:#010x}")?;
