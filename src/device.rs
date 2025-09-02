@@ -3,7 +3,8 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::LogFormat, error::ParseError, print::TpmPrint, uri::Uri, util::build_to_vec, CliError,
+    cli::LogFormat, error::ParseError, parser::PolicyExpr, print::TpmPrint, uri::Uri,
+    util::build_to_vec, CliError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::{
@@ -283,23 +284,22 @@ impl TpmDevice {
     ///
     /// Returns a `CliError` on parsing or TPM command failure.
     pub fn context_load(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
-        if uri.starts_with("tpm://") {
-            let handle = uri.to_tpm_handle()?;
-            Ok((TpmTransient(handle), false))
-        } else if uri.starts_with("data://") || uri.starts_with("file://") {
-            let context_blob = uri.to_bytes()?;
-            let (context, remainder) = TpmsContext::parse(&context_blob)?;
-            if !remainder.is_empty() {
-                return Err(ParseError::Custom("trailing data".to_string()).into());
+        match uri.ast() {
+            PolicyExpr::TpmHandle(handle) => Ok((TpmTransient(*handle), false)),
+            PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
+                let context_blob = uri.to_bytes()?;
+                let (context, remainder) = TpmsContext::parse(&context_blob)?;
+                if !remainder.is_empty() {
+                    return Err(ParseError::Custom("trailing data".to_string()).into());
+                }
+                let cmd = TpmContextLoadCommand { context };
+                let (resp, _) = self.execute(&cmd, &[])?;
+                let resp = resp
+                    .ContextLoad()
+                    .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+                Ok((resp.loaded_handle, true))
             }
-            let cmd = TpmContextLoadCommand { context };
-            let (resp, _) = self.execute(&cmd, &[])?;
-            let resp = resp
-                .ContextLoad()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-            Ok((resp.loaded_handle, true))
-        } else {
-            Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into())
+            _ => Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into()),
         }
     }
 

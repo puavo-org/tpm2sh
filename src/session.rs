@@ -6,23 +6,18 @@ use crate::{
     cli::Cli,
     error::ParseError,
     key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
-    util::{self, build_to_vec},
+    parser::PolicyExpr,
+    util::build_to_vec,
     CliError,
 };
 use log::debug;
-use pest::Parser;
-use pest_derive::Parser;
 use rand::RngCore;
-use std::{fmt, str::FromStr};
+use std::fmt;
 use tpm2_protocol::{
     data::{self, Tpm2bAuth, Tpm2bNonce, TpmRh, TpmaSession},
     message::TpmHeader,
     tpm_hash_size, TpmSession,
 };
-
-#[derive(Parser)]
-#[grammar = "session.pest"]
-pub struct SessionParser;
 
 /// Manages the state of an active authorization session.
 #[derive(Debug, Clone)]
@@ -34,73 +29,30 @@ pub struct AuthSession {
     pub auth_hash: data::TpmAlgId,
 }
 
-impl FromStr for AuthSession {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let pairs_token = SessionParser::parse(Rule::session_content, s)
-            .map_err(|e| ParseError::Custom(e.to_string()))?
-            .next()
-            .unwrap()
-            .into_inner()
-            .next()
-            .unwrap();
-
-        let mut handle = None;
-        let mut nonce_tpm = None;
-        let mut attributes = None;
-        let mut hmac_key = None;
-        let mut auth_hash = None;
-
-        for pair in pairs_token.into_inner() {
-            if pair.as_rule() == Rule::pair {
-                let specific_pair = pair.into_inner().next().unwrap();
-                let rule = specific_pair.as_rule();
-                let value_str = specific_pair.into_inner().next().unwrap().as_str();
-
-                match rule {
-                    Rule::handle_pair => {
-                        let h = util::parse_hex_u32(value_str)
-                            .map_err(|e| ParseError::Custom(e.to_string()))?;
-                        handle = Some(TpmSession(h));
-                    }
-                    Rule::nonce_pair => {
-                        let decoded = hex::decode(value_str)?;
-                        let nonce = data::Tpm2bNonce::try_from(decoded.as_slice())
-                            .map_err(|e| ParseError::Custom(e.to_string()))?;
-                        nonce_tpm = Some(nonce);
-                    }
-                    Rule::attrs_pair => {
-                        let byte = u8::from_str_radix(value_str, 16)?;
-                        attributes = Some(data::TpmaSession::from_bits_truncate(byte));
-                    }
-                    Rule::key_pair => {
-                        let decoded = hex::decode(value_str)?;
-                        let key = data::Tpm2bAuth::try_from(decoded.as_slice())
-                            .map_err(|e| ParseError::Custom(e.to_string()))?;
-                        hmac_key = Some(key);
-                    }
-                    Rule::alg_pair => {
-                        auth_hash =
-                            Some(tpm_alg_id_from_str(value_str).map_err(ParseError::Custom)?);
-                    }
-                    _ => unreachable!(),
-                }
-            }
+impl AuthSession {
+    fn from_ast(ast: &PolicyExpr) -> Result<Self, ParseError> {
+        if let PolicyExpr::Session {
+            handle,
+            nonce,
+            attrs,
+            key,
+            alg,
+        } = ast
+        {
+            Ok(AuthSession {
+                handle: TpmSession(*handle),
+                nonce_tpm: Tpm2bNonce::try_from(nonce.as_slice())
+                    .map_err(|e| ParseError::Custom(e.to_string()))?,
+                attributes: TpmaSession::from_bits_truncate(*attrs),
+                hmac_key: Tpm2bAuth::try_from(key.as_slice())
+                    .map_err(|e| ParseError::Custom(e.to_string()))?,
+                auth_hash: tpm_alg_id_from_str(alg).map_err(ParseError::Custom)?,
+            })
+        } else {
+            Err(ParseError::Custom(
+                "expression is not a session".to_string(),
+            ))
         }
-
-        Ok(AuthSession {
-            handle: handle
-                .ok_or_else(|| ParseError::Custom("session URI missing 'handle'".into()))?,
-            nonce_tpm: nonce_tpm
-                .ok_or_else(|| ParseError::Custom("session URI missing 'nonce'".into()))?,
-            attributes: attributes
-                .ok_or_else(|| ParseError::Custom("session URI missing 'attrs'".into()))?,
-            hmac_key: hmac_key
-                .ok_or_else(|| ParseError::Custom("session URI missing 'key'".into()))?,
-            auth_hash: auth_hash
-                .ok_or_else(|| ParseError::Custom("session URI missing 'alg'".into()))?,
-        })
     }
 }
 
@@ -149,17 +101,20 @@ pub fn session_from_args<C: TpmHeader>(
             "'--session' and '--password' are mutually exclusive".to_string(),
         )),
         (Some(uri), None) => {
-            let session = if uri.starts_with("file://") || uri.starts_with("data://") {
-                let session_bytes = uri.to_bytes()?;
-                let session_str = std::str::from_utf8(&session_bytes)?;
-                AuthSession::from_str(session_str)?
-            } else if let Some(content) = uri.strip_prefix("session://") {
-                AuthSession::from_str(content)?
-            } else {
-                return Err(CliError::Usage(
-                    "the '--session' argument requires a 'file://', 'data://', or 'session://' URI"
-                        .to_string(),
-                ));
+            let session = match uri.ast() {
+                PolicyExpr::Session { .. } => AuthSession::from_ast(uri.ast())?,
+                PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
+                    let session_bytes = uri.to_bytes()?;
+                    let session_str = std::str::from_utf8(&session_bytes)?;
+                    let ast = crate::parser::parse_policy(session_str)?;
+                    AuthSession::from_ast(&ast)?
+                }
+                _ => {
+                    return Err(CliError::Usage(
+                        "the '--session' argument requires a 'file://', 'data://', or 'session://' URI"
+                            .to_string(),
+                    ));
+                }
             };
 
             let params = build_to_vec(command)?;

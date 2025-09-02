@@ -2,17 +2,17 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use cli::session::AuthSession;
+use cli::{parser::PolicyExpr, session::AuthSession, uri::Uri};
 use rstest::rstest;
 use std::str::FromStr;
 use tpm2_protocol::{
-    data::{TpmAlgId, TpmaSession},
+    data::{Tpm2bAuth, Tpm2bNonce, TpmAlgId, TpmaSession},
     TpmSession,
 };
 
 #[rstest]
 #[case(
-    "handle=0x80000001;nonce=112233;attrs=01;key=;alg=sha256",
+    "session://handle=0x80000001;nonce=112233;attrs=01;key=;alg=sha256",
     0x80000001,
     &[0x11, 0x22, 0x33],
     TpmaSession::CONTINUE_SESSION,
@@ -20,7 +20,7 @@ use tpm2_protocol::{
     TpmAlgId::Sha256
 )]
 #[case(
-    "alg=sha384;handle=0x80000002;key=aabbcc;nonce=;attrs=00",
+    "session://alg=sha384;handle=0x80000002;key=aabbcc;nonce=;attrs=00",
     0x80000002,
     &[],
     TpmaSession::empty(),
@@ -35,26 +35,39 @@ fn test_session_content_parser_valid(
     #[case] key: &[u8],
     #[case] alg: TpmAlgId,
 ) {
-    let session = AuthSession::from_str(input).expect("parsing valid session content failed");
-    assert_eq!(session.handle, TpmSession(handle));
-    assert_eq!(&*session.nonce_tpm, nonce);
-    assert_eq!(session.attributes, attrs);
-    assert_eq!(&*session.hmac_key, key);
-    assert_eq!(session.auth_hash, alg);
+    let uri = Uri::from_str(input).expect("parsing valid session uri failed");
+    let ast = uri.ast();
+
+    if let PolicyExpr::Session {
+        handle: h,
+        nonce: n,
+        attrs: a,
+        key: k,
+        alg: al,
+    } = ast
+    {
+        assert_eq!(*h, handle);
+        assert_eq!(n, nonce);
+        assert_eq!(TpmaSession::from_bits_truncate(*a), attrs);
+        assert_eq!(k, key);
+        assert_eq!(cli::key::tpm_alg_id_from_str(al).unwrap(), alg);
+    } else {
+        panic!("Parsed AST is not a session expression");
+    }
 }
 
 #[rstest]
-#[case("session://handle=0x123", "invalid format (contains scheme)")]
-#[case("", "missing 'handle'")]
-#[case("nonce=112233;attrs=01;key=;alg=sha256", "missing 'handle'")]
-#[case("handle=0x123;nonce=112233;key=;alg=sha256", "missing 'attrs'")]
-#[case("handle=0xGG", "invalid digit")]
-#[case("handle=0x123;nonce=1122GG", "invalid digit")]
-#[case("handle=0x123;attrs=123", "invalid length")]
-#[case("handle=0x123;alg=foo", "invalid algorithm")]
+#[case("session://handle=0x123", "missing fields")]
+#[case("session://", "missing fields")]
+#[case("session://nonce=112233;attrs=01;key=;alg=sha256", "missing handle")]
+#[case("session://handle=0x123;nonce=112233;key=;alg=sha256", "missing attrs")]
+#[case("session://handle=0xGG", "invalid digit")]
+#[case("session://handle=0x123;nonce=1122GG", "invalid digit")]
+#[case("session://handle=0x123;attrs=123", "invalid length")]
+#[case("session://handle=0x123;alg=foo", "invalid algorithm")]
 fn test_session_content_parser_invalid(#[case] input: &str, #[case] _reason: &str) {
     assert!(
-        AuthSession::from_str(input).is_err(),
+        Uri::from_str(input).is_err(),
         "parsing should fail for: {}",
         input
     );
@@ -62,13 +75,34 @@ fn test_session_content_parser_invalid(#[case] input: &str, #[case] _reason: &st
 
 #[rstest]
 fn test_session_roundtrip() {
-    let content = "handle=0x80000001;nonce=112233;attrs=01;key=;alg=sha256";
-    let session = AuthSession::from_str(content).unwrap();
+    let session = AuthSession {
+        handle: TpmSession(0x80000001),
+        nonce_tpm: Tpm2bNonce::try_from(&[0x11, 0x22, 0x33][..]).unwrap(),
+        attributes: TpmaSession::CONTINUE_SESSION,
+        hmac_key: Tpm2bAuth::try_from(&[][..]).unwrap(),
+        auth_hash: TpmAlgId::Sha256,
+    };
     let formatted = session.to_string();
-    let result = AuthSession::from_str(&formatted).unwrap();
-    assert_eq!(session.handle, result.handle);
-    assert_eq!(session.nonce_tpm, result.nonce_tpm);
-    assert_eq!(session.attributes, result.attributes);
-    assert_eq!(session.hmac_key, result.hmac_key);
-    assert_eq!(session.auth_hash, result.auth_hash);
+    let parsed_uri = Uri::from_str(&format!("session://{formatted}")).unwrap();
+    let ast = parsed_uri.ast();
+
+    if let PolicyExpr::Session {
+        handle,
+        nonce,
+        attrs,
+        key,
+        alg,
+    } = ast
+    {
+        assert_eq!(*handle, session.handle.0);
+        assert_eq!(**nonce, *session.nonce_tpm);
+        assert_eq!(TpmaSession::from_bits_truncate(*attrs), session.attributes);
+        assert_eq!(**key, *session.hmac_key);
+        assert_eq!(
+            cli::key::tpm_alg_id_from_str(alg).unwrap(),
+            session.auth_hash
+        );
+    } else {
+        panic!("Parsed AST is not a session expression");
+    }
 }

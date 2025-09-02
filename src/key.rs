@@ -110,7 +110,11 @@ impl PartialOrd for Alg {
 }
 
 /// Converts a user-friendly string to a `TpmAlgId`.
-pub(crate) fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, String> {
+///
+/// # Errors
+///
+/// If the algorithm tag is unknown, `Err::String` will be returned.
+pub fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, String> {
     match s {
         "rsa" => Ok(TpmAlgId::Rsa),
         "sha1" => Ok(TpmAlgId::Sha1),

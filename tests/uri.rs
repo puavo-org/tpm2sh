@@ -13,11 +13,11 @@ use std::str::FromStr;
 #[case("data://hex,deadbeef")]
 #[case("data://base64,aGVsbG8gd29ybGQ=")]
 #[case("pcr://sha256:7")]
-#[case("pcr://sha1:0x10")]
+#[case("pcr://sha1:1+sha256:2,3")]
 fn test_uri_from_str_valid(#[case] input: &str) {
     let uri = Uri::from_str(input);
     assert!(uri.is_ok(), "Parsing failed for valid input: {input}");
-    assert_eq!(&*uri.unwrap(), input);
+    assert_eq!(uri.unwrap().to_string(), input);
 }
 
 #[rstest]
@@ -46,7 +46,7 @@ fn test_uri_from_str_invalid(#[case] input: &str) {
 
 #[rstest]
 fn test_uri_deref() {
-    let uri_str = "tpm://0x1234";
+    let uri_str = "tpm://0x81000001";
     let uri = Uri::from_str(uri_str).unwrap();
     assert_eq!(&*uri, uri_str);
     assert!(uri.starts_with("tpm://"));

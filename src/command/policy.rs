@@ -4,14 +4,12 @@
 use crate::{
     cli::{self, Cli, DeviceCommand, Policy, SessionType},
     error::ParseError,
+    parser::{parse_policy, PolicyExpr},
     pcr::{pcr_composite_digest, pcr_get_count},
     session::session_from_args,
-    uri::{pcr_parse_selection, Uri},
+    uri::pcr_selection_to_list,
     CliError, TpmDevice,
 };
-use pest::iterators::{Pair, Pairs};
-use pest::Parser;
-use pest_derive::Parser;
 use std::io::Write;
 use tpm2_protocol::{
     data::{
@@ -24,102 +22,6 @@ use tpm2_protocol::{
     },
     TpmSession, TpmTransient,
 };
-
-#[derive(Parser)]
-#[grammar = "command/policy.pest"]
-pub struct PolicyParser;
-
-#[derive(Debug, PartialEq, Clone)]
-enum PolicyAst {
-    Pcr {
-        selection: String,
-        digest: Option<String>,
-        count: Option<u32>,
-    },
-    Secret {
-        auth_handle_uri: Uri,
-        password: Option<String>,
-    },
-    Or(Vec<PolicyAst>),
-}
-
-fn parse_quoted_string(pair: &Pair<'_, Rule>) -> Result<String, CliError> {
-    if pair.as_rule() != Rule::quoted_string {
-        return Err(ParseError::Custom("expected a quoted string".to_string()).into());
-    }
-    let s = pair.as_str();
-    Ok(s[1..s.len() - 1].to_string())
-}
-
-fn parse_policy_internal(mut pairs: Pairs<'_, Rule>) -> Result<PolicyAst, CliError> {
-    let pair = pairs
-        .next()
-        .ok_or_else(|| ParseError::Custom("expected a policy expression".to_string()))?;
-    let ast = match pair.as_rule() {
-        Rule::pcr_expression => {
-            let mut inner_pairs = pair.into_inner();
-            let selection = inner_pairs.next().unwrap().as_str().to_string();
-            let digest = inner_pairs
-                .next()
-                .map(|p| parse_quoted_string(&p))
-                .transpose()?;
-            let count = inner_pairs
-                .next()
-                .map(|p| {
-                    p.as_str()
-                        .strip_prefix("count=")
-                        .unwrap_or("")
-                        .parse::<u32>()
-                })
-                .transpose()?;
-            PolicyAst::Pcr {
-                selection,
-                digest,
-                count,
-            }
-        }
-        Rule::secret_expression => {
-            let mut inner_pairs = pair.into_inner();
-            let uri_str = parse_quoted_string(&inner_pairs.next().unwrap())?;
-            let auth_handle_uri = uri_str.parse()?;
-            let password = inner_pairs
-                .next()
-                .map(|p| parse_quoted_string(&p))
-                .transpose()?;
-            PolicyAst::Secret {
-                auth_handle_uri,
-                password,
-            }
-        }
-        Rule::or_expression => {
-            let mut or_pairs = pair.into_inner();
-            let policy_list_pairs = or_pairs.next().unwrap().into_inner();
-            let branches = policy_list_pairs
-                .map(|p| parse_policy_internal(p.into_inner()))
-                .collect::<Result<_, _>>()?;
-            PolicyAst::Or(branches)
-        }
-        _ => {
-            return Err(ParseError::Custom(format!(
-                "unexpected policy expression part: {:?}",
-                pair.as_rule()
-            ))
-            .into())
-        }
-    };
-    if pairs.next().is_some() {
-        return Err(ParseError::Custom("unexpected trailing input".to_string()).into());
-    }
-
-    Ok(ast)
-}
-
-fn parse_policy_expression(input: &str) -> Result<PolicyAst, CliError> {
-    let pairs = PolicyParser::parse(Rule::policy_expression, input)
-        .map_err(|e| ParseError::Custom(e.to_string()))?;
-    let mut root_pairs = pairs.clone();
-    parse_policy_internal(root_pairs.next().unwrap().into_inner())
-}
 
 struct PolicyExecutor<'a> {
     pcr_count: usize,
@@ -138,12 +40,12 @@ impl PolicyExecutor<'_> {
         let pcr_digest_bytes = if let Some(digest_hex) = digest {
             hex::decode(digest_hex)?
         } else {
-            let pcr_selection_in = pcr_parse_selection(selection_str, self.pcr_count)?;
+            let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
             let read_resp = self.device.pcr_read(&pcr_selection_in)?;
             pcr_composite_digest(&read_resp)
         };
 
-        let pcr_selection = pcr_parse_selection(selection_str, self.pcr_count)?;
+        let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;
         let pcr_digest = Tpm2bDigest::try_from(pcr_digest_bytes.as_slice())?;
 
         let cmd = TpmPolicyPcrCommand {
@@ -161,10 +63,15 @@ impl PolicyExecutor<'_> {
         &mut self,
         _cli: &Cli,
         session_handle: TpmSession,
-        auth_handle_uri: &Uri,
+        auth_handle_uri: &PolicyExpr,
         password: Option<&String>,
     ) -> Result<(), CliError> {
-        let auth_handle = auth_handle_uri.to_tpm_handle()?;
+        let auth_handle = match auth_handle_uri {
+            PolicyExpr::TpmHandle(handle) => Ok(*handle),
+            _ => Err(ParseError::Custom(
+                "secret policy requires a tpm:// handle".to_string(),
+            )),
+        }?;
         let cmd = TpmPolicySecretCommand {
             auth_handle: auth_handle.into(),
             policy_session: session_handle.0.into(),
@@ -187,7 +94,7 @@ impl PolicyExecutor<'_> {
         &mut self,
         cli: &Cli,
         session_handle: TpmSession,
-        branches: &[PolicyAst],
+        branches: &[PolicyExpr],
     ) -> Result<(), CliError> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
@@ -215,10 +122,10 @@ impl PolicyExecutor<'_> {
         &mut self,
         cli: &Cli,
         session_handle: TpmSession,
-        ast: &PolicyAst,
+        ast: &PolicyExpr,
     ) -> Result<(), CliError> {
         match ast {
-            PolicyAst::Pcr {
+            PolicyExpr::Pcr {
                 selection,
                 digest,
                 count,
@@ -229,13 +136,16 @@ impl PolicyExecutor<'_> {
                 digest.as_ref(),
                 count.as_ref(),
             ),
-            PolicyAst::Secret {
+            PolicyExpr::Secret {
                 auth_handle_uri,
                 password,
             } => {
                 self.execute_secret_policy(cli, session_handle, auth_handle_uri, password.as_ref())
             }
-            PolicyAst::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
+            PolicyExpr::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
+            _ => Err(
+                ParseError::Custom("unsupported expression for policy command".to_string()).into(),
+            ),
         }
     }
 }
@@ -297,7 +207,7 @@ impl DeviceCommand for Policy {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let ast = parse_policy_expression(&self.expression)?;
+        let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
         let session_handle =
             start_trial_session(device, cli, SessionType::Trial, TpmAlgId::Sha256)?;

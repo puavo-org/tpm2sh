@@ -12,6 +12,7 @@ pub mod device;
 pub mod error;
 pub mod key;
 pub mod mocktpm;
+pub mod parser;
 pub mod pcr;
 pub mod print;
 pub mod session;

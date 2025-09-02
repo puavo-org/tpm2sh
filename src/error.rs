@@ -44,9 +44,6 @@ pub enum CliError {
     #[error("I/O: {0}")]
     Io(#[from] IoError),
 
-    #[error("JSON: {0}")]
-    Json(#[from] serde_json::Error),
-
     #[error("Parser: {0}")]
     Parse(#[from] ParseError),
 
