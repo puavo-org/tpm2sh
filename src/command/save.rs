@@ -21,18 +21,12 @@ impl DeviceCommand for Save {
         device: &mut TpmDevice,
         writer: &mut W,
     ) -> Result<Vec<TpmTransient>, CliError> {
-        let (object_handle, needs_flush) = device.context_load(&self.in_uri)?;
-        let mut handles_to_flush = Vec::new();
-        if needs_flush {
-            handles_to_flush.push(object_handle);
-        }
+        let (object_handle, _) = device.context_load(&self.in_uri)?;
 
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
         device.evict_control(cli, object_handle.0, persistent_handle)?;
 
-        handles_to_flush.retain(|&h| h != object_handle);
-
         writeln!(writer, "tpm://{persistent_handle:#010x}")?;
-        Ok(handles_to_flush)
+        Ok(Vec::new())
     }
 }
