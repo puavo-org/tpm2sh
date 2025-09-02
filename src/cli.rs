@@ -86,20 +86,33 @@ impl fmt::Display for LogFormat {
 #[derive(Parser, Debug, Default)]
 #[command(version, about, styles = STYLES, help_template = HELP_TEMPLATE)]
 pub struct Cli {
-    /// TPM device path
-    #[arg(short = 'd', long, default_value = "/dev/tpmrm0", global = true)]
+    #[arg(
+        short = 'd',
+        long,
+        default_value = "/dev/tpmrm0",
+        global = true,
+        help = "TPM device path"
+    )]
     pub device: String,
 
-    /// Logging format
-    #[arg(long, value_enum, default_value_t = LogFormat::Plain, global = true)]
+    #[arg(long, value_enum, default_value_t = LogFormat::Plain, global = true, help = "Logging format")]
     pub log_format: LogFormat,
 
-    /// Default authorization password for objects and sessions
-    #[arg(short = 'p', long, global = true)]
+    #[arg(
+        short = 'p',
+        long,
+        global = true,
+        help = "Default authorization password for objects and sessions"
+    )]
     pub password: Option<String>,
 
-    /// Session object URI (e.g., `tpm://0x03000000`)
-    #[arg(short = 'S', long, global = true, value_name = "URI")]
+    #[arg(
+        short = 'S',
+        long,
+        global = true,
+        value_name = "URI",
+        help = "Session object URI (e.g., 'tpm://0x03000000')"
+    )]
     pub session: Option<Uri>,
 
     #[command(subcommand)]
@@ -261,50 +274,56 @@ tpm2sh_command!(
 /// Lists available algorithms
 #[derive(Args, Debug, Default)]
 pub struct Algorithms {
-    /// A regex to filter the algorithm names
+    #[arg(help = "A regex to filter the algorithm names")]
     pub filter: Option<String>,
 }
 
 /// Converts keys between ASN.1 formats
 #[derive(Args, Debug, Default)]
 pub struct Convert {
-    /// Input format
-    #[arg(long, value_enum, default_value_t = KeyFormat::Pem)]
+    #[arg(long, value_enum, default_value_t = KeyFormat::Pem, help = "Input format")]
     pub from: KeyFormat,
-    /// Output format
-    #[arg(long, value_enum, default_value_t = KeyFormat::Der)]
+    #[arg(long, value_enum, default_value_t = KeyFormat::Der, help = "Output format")]
     pub to: KeyFormat,
-    /// URI of the input object (e.g., `file:///path/to/key.pem`)
+    #[arg(help = "URI of the input object (e.g., 'file:///path/to/key.pem')")]
     pub input: Uri,
 }
 
 /// Creates a primary key
 #[derive(Args, Debug, Default)]
 pub struct CreatePrimary {
-    /// Hierarchy for the new key
-    #[arg(short = 'H', long, value_enum, default_value_t = Hierarchy::Owner)]
+    #[arg(short = 'H', long, value_enum, default_value_t = Hierarchy::Owner, help = "Hierarchy for the new key")]
     pub hierarchy: Hierarchy,
-    /// Public key algorithm. Run `algorithms` for options
-    #[arg(long)]
+    #[arg(long, help = "Public key algorithm. Run 'algorithms' for options")]
     pub algorithm: Alg,
-    /// Store object to non-volatile memory (e.g., `tpm://0x81000001`)
-    #[arg(long, value_name = "HANDLEURI")]
+    #[arg(
+        long,
+        value_name = "HANDLEURI",
+        help = "Store object to non-volatile memory (e.g., 'tpm://0x81000001')"
+    )]
     pub handle: Option<Uri>,
 }
 
 /// Deletes a transient or persistent object
 #[derive(Args, Debug, Default)]
 pub struct Delete {
-    /// URI of the object to delete (e.g. `tpm://0x81000001`)
-    #[arg(value_name = "HANDLE")]
+    #[arg(
+        value_name = "HANDLE",
+        help = "URI of the object to delete (e.g. 'tpm://0x81000001')"
+    )]
     pub handle: Uri,
 }
 
 /// Arguments for commands requiring a parent object.
 #[derive(Args, Debug, Default)]
 pub struct ParentArgs {
-    /// Parent object URI (e.g., `tpm://0x80000001', 'file:///context.bin`)
-    #[arg(short = 'P', long, required = true, value_name = "URI")]
+    #[arg(
+        short = 'P',
+        long,
+        required = true,
+        value_name = "URI",
+        help = "Parent object URI (e.g., 'tpm://0x80000001', 'file:///context.bin')"
+    )]
     pub parent: Uri,
 }
 
@@ -313,8 +332,11 @@ pub struct ParentArgs {
 pub struct Import {
     #[command(flatten)]
     pub parent: ParentArgs,
-    /// URI of the external private key to import (e.g., `file:///path/to/key.pem`)
-    #[arg(long, value_name = "KEY")]
+    #[arg(
+        long,
+        value_name = "KEY",
+        help = "URI of the external private key to import (e.g., 'file:///path/to/key.pem')"
+    )]
     pub key: Uri,
 }
 
@@ -323,11 +345,9 @@ pub struct Import {
 pub struct Load {
     #[command(flatten)]
     pub parent: ParentArgs,
-    /// URI of the public part of the key
-    #[arg(long, value_name = "URI")]
+    #[arg(long, value_name = "URI", help = "URI of the public part of the key")]
     pub public: Uri,
-    /// URI of the private part of the key
-    #[arg(long, value_name = "URI")]
+    #[arg(long, value_name = "URI", help = "URI of the private part of the key")]
     pub private: Uri,
 }
 
@@ -338,35 +358,39 @@ pub struct Objects;
 /// Extends a PCR with an event
 #[derive(Args, Debug, Default)]
 pub struct PcrEvent {
-    /// PCR to extend (e.g., `pcr://sha256:7`)
-    #[arg(value_name = "PCR")]
+    #[arg(value_name = "PCR", help = "PCR to extend (e.g., 'pcr://sha256:7')")]
     pub pcr: Uri,
-    /// URI of the data (e.g., `data://hex,deadbeef`)
-    #[arg(value_name = "DATA")]
+    #[arg(
+        value_name = "DATA",
+        help = "URI of the data (e.g., 'data://hex,deadbeef')"
+    )]
     pub data: Uri,
 }
 
 /// Reads PCRs
 #[derive(Args, Debug, Default)]
 pub struct PcrRead {
-    /// PCR selection (e.g. `pcr://sha256:0,1,2+sha1:0`)
-    #[arg(value_name = "PCR")]
+    #[arg(
+        value_name = "PCR",
+        help = "PCR selection (e.g. 'pcr://sha256:0,1,2+sha1:0')"
+    )]
     pub pcr: Uri,
 }
 
 /// Builds a policy using a policy expression
 #[derive(Args, Debug, Default)]
 pub struct Policy {
-    /// Policy expression (e.g., `pcr("sha256:0","...")`)
-    #[arg(value_name = "EXPRESSION")]
+    #[arg(
+        value_name = "EXPRESSION",
+        help = "Policy expression (e.g., 'pcr(\"sha256:0\",\"...\")')"
+    )]
     pub expression: String,
 }
 
 /// Encodes and print a TPM error code
 #[derive(Args, Debug)]
 pub struct PrintError {
-    /// TPM error code (e.g., `0x100`)
-    #[arg(value_parser = crate::util::parse_tpm_rc_str)]
+    #[arg(value_parser = crate::util::parse_tpm_rc_str, help = "TPM error code (e.g., '0x100')")]
     pub rc: TpmRc,
 }
 
@@ -377,11 +401,17 @@ pub struct ResetLock;
 /// Saves to non-volatile memory
 #[derive(Args, Debug, Default)]
 pub struct Save {
-    /// URI for the persistent object to be created (e.g., `tpm://0x81000001`)
-    #[arg(long, value_name = "HANDLE")]
+    #[arg(
+        long,
+        value_name = "HANDLE",
+        help = "URI for the persistent object to be created (e.g., 'tpm://0x81000001')"
+    )]
     pub to_uri: Uri,
-    /// URI of the transient object context to save (e.g., `file:///path/to/context.bin`)
-    #[arg(long = "in", value_name = "CONTEXT")]
+    #[arg(
+        long = "in",
+        value_name = "CONTEXT",
+        help = "URI of the transient object context to save (e.g., 'file:///path/to/context.bin')"
+    )]
     pub in_uri: Uri,
 }
 
@@ -390,26 +420,34 @@ pub struct Save {
 pub struct Seal {
     #[command(flatten)]
     pub parent: ParentArgs,
-    /// URI of the secret to seal (e.g., `data://utf8,mysecret`)
-    #[arg(long, value_name = "URI")]
+    #[arg(
+        long,
+        value_name = "URI",
+        help = "URI of the secret to seal (e.g., 'data://utf8,mysecret')"
+    )]
     pub data: Uri,
-    /// Authorization for the new sealed object
-    #[arg(long, value_name = "PASSWORD")]
+    #[arg(
+        long,
+        value_name = "PASSWORD",
+        help = "Authorization for the new sealed object"
+    )]
     pub object_password: Option<String>,
 }
 
 /// Starts an authorization session
 #[derive(Args, Debug, Default)]
 pub struct StartSession {
-    /// Session type
-    #[arg(short, long, value_enum, default_value_t = SessionType::Hmac)]
+    #[arg(short, long, value_enum, default_value_t = SessionType::Hmac, help = "Session type")]
     pub session_type: SessionType,
 }
 
 /// Unseals a keyedhash object
 #[derive(Args, Debug, Default)]
 pub struct Unseal {
-    /// URI of the loaded sealed object to unseal (e.g., `tpm://0x80000000`)
-    #[arg(long, value_name = "HANDLE")]
+    #[arg(
+        long,
+        value_name = "HANDLE",
+        help = "URI of the loaded sealed object to unseal (e.g., 'tpm://0x80000000')"
+    )]
     pub handle: Uri,
 }
