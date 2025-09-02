@@ -50,7 +50,7 @@ pub enum CliError {
     #[error("PCR: {0}")]
     PcrSelection(String),
 
-    #[error("TPM RC: {0}")]
+    #[error("{0}")]
     TpmRc(TpmRc),
 
     #[error("TPM unexpected: {0}")]
