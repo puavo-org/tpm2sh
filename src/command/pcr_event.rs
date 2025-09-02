@@ -59,7 +59,9 @@ impl DeviceCommand for PcrEvent {
                     None
                 }
             })
-            .unwrap();
+            .ok_or_else(|| {
+                CliError::Execution("pcr-event could not determine the index".to_string())
+            })?;
 
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
