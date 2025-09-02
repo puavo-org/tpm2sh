@@ -22,11 +22,13 @@ pub mod util;
 
 use crate::{cli::Cli, device::TpmDevice, error::CliError};
 use clap::{CommandFactory, Parser};
+use log::warn;
 use std::{
     fs::OpenOptions,
     io::{self, Write},
     sync::{Arc, Mutex},
 };
+use tpm2_protocol::{message::TpmFlushContextCommand, TpmTransient};
 
 /// A trait for executing the top-level Commands enum.
 pub trait Command {
@@ -43,7 +45,7 @@ pub trait Command {
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
-    ) -> Result<(), CliError>;
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -66,7 +68,31 @@ pub fn execute_cli() -> Result<(), CliError> {
             let device = TpmDevice::new(file, cli.log_format);
             Some(Arc::new(Mutex::new(device)))
         };
-        command.run(&cli, device_arc, &mut io::stdout())
+
+        let handles_to_manage = command.run(&cli, device_arc.clone(), &mut io::stdout())?;
+
+        if let Some(device_arc) = device_arc {
+            let handles_to_flush: Vec<_> = handles_to_manage
+                .into_iter()
+                .filter(|&(_, should_flush)| should_flush)
+                .map(|(handle, _)| handle)
+                .collect();
+
+            if !handles_to_flush.is_empty() {
+                let mut guard = device_arc
+                    .lock()
+                    .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+                for handle in handles_to_flush {
+                    let cmd = TpmFlushContextCommand {
+                        flush_handle: handle.into(),
+                    };
+                    if let Err(err) = guard.execute(&cmd, &[]) {
+                        warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
+                    }
+                }
+            }
+        }
+        Ok(())
     } else {
         Cli::command()
             .help_template(cli::USAGE_TEMPLATE)

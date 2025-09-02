@@ -20,7 +20,7 @@ impl DeviceCommand for Algorithms {
         _cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let mut algorithms = device.get_all_algorithms()?;
         algorithms.sort_by(|a, b| a.1.cmp(&b.1));
 

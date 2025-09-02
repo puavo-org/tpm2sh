@@ -7,10 +7,15 @@ use crate::{
     CliError,
 };
 use std::io::Write;
+use tpm2_protocol::TpmTransient;
 
 impl LocalCommand for PrintError {
-    fn run<W: Write>(&self, _cli: &Cli, writer: &mut W) -> Result<(), CliError> {
+    fn run<W: Write>(
+        &self,
+        _cli: &Cli,
+        writer: &mut W,
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         writeln!(writer, "{}", self.rc)?;
-        Ok(())
+        Ok(Vec::new())
     }
 }

@@ -20,7 +20,7 @@ impl DeviceCommand for Save {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let (object_handle, _) = device.context_load(&self.in_uri)?;
 
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);

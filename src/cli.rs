@@ -7,14 +7,13 @@ use clap::{
     builder::styling::{AnsiColor, Color, Style, Styles},
     Args, Parser, Subcommand, ValueEnum,
 };
-use log::warn;
 use std::{
     fmt,
     io::Write,
     sync::{Arc, Mutex},
 };
 use tpm2_protocol::data::{TpmRc, TpmRh, TpmSe};
-use tpm2_protocol::{message::TpmFlushContextCommand, TpmTransient};
+use tpm2_protocol::TpmTransient;
 
 /// Subcommand not requiring TPM device access.
 pub trait LocalCommand {
@@ -23,7 +22,11 @@ pub trait LocalCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(&self, cli: &Cli, writer: &mut W) -> Result<(), CliError>;
+    fn run<W: Write>(
+        &self,
+        cli: &Cli,
+        writer: &mut W,
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
 }
 
 /// Subcommand requiring TPM device access.
@@ -38,7 +41,7 @@ pub trait DeviceCommand {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError>;
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
 }
 
 const STYLES: Styles = Styles::styled()
@@ -216,7 +219,7 @@ macro_rules! tpm2sh_command {
                 cli: &Cli,
                 device: Option<Arc<Mutex<TpmDevice>>>,
                 writer: &mut W,
-            ) -> Result<(), CliError> {
+            ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
                 match self {
                     $(
                         Self::$local_command(args) => {
@@ -232,17 +235,7 @@ macro_rules! tpm2sh_command {
                                 .lock()
                                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-                            let handles_to_flush = args.run(cli, &mut guard, writer)?;
-
-                            for handle in handles_to_flush {
-                                let cmd = TpmFlushContextCommand {
-                                    flush_handle: handle.into(),
-                                };
-                                if let Err(err) = guard.execute(&cmd, &[]) {
-                                    warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
-                                }
-                            }
-                            Ok(())
+                            args.run(cli, &mut guard, writer)
                         }
                     ,)*
                 }

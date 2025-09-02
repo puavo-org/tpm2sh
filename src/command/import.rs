@@ -263,7 +263,7 @@ impl DeviceCommand for Import {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
         let handles_to_flush = if needs_flush {
             vec![parent_handle]
@@ -321,6 +321,6 @@ impl DeviceCommand for Import {
             "data://base64,{}",
             base64_engine.encode(priv_key_bytes)
         )?;
-        Ok(handles_to_flush)
+        Ok(handles_to_flush.into_iter().map(|h| (h, true)).collect())
     }
 }

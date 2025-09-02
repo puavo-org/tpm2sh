@@ -21,7 +21,7 @@ impl DeviceCommand for ResetLock {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };

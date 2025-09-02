@@ -28,7 +28,7 @@ impl DeviceCommand for StartSession {
         _cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;

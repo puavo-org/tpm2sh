@@ -206,7 +206,7 @@ impl DeviceCommand for Policy {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
         let session_handle =

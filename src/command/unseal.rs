@@ -21,7 +21,7 @@ impl DeviceCommand for Unseal {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let handle = self.handle.to_tpm_handle()?;
         let object_handle = TpmTransient(handle);
 

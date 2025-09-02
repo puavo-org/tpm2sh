@@ -90,7 +90,7 @@ impl DeviceCommand for CreatePrimary {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -123,7 +123,7 @@ impl DeviceCommand for CreatePrimary {
             Ok(Vec::new())
         } else {
             device.context_save(object_handle, writer)?;
-            Ok(vec![object_handle])
+            Ok(vec![(object_handle, true)])
         }
     }
 }

@@ -27,7 +27,7 @@ impl DeviceCommand for Load {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let (parent_handle, parent_needs_flush) = device.context_load(&self.parent.parent)?;
 
         let mut handles_to_flush = Vec::new();
@@ -59,6 +59,6 @@ impl DeviceCommand for Load {
 
         device.context_save(save_handle, writer)?;
 
-        Ok(handles_to_flush)
+        Ok(handles_to_flush.into_iter().map(|h| (h, true)).collect())
     }
 }

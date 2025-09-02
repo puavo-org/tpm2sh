@@ -709,7 +709,6 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     let (sensitive_struct, _) =
         TpmtSensitive::parse(&sensitive_data).map_err(TpmErrorKindExt::to_tpm_rc)?;
 
-    // Re-wrap the sensitive data with the mock parent's key
     let sym_key_rewrap = crypto_kdfa(
         parent_key.public.name_alg,
         &parent_key.seed_value,

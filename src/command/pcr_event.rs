@@ -24,7 +24,7 @@ impl DeviceCommand for PcrEvent {
         cli: &Cli,
         device: &mut TpmDevice,
         _writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let pcr_count = pcr_get_count(device)?;
         let selection = self.pcr.to_pcr_selection(pcr_count)?;
 

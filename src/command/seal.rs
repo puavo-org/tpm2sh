@@ -31,7 +31,7 @@ impl DeviceCommand for Seal {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<TpmTransient>, CliError> {
+    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
         let mut handles_to_flush = Vec::new();
         if needs_flush {
@@ -86,6 +86,6 @@ impl DeviceCommand for Seal {
         writeln!(writer, "data://base64,{}", base64_engine.encode(pub_bytes))?;
         writeln!(writer, "data://base64,{}", base64_engine.encode(priv_bytes))?;
 
-        Ok(handles_to_flush)
+        Ok(handles_to_flush.into_iter().map(|h| (h, true)).collect())
     }
 }
