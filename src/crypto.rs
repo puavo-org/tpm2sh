@@ -6,9 +6,13 @@
 
 use crate::util;
 
+use aes::Aes128;
+use cfb_mode::Encryptor;
+use cipher::{AsyncStreamCipher, KeyIvInit};
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use hmac::{Hmac, Mac};
-use p256::{elliptic_curve::sec1::ToEncodedPoint, SecretKey};
+use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
+use p256::SecretKey;
 use pkcs8::{
     der::{self, asn1::AnyRef, Decode, Encode},
     EncodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
@@ -134,6 +138,84 @@ pub fn crypto_kdfa(
 
     Ok(key_stream)
 }
+
+macro_rules! ecdh {
+    (
+        $vis:vis $fn_name:ident,
+        $pk_ty:ty, $sk_ty:ty, $affine_ty:ty, $dh_fn:path, $encoded_point_ty:ty
+    ) => {
+        #[allow(clippy::similar_names, clippy::missing_errors_doc)]
+        $vis fn $fn_name(
+            parent_point: &TpmsEccPoint,
+            name_alg: TpmAlgId,
+            seed: &[u8; 32],
+        ) -> Result<(Vec<u8>, Vec<u8>), TpmRc> {
+            let encoded_point = <$encoded_point_ty>::from_affine_coordinates(
+                parent_point.x.as_ref().into(),
+                parent_point.y.as_ref().into(),
+                false,
+            );
+            let affine_point_opt: Option<$affine_ty> =
+                <$affine_ty>::from_encoded_point(&encoded_point).into();
+            let affine_point = affine_point_opt.ok_or(TpmRc::from(TpmRcBase::EccPoint))?;
+
+            if affine_point.is_identity().into() {
+                return Err(TpmRc::from(TpmRcBase::EccPoint));
+            }
+
+            let parent_pk =
+                <$pk_ty>::from_affine(affine_point).map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+
+            let context_b: Vec<u8> = [parent_point.x.as_ref(), parent_point.y.as_ref()].concat();
+
+            let ephemeral_sk = <$sk_ty>::random(&mut rand::thread_rng());
+            let ephemeral_pk_bytes_encoded = ephemeral_sk.public_key().to_encoded_point(false);
+            let ephemeral_pk_bytes = ephemeral_pk_bytes_encoded.as_bytes();
+            if ephemeral_pk_bytes.is_empty() || ephemeral_pk_bytes[0] != UNCOMPRESSED_POINT_TAG {
+                return Err(TpmRc::from(TpmRcBase::Value));
+            }
+            let context_a = &ephemeral_pk_bytes[1..];
+
+            let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
+            let z = shared_secret.raw_secret_bytes();
+            let sym_material =
+                crypto_kdfa(name_alg, &z, KDF_LABEL_STORAGE, context_a, &context_b, 256)?;
+            let (aes_key, iv) = sym_material.split_at(16);
+            let mut encrypted_seed_buf = *seed;
+            let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
+            cipher.encrypt(&mut encrypted_seed_buf);
+
+            Ok((encrypted_seed_buf.to_vec(), ephemeral_pk_bytes.to_vec()))
+        }
+    };
+}
+
+ecdh!(
+    pub crypto_ecdh_p256,
+    p256::PublicKey,
+    p256::SecretKey,
+    p256::AffinePoint,
+    p256::ecdh::diffie_hellman,
+    p256::EncodedPoint
+);
+
+ecdh!(
+    pub crypto_ecdh_p384,
+    p384::PublicKey,
+    p384::SecretKey,
+    p384::AffinePoint,
+    p384::ecdh::diffie_hellman,
+    p384::EncodedPoint
+);
+
+ecdh!(
+    pub crypto_ecdh_p521,
+    p521::PublicKey,
+    p521::SecretKey,
+    p521::AffinePoint,
+    p521::ecdh::diffie_hellman,
+    p521::EncodedPoint
+);
 
 /// Calculates the TPM name of a public object.
 ///

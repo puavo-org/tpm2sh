@@ -5,8 +5,9 @@
 use crate::{
     cli::{Cli, DeviceCommand, Import},
     crypto::{
-        crypto_hmac, crypto_kdfa, crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE,
-        KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE, UNCOMPRESSED_POINT_TAG,
+        crypto_ecdh_p256, crypto_ecdh_p384, crypto_ecdh_p521, crypto_hmac, crypto_kdfa,
+        crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
+        UNCOMPRESSED_POINT_TAG,
     },
     key::private_key_from_pem_bytes,
     session::session_from_args,
@@ -19,7 +20,6 @@ use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
 use num_traits::FromPrimitive;
-use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use rand::{thread_rng, RngCore};
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
@@ -34,90 +34,6 @@ use tpm2_protocol::{
     message::TpmImportCommand,
     TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
-
-macro_rules! ecdh {
-    (
-		$fn_name:ident,
-		$pk_ty:ty, $sk_ty:ty, $affine_ty:ty, $dh_fn:path, $encoded_point_ty:ty
-	) => {
-        fn $fn_name(
-            parent_point: &TpmsEccPoint,
-            name_alg: TpmAlgId,
-            seed: &[u8; 32],
-        ) -> Result<(Vec<u8>, Vec<u8>), CliError> {
-            let encoded_point = <$encoded_point_ty>::from_affine_coordinates(
-                parent_point.x.as_ref().into(),
-                parent_point.y.as_ref().into(),
-                false,
-            );
-            let affine_point_opt: Option<$affine_ty> =
-                <$affine_ty>::from_encoded_point(&encoded_point).into();
-            let affine_point = affine_point_opt.ok_or_else(|| {
-                CliError::Execution("Invalid parent public key: not on curve".to_string())
-            })?;
-
-            if affine_point.is_identity().into() {
-                return Err(CliError::Execution(
-                    "Invalid parent public key: point at infinity".to_string(),
-                ));
-            }
-
-            let parent_pk = <$pk_ty>::from_affine(affine_point)
-                .map_err(|e| CliError::Execution(format!("failed to construct public key: {e}")))?;
-
-            let context_b: Vec<u8> = [parent_point.x.as_ref(), parent_point.y.as_ref()].concat();
-
-            let ephemeral_sk = <$sk_ty>::random(&mut thread_rng());
-            let ephemeral_pk_bytes_encoded = ephemeral_sk.public_key().to_encoded_point(false);
-            let ephemeral_pk_bytes = ephemeral_pk_bytes_encoded.as_bytes();
-            if ephemeral_pk_bytes.is_empty() || ephemeral_pk_bytes[0] != UNCOMPRESSED_POINT_TAG {
-                return Err(CliError::Execution(
-                    "invalid ephemeral ECC public key format".to_string(),
-                ));
-            }
-            let context_a = &ephemeral_pk_bytes[1..];
-
-            let shared_secret = $dh_fn(ephemeral_sk.to_nonzero_scalar(), parent_pk.as_affine());
-            let z = shared_secret.raw_secret_bytes();
-            let sym_material =
-                crypto_kdfa(name_alg, z, KDF_LABEL_STORAGE, context_a, &context_b, 256)
-                    .map_err(CliError::TpmRc)?;
-            let (aes_key, iv) = sym_material.split_at(16);
-            let mut encrypted_seed_buf = *seed;
-            let cipher = Encryptor::<Aes128>::new(aes_key.into(), iv.into());
-            cipher.encrypt(&mut encrypted_seed_buf);
-
-            Ok((encrypted_seed_buf.to_vec(), ephemeral_pk_bytes.to_vec()))
-        }
-    };
-}
-
-ecdh!(
-    ecdh_p256,
-    p256::PublicKey,
-    p256::SecretKey,
-    p256::AffinePoint,
-    p256::ecdh::diffie_hellman,
-    p256::EncodedPoint
-);
-
-ecdh!(
-    ecdh_p384,
-    p384::PublicKey,
-    p384::SecretKey,
-    p384::AffinePoint,
-    p384::ecdh::diffie_hellman,
-    p384::EncodedPoint
-);
-
-ecdh!(
-    ecdh_p521,
-    p521::PublicKey,
-    p521::SecretKey,
-    p521::AffinePoint,
-    p521::ecdh::diffie_hellman,
-    p521::EncodedPoint
-);
 
 /// Encrypts the import seed using the parent's RSA public key.
 ///
@@ -193,16 +109,20 @@ fn protect_seed_with_ecc(
         )),
     }?;
 
-    let (encrypted_seed, ephemeral_point_bytes) = match curve_id {
-        TpmEccCurve::NistP256 => ecdh_p256(parent_point, parent_public.name_alg, seed)?,
-        TpmEccCurve::NistP384 => ecdh_p384(parent_point, parent_public.name_alg, seed)?,
-        TpmEccCurve::NistP521 => ecdh_p521(parent_point, parent_public.name_alg, seed)?,
-        _ => {
-            return Err(CliError::Execution(format!(
-                "unsupported parent ECC curve for import: {curve_id:?}"
-            )))
-        }
-    };
+    let (encrypted_seed, ephemeral_point_bytes) =
+        match curve_id {
+            TpmEccCurve::NistP256 => crypto_ecdh_p256(parent_point, parent_public.name_alg, seed)
+                .map_err(CliError::TpmRc)?,
+            TpmEccCurve::NistP384 => crypto_ecdh_p384(parent_point, parent_public.name_alg, seed)
+                .map_err(CliError::TpmRc)?,
+            TpmEccCurve::NistP521 => crypto_ecdh_p521(parent_point, parent_public.name_alg, seed)
+                .map_err(CliError::TpmRc)?,
+            _ => {
+                return Err(CliError::Execution(format!(
+                    "unsupported parent ECC curve for import: {curve_id:?}"
+                )))
+            }
+        };
 
     if ephemeral_point_bytes.is_empty() || ephemeral_point_bytes[0] != UNCOMPRESSED_POINT_TAG {
         return Err(CliError::Execution(
