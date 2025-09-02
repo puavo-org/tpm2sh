@@ -3,8 +3,14 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::LogFormat, error::ParseError, parser::PolicyExpr, print::TpmPrint, uri::Uri,
-    util::build_to_vec, CliError,
+    cli::{Cli, LogFormat},
+    error::ParseError,
+    parser::PolicyExpr,
+    print::TpmPrint,
+    session::session_from_args,
+    uri::Uri,
+    util::build_to_vec,
+    CliError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::{
@@ -27,11 +33,11 @@ use tpm2_protocol::{
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmContextSaveCommand, TpmGetCapabilityCommand,
-        TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand, TpmPcrReadResponse,
-        TpmReadPublicCommand, TpmResponseBody,
+        TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
+        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand,
+        TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody,
     },
-    TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmParse, TpmPersistent, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
@@ -189,6 +195,35 @@ impl TpmDevice {
         }
     }
 
+    /// Loads a TPM context from URI, and return a pair, where the boolean flag
+    /// tells whether the context needs to be cleaned up or not.
+    ///
+    /// `tpm://` URIs are considered to be managed by the caller, and thus they are
+    /// paired with `false`. Other types of URIs are paired with `true`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` on parsing or TPM command failure.
+    pub fn context_load(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
+        match uri.ast() {
+            PolicyExpr::TpmHandle(handle) => Ok((TpmTransient(*handle), false)),
+            PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
+                let context_blob = uri.to_bytes()?;
+                let (context, remainder) = TpmsContext::parse(&context_blob)?;
+                if !remainder.is_empty() {
+                    return Err(ParseError::Custom("trailing data".to_string()).into());
+                }
+                let cmd = TpmContextLoadCommand { context };
+                let (resp, _) = self.execute(&cmd, &[])?;
+                let resp = resp
+                    .ContextLoad()
+                    .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+                Ok((resp.loaded_handle, true))
+            }
+            _ => Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into()),
+        }
+    }
+
     /// Saves a transient object context and writes it to a writer as a data URI.
     ///
     /// # Errors
@@ -216,21 +251,29 @@ impl TpmDevice {
         Ok(())
     }
 
-    /// Reads PCR values from the TPM.
+    /// Makes a transient object persistent.
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the TPM command fails.
-    pub fn pcr_read(
+    /// Returns `CliError` if the `EvictControl` command fails.
+    pub fn evict_control(
         &mut self,
-        pcr_selection_in: &TpmlPcrSelection,
-    ) -> Result<TpmPcrReadResponse, CliError> {
-        let cmd = TpmPcrReadCommand {
-            pcr_selection_in: *pcr_selection_in,
+        cli: &Cli,
+        object_handle: u32,
+        persistent_handle: TpmPersistent,
+    ) -> Result<(), CliError> {
+        let auth_handle = TpmRh::Owner;
+        let cmd = TpmEvictControlCommand {
+            auth: (auth_handle as u32).into(),
+            object_handle: object_handle.into(),
+            persistent_handle,
         };
-        let (resp, _) = self.execute(&cmd, &[])?;
-        resp.PcrRead()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))
+        let handles = [auth_handle as u32, object_handle];
+        let sessions = session_from_args(&cmd, &handles, cli)?;
+        let (resp, _) = self.execute(&cmd, &sessions)?;
+        resp.EvictControl()
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+        Ok(())
     }
 
     /// Retrieves all algorithms from the TPM.
@@ -272,35 +315,6 @@ impl TpmDevice {
             })
             .collect();
         Ok(handles)
-    }
-
-    /// Loads a TPM context from URI, and return a pair, where the boolean flag
-    /// tells whether the context needs to be cleaned up or not.
-    ///
-    /// `tpm://` URIs are considered to be managed by the caller, and thus they are
-    /// paired with `false`. Other types of URIs are paired with `true`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` on parsing or TPM command failure.
-    pub fn context_load(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
-        match uri.ast() {
-            PolicyExpr::TpmHandle(handle) => Ok((TpmTransient(*handle), false)),
-            PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
-                let context_blob = uri.to_bytes()?;
-                let (context, remainder) = TpmsContext::parse(&context_blob)?;
-                if !remainder.is_empty() {
-                    return Err(ParseError::Custom("trailing data".to_string()).into());
-                }
-                let cmd = TpmContextLoadCommand { context };
-                let (resp, _) = self.execute(&cmd, &[])?;
-                let resp = resp
-                    .ContextLoad()
-                    .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-                Ok((resp.loaded_handle, true))
-            }
-            _ => Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into()),
-        }
     }
 
     /// Fetches and returns all capabilities of a certain type from the TPM.
@@ -353,6 +367,23 @@ impl TpmDevice {
             }
         }
         Ok(all_caps)
+    }
+
+    /// Reads PCR values from the TPM.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the TPM command fails.
+    pub fn pcr_read(
+        &mut self,
+        pcr_selection_in: &TpmlPcrSelection,
+    ) -> Result<TpmPcrReadResponse, CliError> {
+        let cmd = TpmPcrReadCommand {
+            pcr_selection_in: *pcr_selection_in,
+        };
+        let (resp, _) = self.execute(&cmd, &[])?;
+        resp.PcrRead()
+            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))
     }
 
     /// Reads the public area and name of a TPM object.
