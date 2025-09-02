@@ -18,7 +18,7 @@ use tpm2_protocol::{
         TpmsKeyedhashParms, TpmsRsaParms, TpmsSensitiveCreate, TpmtKdfScheme, TpmtPublic,
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
-    message::{TpmCreatePrimaryCommand, TpmEvictControlCommand},
+    message::TpmCreatePrimaryCommand,
     TpmPersistent, TpmTransient,
 };
 
@@ -117,16 +117,7 @@ impl DeviceCommand for CreatePrimary {
 
         if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
-            let evict_cmd = TpmEvictControlCommand {
-                auth: (TpmRh::Owner as u32).into(),
-                object_handle: object_handle.0.into(),
-                persistent_handle,
-            };
-            let evict_handles = [TpmRh::Owner as u32, object_handle.into()];
-            let evict_sessions = session_from_args(&evict_cmd, &evict_handles, cli)?;
-            let (resp, _) = device.execute(&evict_cmd, &evict_sessions)?;
-            resp.EvictControl()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            device.evict_control(cli, object_handle.0, persistent_handle)?;
 
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
             Ok(Vec::new())

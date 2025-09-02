@@ -4,11 +4,10 @@
 
 use crate::{
     cli::{Cli, DeviceCommand, Save},
-    session::session_from_args,
     CliError, TpmDevice,
 };
 use std::io::Write;
-use tpm2_protocol::{data::TpmRh, message::TpmEvictControlCommand, TpmPersistent, TpmTransient};
+use tpm2_protocol::{TpmPersistent, TpmTransient};
 
 impl DeviceCommand for Save {
     /// Runs `save`.
@@ -29,18 +28,7 @@ impl DeviceCommand for Save {
         }
 
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
-        let auth_handle = TpmRh::Owner;
-        let handles = [auth_handle as u32, object_handle.into()];
-
-        let evict_cmd = TpmEvictControlCommand {
-            auth: (auth_handle as u32).into(),
-            object_handle: object_handle.0.into(),
-            persistent_handle,
-        };
-        let sessions = session_from_args(&evict_cmd, &handles, cli)?;
-        let (resp, _) = device.execute(&evict_cmd, &sessions)?;
-        resp.EvictControl()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+        device.evict_control(cli, object_handle.0, persistent_handle)?;
 
         handles_to_flush.retain(|&h| h != object_handle);
 
