@@ -178,48 +178,6 @@ pub(crate) fn tpm_ecc_curve_to_str(curve: TpmEccCurve) -> &'static str {
     }
 }
 
-/// Returns an iterator over all CLI-supported algorithm combinations.
-pub fn enumerate_all() -> impl Iterator<Item = Alg> {
-    let name_algs = [TpmAlgId::Sha256, TpmAlgId::Sha384, TpmAlgId::Sha512];
-    let rsa_key_sizes = [2048, 3072, 4096];
-    let ecc_curves = [
-        TpmEccCurve::NistP256,
-        TpmEccCurve::NistP384,
-        TpmEccCurve::NistP521,
-    ];
-
-    let rsa_iter = rsa_key_sizes.into_iter().flat_map(move |key_bits| {
-        name_algs.into_iter().map(move |name_alg| Alg {
-            name: format!("rsa:{}:{}", key_bits, tpm_alg_id_to_str(name_alg)),
-            object_type: TpmAlgId::Rsa,
-            name_alg,
-            params: AlgInfo::Rsa { key_bits },
-        })
-    });
-
-    let ecc_iter = ecc_curves.into_iter().flat_map(move |curve_id| {
-        name_algs.into_iter().map(move |name_alg| Alg {
-            name: format!(
-                "ecc:{}:{}",
-                tpm_ecc_curve_to_str(curve_id),
-                tpm_alg_id_to_str(name_alg)
-            ),
-            object_type: TpmAlgId::Ecc,
-            name_alg,
-            params: AlgInfo::Ecc { curve_id },
-        })
-    });
-
-    let keyedhash_iter = name_algs.into_iter().map(move |name_alg| Alg {
-        name: format!("keyedhash:{}", tpm_alg_id_to_str(name_alg)),
-        object_type: TpmAlgId::KeyedHash,
-        name_alg,
-        params: AlgInfo::KeyedHash,
-    });
-
-    rsa_iter.chain(ecc_iter).chain(keyedhash_iter)
-}
-
 /// A TPM key struct that is directly compatible with ASN.1 DER encoding.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TpmKey {

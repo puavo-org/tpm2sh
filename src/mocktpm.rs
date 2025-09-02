@@ -26,17 +26,18 @@ use tpm2_protocol::{
     self,
     data::{
         Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
-        TpmCap, TpmCc, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca,
-        TpmlHandle, TpmsAlgProperty, TpmtPublic, TpmtTkCreation, TpmuCapabilities, TpmuPublicId,
-        TpmuPublicParms,
+        TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc,
+        TpmlAlgProperty, TpmlCca, TpmlHandle, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmtPublic,
+        TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,
         TpmContextLoadCommand, TpmContextLoadResponse, TpmContextSaveCommand,
         TpmContextSaveResponse, TpmCreatePrimaryCommand, TpmCreatePrimaryResponse,
-        TpmFlushContextCommand, TpmFlushContextResponse, TpmGetCapabilityCommand,
-        TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
-        TpmLoadResponse, TpmReadPublicCommand, TpmReadPublicResponse, TpmResponseBody,
+        TpmEccParametersCommand, TpmEccParametersResponse, TpmFlushContextCommand,
+        TpmFlushContextResponse, TpmGetCapabilityCommand, TpmGetCapabilityResponse,
+        TpmImportCommand, TpmImportResponse, TpmLoadCommand, TpmLoadResponse, TpmReadPublicCommand,
+        TpmReadPublicResponse, TpmResponseBody, TpmTestParmsCommand, TpmTestParmsResponse,
     },
     TpmBuffer, TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -85,11 +86,13 @@ mocktpm_response!(
     ContextLoad,
     ContextSave,
     CreatePrimary,
+    EccParameters,
     FlushContext,
     GetCapability,
     Import,
     Load,
     ReadPublic,
+    TestParms,
 );
 
 #[derive(Debug, Default)]
@@ -129,11 +132,13 @@ impl MockTpm {
             ContextLoad => mocktpm_context_load,
             ContextSave => mocktpm_context_save,
             CreatePrimary => mocktpm_create_primary,
+            EccParameters => mocktpm_ecc_parameters,
             FlushContext => mocktpm_flush_context,
             GetCapability => mocktpm_get_capability,
             Import => mocktpm_import,
             Load => mocktpm_load,
             ReadPublic => mocktpm_read_public,
+            TestParms => mocktpm_test_parms,
         }
     }
 }
@@ -171,11 +176,13 @@ fn mocktpm_supported_commands() -> &'static [TpmCc] {
         TpmCc::ContextLoad,
         TpmCc::ContextSave,
         TpmCc::CreatePrimary,
+        TpmCc::EccParameters,
         TpmCc::FlushContext,
         TpmCc::GetCapability,
         TpmCc::Import,
         TpmCc::Load,
         TpmCc::ReadPublic,
+        TpmCc::TestParms,
     ]
 }
 
@@ -285,6 +292,26 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
         TpmResponseBody::CreatePrimary(resp),
         TpmAuthResponses::default(),
     ))
+}
+
+#[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
+fn mocktpm_ecc_parameters(_tpm: &mut MockTpm, cmd: &TpmEccParametersCommand) -> MockTpmResult {
+    let supported_curves = [
+        TpmEccCurve::NistP256,
+        TpmEccCurve::NistP384,
+        TpmEccCurve::NistP521,
+    ];
+    if supported_curves.contains(&cmd.curve_id) {
+        let resp = TpmEccParametersResponse {
+            parameters: TpmsAlgorithmDetailEcc::default(),
+        };
+        return Ok((
+            TpmRc::from(TpmRcBase::Success),
+            TpmResponseBody::EccParameters(resp),
+            TpmAuthResponses::default(),
+        ));
+    }
+    Err(TpmRc::from(TpmRcBase::Curve))
 }
 
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
@@ -507,6 +534,25 @@ fn mocktpm_read_public(tpm: &mut MockTpm, cmd: &TpmReadPublicCommand) -> MockTpm
         TpmResponseBody::ReadPublic(resp),
         TpmAuthResponses::default(),
     ))
+}
+
+#[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
+fn mocktpm_test_parms(_tpm: &mut MockTpm, cmd: &TpmTestParmsCommand) -> MockTpmResult {
+    if let tpm2_protocol::data::TpmtPublicParms {
+        object_type: TpmAlgId::Rsa,
+        parameters: TpmuPublicParms::Rsa(params),
+    } = cmd.parameters
+    {
+        if params.key_bits == 2048 {
+            let resp = TpmTestParmsResponse {};
+            return Ok((
+                TpmRc::from(TpmRcBase::Success),
+                TpmResponseBody::TestParms(resp),
+                TpmAuthResponses::default(),
+            ));
+        }
+    }
+    Err(TpmRc::from(TpmRcBase::Value))
 }
 
 fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmErrorKind> {

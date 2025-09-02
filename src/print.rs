@@ -11,22 +11,23 @@ use tpm2_protocol::{
         TpmSe, TpmSt, TpmaAlgorithm, TpmaCc, TpmaLocality, TpmaNv, TpmaObject, TpmaSession,
         TpmiYesNo, TpmsAlgProperty, TpmsAuthCommand, TpmsCapabilityData, TpmsContext,
         TpmsCreationData, TpmsEccPoint, TpmsKeyedhashParms, TpmsPcrSelection, TpmsSensitiveCreate,
-        TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject,
-        TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa, TpmuPublicId, TpmuPublicParms,
-        TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
+        TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtPublicParms, TpmtScheme,
+        TpmtSymDefObject, TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa, TpmuPublicId,
+        TpmuPublicParms, TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{
         TpmCommandBody, TpmContextLoadCommand, TpmContextLoadResponse, TpmContextSaveCommand,
         TpmContextSaveResponse, TpmCreateCommand, TpmCreatePrimaryCommand,
         TpmCreatePrimaryResponse, TpmCreateResponse, TpmDictionaryAttackLockResetCommand,
-        TpmDictionaryAttackLockResetResponse, TpmEvictControlCommand, TpmEvictControlResponse,
-        TpmFlushContextCommand, TpmFlushContextResponse, TpmGetCapabilityCommand,
-        TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
-        TpmLoadResponse, TpmPcrEventCommand, TpmPcrEventResponse, TpmPcrReadCommand,
-        TpmPcrReadResponse, TpmPolicyGetDigestCommand, TpmPolicyGetDigestResponse,
-        TpmPolicyOrCommand, TpmPolicyPcrCommand, TpmPolicySecretCommand, TpmReadPublicCommand,
-        TpmReadPublicResponse, TpmResponseBody, TpmStartAuthSessionCommand,
-        TpmStartAuthSessionResponse, TpmUnsealCommand, TpmUnsealResponse,
+        TpmDictionaryAttackLockResetResponse, TpmEccParametersCommand, TpmEvictControlCommand,
+        TpmEvictControlResponse, TpmFlushContextCommand, TpmFlushContextResponse,
+        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse,
+        TpmLoadCommand, TpmLoadResponse, TpmPcrEventCommand, TpmPcrEventResponse,
+        TpmPcrReadCommand, TpmPcrReadResponse, TpmPolicyGetDigestCommand,
+        TpmPolicyGetDigestResponse, TpmPolicyOrCommand, TpmPolicyPcrCommand,
+        TpmPolicySecretCommand, TpmReadPublicCommand, TpmReadPublicResponse, TpmResponseBody,
+        TpmStartAuthSessionCommand, TpmStartAuthSessionResponse, TpmTestParmsCommand,
+        TpmUnsealCommand, TpmUnsealResponse,
     },
     TpmBuffer, TpmList, TpmPersistent, TpmSession, TpmTransient,
 };
@@ -198,6 +199,8 @@ tpm_print_struct!(TpmUnsealCommand, item_handle => "itemHandle");
 tpm_print_struct!(TpmGetCapabilityCommand, cap => "cap", property => "property", property_count => "propertyCount");
 tpm_print_struct!(TpmStartAuthSessionCommand, tpm_key => "tpmKey", bind => "bind", nonce_caller => "nonceCaller", encrypted_salt => "encryptedSalt", session_type => "sessionType", symmetric => "symmetric", auth_hash => "authHash");
 tpm_print_struct!(TpmContextLoadCommand, context => "context");
+tpm_print_struct!(TpmTestParmsCommand, parameters => "parameters");
+tpm_print_struct!(TpmEccParametersCommand, curve_id => "curveId");
 
 tpm_print_struct!(TpmCreatePrimaryResponse, object_handle => "objectHandle", out_public => "outPublic", creation_data => "creationData", creation_hash => "creationHash", creation_ticket => "creationTicket", name => "name");
 tpm_print_struct!(TpmContextSaveResponse, context => "context");
@@ -291,6 +294,15 @@ impl TpmPrint for TpmuPublicId {
             Self::Ecc(p) => p.print(&format!("{name} (ecc)"), indent),
             Self::Null => trace!(target: "cli::device", "{prefix}{name}: null"),
         }
+    }
+}
+
+impl TpmPrint for TpmtPublicParms {
+    fn print(&self, name: &str, indent: usize) {
+        let prefix = " ".repeat(indent * INDENT);
+        trace!(target: "cli::device", "{prefix}{name}:");
+        self.object_type.print("type", indent + 1);
+        self.parameters.print("parameters", indent + 1);
     }
 }
 
@@ -394,6 +406,8 @@ impl TpmPrint for TpmCommandBody {
             Self::GetCapability(cmd) => cmd.print(name, indent),
             Self::StartAuthSession(cmd) => cmd.print(name, indent),
             Self::ContextLoad(cmd) => cmd.print(name, indent),
+            Self::TestParms(cmd) => cmd.print(name, indent),
+            Self::EccParameters(cmd) => cmd.print(name, indent),
             _ => {
                 let prefix = " ".repeat(indent * INDENT);
                 trace!(target: "cli::device", "{prefix}{name}: {self:?} (unimplemented pretty trace)");

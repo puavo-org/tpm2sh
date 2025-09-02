@@ -5,6 +5,7 @@
 use crate::{
     cli::{Cli, LogFormat},
     error::ParseError,
+    key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
     parser::PolicyExpr,
     print::TpmPrint,
     session::session_from_args,
@@ -28,14 +29,16 @@ use std::{
 use log::{trace, warn};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmRh, TpmSt, TpmaCc, TpmlPcrSelection,
-        TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmtPublic, TpmuCapabilities,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh, TpmSt, TpmaCc, TpmlPcrSelection,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsRsaParms, TpmtPublic,
+        TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand,
-        TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody,
+        TpmContextLoadCommand, TpmContextSaveCommand, TpmEccParametersCommand,
+        TpmEvictControlCommand, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
+        TpmPcrReadCommand, TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody,
+        TpmTestParmsCommand,
     },
     TpmParse, TpmPersistent, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -58,6 +61,26 @@ impl<T: Read + Write + Send + Debug> TpmTransport for T {}
 pub struct TpmDevice {
     transport: Box<dyn TpmTransport>,
     log_format: LogFormat,
+}
+
+/// Checks if the TPM supports a given set of RSA parameters.
+fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<(), CliError> {
+    let cmd = TpmTestParmsCommand {
+        parameters: TpmtPublicParms {
+            object_type: TpmAlgId::Rsa,
+            parameters: TpmuPublicParms::Rsa(TpmsRsaParms {
+                key_bits,
+                ..Default::default()
+            }),
+        },
+    };
+    device.execute(&cmd, &[]).map(|_| ())
+}
+
+/// Checks if the TPM supports a given ECC curve.
+fn test_ecc_parms(device: &mut TpmDevice, curve_id: TpmEccCurve) -> Result<(), CliError> {
+    let cmd = TpmEccParametersCommand { curve_id };
+    device.execute(&cmd, &[]).map(|_| ())
 }
 
 impl TpmDevice {
@@ -276,24 +299,77 @@ impl TpmDevice {
         Ok(())
     }
 
-    /// Retrieves all algorithms from the TPM.
+    /// Retrieves all supported algorithms from the TPM by probing its capabilities.
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_algorithms(&mut self) -> Result<HashSet<TpmAlgId>, CliError> {
-        let cap_data_vec = self.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
-        let algorithms: HashSet<TpmAlgId> = cap_data_vec
-            .into_iter()
+    /// Returns a `CliError` if querying the TPM fails.
+    pub fn get_all_algorithms(&mut self) -> Result<Vec<(TpmAlgId, String)>, CliError> {
+        let mut supported_algs = Vec::new();
+
+        let alg_props_vec = self.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
+        let all_algs: HashSet<TpmAlgId> = alg_props_vec
+            .iter()
             .flat_map(|cap_data| {
-                if let TpmuCapabilities::Algs(p) = cap_data.data {
+                if let TpmuCapabilities::Algs(p) = &cap_data.data {
                     p.iter().map(|prop| prop.alg).collect::<Vec<_>>()
                 } else {
                     Vec::new()
                 }
             })
             .collect();
-        Ok(algorithms)
+
+        let name_algs: Vec<TpmAlgId> = [TpmAlgId::Sha256, TpmAlgId::Sha384, TpmAlgId::Sha512]
+            .into_iter()
+            .filter(|alg| all_algs.contains(alg))
+            .collect();
+
+        if all_algs.contains(&TpmAlgId::Rsa) {
+            let rsa_key_sizes = [2048, 3072, 4096];
+            for key_bits in rsa_key_sizes {
+                if test_rsa_parms(self, key_bits).is_ok() {
+                    for &name_alg in &name_algs {
+                        supported_algs.push((
+                            TpmAlgId::Rsa,
+                            format!("rsa:{}:{}", key_bits, tpm_alg_id_to_str(name_alg)),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if all_algs.contains(&TpmAlgId::Ecc) {
+            let ecc_curves = [
+                TpmEccCurve::NistP256,
+                TpmEccCurve::NistP384,
+                TpmEccCurve::NistP521,
+            ];
+            for curve_id in ecc_curves {
+                if test_ecc_parms(self, curve_id).is_ok() {
+                    for &name_alg in &name_algs {
+                        supported_algs.push((
+                            TpmAlgId::Ecc,
+                            format!(
+                                "ecc:{}:{}",
+                                tpm_ecc_curve_to_str(curve_id),
+                                tpm_alg_id_to_str(name_alg)
+                            ),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if all_algs.contains(&TpmAlgId::KeyedHash) {
+            for &name_alg in &name_algs {
+                supported_algs.push((
+                    TpmAlgId::KeyedHash,
+                    format!("keyedhash:{}", tpm_alg_id_to_str(name_alg)),
+                ));
+            }
+        }
+
+        Ok(supported_algs)
     }
 
     /// Retrieves all handles of a specific type from the TPM.
