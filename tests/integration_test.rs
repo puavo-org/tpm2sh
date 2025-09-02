@@ -43,6 +43,9 @@ fn test_context() -> TestFixture {
 }
 
 #[rstest]
+/// FIXME: the expected list should be a static array maching MockTPM. The
+/// use of `enumerate_all()` gives no guarantees on what might from
+/// MockTPM.
 fn test_subcommand_algorithms(test_context: TestFixture) {
     let algorithms_cmd = Commands::Algorithms(Algorithms { filter: None });
     let mut out_buf = Vec::new();

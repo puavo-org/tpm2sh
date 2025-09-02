@@ -7,7 +7,6 @@ use crate::{
     key::enumerate_all,
     CliError, TpmDevice,
 };
-use regex::Regex;
 use std::io::Write;
 use tpm2_protocol::TpmTransient;
 
@@ -25,27 +24,17 @@ impl DeviceCommand for Algorithms {
     ) -> Result<Vec<TpmTransient>, CliError> {
         let chip_algorithms = device.get_all_algorithms()?;
         let cli_algorithms = enumerate_all();
-
-        let supported_algorithms: Vec<_> = cli_algorithms
+        // FIXME: This is incorrect. The command should instead iterator through
+        // chip algorithms only and figure out the name for each  of them, as
+        // `tpm2-protocol` is now TCG spec complete. `enumerate_all()` should be
+        // removed from the crate entirely.
+        let mut names: Vec<_> = cli_algorithms
             .into_iter()
             .filter(|alg| chip_algorithms.contains(&alg.object_type))
-            .collect();
-        let filtered_algorithms: Vec<_> = if let Some(pattern) = &self.filter {
-            let re =
-                Regex::new(pattern).map_err(|e| CliError::Usage(format!("invalid regex: {e}")))?;
-            supported_algorithms
-                .into_iter()
-                .filter(|alg| re.is_match(&alg.name))
-                .collect()
-        } else {
-            supported_algorithms
-        };
-        let mut sorted_names: Vec<_> = filtered_algorithms
-            .into_iter()
             .map(|alg| alg.name)
             .collect();
-        sorted_names.sort();
-        for name in sorted_names {
+        names.sort();
+        for name in names {
             writeln!(writer, "{name}")?;
         }
         Ok(Vec::new())

@@ -1425,7 +1425,6 @@ dependencies = [
  "pkcs8",
  "polling",
  "rand",
- "regex",
  "rsa",
  "rstest",
  "sha1",
