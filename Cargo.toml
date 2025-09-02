@@ -45,6 +45,7 @@ cfb-mode = "0.8"
 cipher = "0.4"
 clap = { version = "4.5", features = ["derive", "env"] }
 const-oid = { version = "0.9", features = ["db"] }
+ctrlc = "3.4"
 directories = "6.0"
 env_logger = "0.11"
 hex = "0.4"
