@@ -19,7 +19,7 @@ impl DeviceCommand for Delete {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let handle = self.handle.to_tpm_handle()?;
 
         if handle >= TpmRh::PersistentFirst as u32 {
@@ -40,6 +40,6 @@ impl DeviceCommand for Delete {
                 "'{handle:#010x}' is not a transient or persistent handle"
             )));
         }
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

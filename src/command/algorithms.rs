@@ -7,7 +7,6 @@ use crate::{
     CliError, TpmDevice,
 };
 use std::io::Write;
-use tpm2_protocol::TpmTransient;
 
 impl DeviceCommand for Algorithms {
     /// Runs `algorithms`.
@@ -20,15 +19,14 @@ impl DeviceCommand for Algorithms {
         _cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let mut algorithms = device.get_all_algorithms()?;
         algorithms.sort_by(|a, b| a.1.cmp(&b.1));
-
         for (_, name) in algorithms {
             if self.filter.as_ref().map_or(true, |f| name.contains(f)) {
                 writeln!(writer, "{name}")?;
             }
         }
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

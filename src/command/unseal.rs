@@ -21,23 +21,19 @@ impl DeviceCommand for Unseal {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let handle = self.handle.to_tpm_handle()?;
         let object_handle = TpmTransient(handle);
-
         let unseal_cmd = TpmUnsealCommand {
             item_handle: object_handle.0.into(),
         };
         let unseal_handles = [object_handle.into()];
         let unseal_sessions = session_from_args(&unseal_cmd, &unseal_handles, cli)?;
-
         let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp
             .Unseal()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-
         writer.write_all(&unseal_resp.out_data)?;
-
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

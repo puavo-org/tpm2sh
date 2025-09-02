@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command};
+use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command, Resources};
 use clap::{
     builder::styling::{AnsiColor, Color, Style, Styles},
     Args, Parser, Subcommand, ValueEnum,
@@ -13,7 +13,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tpm2_protocol::data::{TpmRc, TpmRh, TpmSe};
-use tpm2_protocol::TpmTransient;
 
 /// Subcommand not requiring TPM device access.
 pub trait LocalCommand {
@@ -22,11 +21,7 @@ pub trait LocalCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        cli: &Cli,
-        writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
+    fn run<W: Write>(&self, cli: &Cli, writer: &mut W) -> Result<Resources, CliError>;
 }
 
 /// Subcommand requiring TPM device access.
@@ -41,7 +36,7 @@ pub trait DeviceCommand {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
+    ) -> Result<Resources, CliError>;
 }
 
 const STYLES: Styles = Styles::styled()
@@ -219,7 +214,7 @@ macro_rules! tpm2sh_command {
                 cli: &Cli,
                 device: Option<Arc<Mutex<TpmDevice>>>,
                 writer: &mut W,
-            ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+            ) -> Result<Resources, CliError> {
                 match self {
                     $(
                         Self::$local_command(args) => {

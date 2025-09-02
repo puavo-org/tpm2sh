@@ -14,7 +14,7 @@ use tpm2_protocol::{
         TpmuSymMode,
     },
     message::TpmStartAuthSessionCommand,
-    tpm_hash_size, TpmTransient,
+    tpm_hash_size,
 };
 
 impl DeviceCommand for StartSession {
@@ -28,7 +28,7 @@ impl DeviceCommand for StartSession {
         _cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;
@@ -57,6 +57,6 @@ impl DeviceCommand for StartSession {
             writeln!(writer, "digest://sha256,{digest}")?;
         }
         writeln!(writer, "tpm://{handle:#010x}")?;
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

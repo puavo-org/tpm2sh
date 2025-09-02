@@ -8,7 +8,6 @@ use crate::{
     CliError,
 };
 use std::io::Write;
-use tpm2_protocol::TpmTransient;
 
 impl LocalCommand for Convert {
     /// Runs `convert`.
@@ -16,24 +15,17 @@ impl LocalCommand for Convert {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        _cli: &Cli,
-        writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    fn run<W: Write>(&self, _cli: &Cli, writer: &mut W) -> Result<crate::Resources, CliError> {
         if self.from == self.to {
             return Err(CliError::Usage(
                 "input and output formats cannot be the same".to_string(),
             ));
         }
-
         let input_bytes = self.input.to_bytes()?;
-
         let tpm_key = match self.from {
             KeyFormat::Pem => TpmKey::from_pem(&input_bytes)?,
             KeyFormat::Der => TpmKey::from_der(&input_bytes)?,
         };
-
         match self.to {
             KeyFormat::Pem => {
                 let pem_string = tpm_key.to_pem()?;
@@ -44,7 +36,6 @@ impl LocalCommand for Convert {
                 writer.write_all(&der_bytes)?;
             }
         }
-
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

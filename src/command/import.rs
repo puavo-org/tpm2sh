@@ -32,7 +32,7 @@ use tpm2_protocol::{
         TpmuSymMode,
     },
     message::TpmImportCommand,
-    TpmBuild, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuild, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 /// Encrypts the import seed using the parent's RSA public key.
@@ -263,25 +263,21 @@ impl DeviceCommand for Import {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
         let handles_to_flush = if needs_flush {
             vec![parent_handle]
         } else {
             Vec::new()
         };
-
         let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
-
         let (_, public, sensitive_blob) = prepare_key_for_import(&self.key, parent_name_alg)?;
         let public_bytes_struct = Tpm2bPublic {
             inner: public.clone(),
         };
-
         let (duplicate, in_sym_seed, encryption_key) =
             create_import_blob(&parent_public, &public, &sensitive_blob, &parent_name)?;
-
         let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
             TpmtSymDef::default()
         } else {
@@ -291,7 +287,6 @@ impl DeviceCommand for Import {
                 mode: TpmuSymMode::Aes(TpmAlgId::Cfb),
             }
         };
-
         let import_cmd = TpmImportCommand {
             parent_handle: parent_handle.0.into(),
             encryption_key,
@@ -302,15 +297,12 @@ impl DeviceCommand for Import {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&import_cmd, &handles, cli)?;
-
         let (resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;
-
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
-
         writeln!(
             writer,
             "data://base64,{}",
@@ -321,6 +313,7 @@ impl DeviceCommand for Import {
             "data://base64,{}",
             base64_engine.encode(priv_key_bytes)
         )?;
-        Ok(handles_to_flush.into_iter().map(|h| (h, true)).collect())
+        let handles = handles_to_flush.into_iter().map(|h| (h, true)).collect();
+        Ok(crate::Resources::new(handles))
     }
 }

@@ -17,7 +17,6 @@ use tpm2_protocol::{
         TpmtPublic, TpmtScheme, TpmuPublicId, TpmuPublicParms,
     },
     message::TpmCreateCommand,
-    TpmTransient,
 };
 
 impl DeviceCommand for Seal {
@@ -31,15 +30,13 @@ impl DeviceCommand for Seal {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
         let mut handles_to_flush = Vec::new();
         if needs_flush {
             handles_to_flush.push(parent_handle);
         }
-
         let data_to_seal = self.data.to_bytes()?;
-
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
         if self.object_password.is_some() {
             object_attributes |= TpmaObject::USER_WITH_AUTH;
@@ -56,7 +53,6 @@ impl DeviceCommand for Seal {
             }),
             unique: TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
         };
-
         let sealed_obj_password = self.object_password.as_deref().unwrap_or("").as_bytes();
         let cmd = TpmCreateCommand {
             parent_handle: parent_handle.0.into(),
@@ -79,13 +75,11 @@ impl DeviceCommand for Seal {
         let create_resp = resp.Create().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Create: {e:?}"))
         })?;
-
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;
-
         writeln!(writer, "data://base64,{}", base64_engine.encode(pub_bytes))?;
         writeln!(writer, "data://base64,{}", base64_engine.encode(priv_bytes))?;
-
-        Ok(handles_to_flush.into_iter().map(|h| (h, true)).collect())
+        let handles = handles_to_flush.into_iter().map(|h| (h, true)).collect();
+        Ok(crate::Resources::new(handles))
     }
 }

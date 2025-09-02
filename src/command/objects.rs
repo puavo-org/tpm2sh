@@ -6,7 +6,7 @@ use crate::{
     CliError, TpmDevice,
 };
 use std::io::Write;
-use tpm2_protocol::{data::TpmRh, TpmTransient};
+use tpm2_protocol::data::TpmRh;
 
 impl DeviceCommand for Objects {
     /// Runs `objects`.
@@ -19,7 +19,7 @@ impl DeviceCommand for Objects {
         _cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
         for handle in transient_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
@@ -28,6 +28,6 @@ impl DeviceCommand for Objects {
         for handle in persistent_handles {
             writeln!(writer, "tpm://{handle:#010x}")?;
         }
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

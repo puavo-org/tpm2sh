@@ -19,7 +19,7 @@ use tpm2_protocol::{
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmCreatePrimaryCommand,
-    TpmPersistent, TpmTransient,
+    TpmPersistent,
 };
 
 fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
@@ -90,7 +90,7 @@ impl DeviceCommand for CreatePrimary {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -120,10 +120,10 @@ impl DeviceCommand for CreatePrimary {
             device.evict_control(cli, object_handle.0, persistent_handle)?;
 
             writeln!(writer, "tpm://{persistent_handle:#010x}")?;
-            Ok(Vec::new())
+            Ok(crate::Resources::new(Vec::new()))
         } else {
             device.context_save(object_handle, writer)?;
-            Ok(vec![(object_handle, true)])
+            Ok(crate::Resources::new(vec![(object_handle, true)]))
         }
     }
 }

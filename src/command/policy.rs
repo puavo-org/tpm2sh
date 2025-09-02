@@ -20,7 +20,7 @@ use tpm2_protocol::{
         TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
         TpmPolicySecretCommand, TpmStartAuthSessionCommand,
     },
-    TpmSession, TpmTransient,
+    TpmSession,
 };
 
 struct PolicyExecutor<'a> {
@@ -206,20 +206,16 @@ impl DeviceCommand for Policy {
         cli: &Cli,
         device: &mut TpmDevice,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+    ) -> Result<crate::Resources, CliError> {
         let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
         let session_handle =
             start_trial_session(device, cli, SessionType::Trial, TpmAlgId::Sha256)?;
-
         let mut executor = PolicyExecutor { pcr_count, device };
         executor.execute_policy_ast(cli, session_handle, &ast)?;
-
         let final_digest = get_policy_digest(executor.device, cli, session_handle)?;
         flush_session(executor.device, cli, session_handle)?;
-
         writeln!(writer, "{}", hex::encode(&*final_digest))?;
-
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }

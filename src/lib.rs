@@ -30,6 +30,18 @@ use std::{
 };
 use tpm2_protocol::{message::TpmFlushContextCommand, TpmTransient};
 
+#[derive(Debug)]
+pub struct Resources {
+    pub handles: Vec<(TpmTransient, bool)>,
+}
+
+impl Resources {
+    #[must_use]
+    pub fn new(handles: Vec<(TpmTransient, bool)>) -> Self {
+        Self { handles }
+    }
+}
+
 /// A trait for executing the top-level Commands enum.
 pub trait Command {
     /// Returns `true` if the command does not require TPM device access.
@@ -45,7 +57,7 @@ pub trait Command {
         cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
         writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError>;
+    ) -> Result<Resources, CliError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -69,10 +81,11 @@ pub fn execute_cli() -> Result<(), CliError> {
             Some(Arc::new(Mutex::new(device)))
         };
 
-        let handles_to_manage = command.run(&cli, device_arc.clone(), &mut io::stdout())?;
+        let resources = command.run(&cli, device_arc.clone(), &mut io::stdout())?;
 
         if let Some(device_arc) = device_arc {
-            let handles_to_flush: Vec<_> = handles_to_manage
+            let handles_to_flush: Vec<_> = resources
+                .handles
                 .into_iter()
                 .filter(|&(_, should_flush)| should_flush)
                 .map(|(handle, _)| handle)

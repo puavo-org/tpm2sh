@@ -8,7 +8,7 @@ use crate::{
     CliError, TpmDevice,
 };
 use std::io::Write;
-use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand, TpmTransient};
+use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
 impl DeviceCommand for ResetLock {
     /// Runs `reset-lock`.
@@ -20,8 +20,8 @@ impl DeviceCommand for ResetLock {
         &self,
         cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<Vec<(TpmTransient, bool)>, CliError> {
+        _writer: &mut W,
+    ) -> Result<crate::Resources, CliError> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
@@ -30,8 +30,6 @@ impl DeviceCommand for ResetLock {
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-
-        writeln!(writer, "Dictionary attack lockout has been reset.")?;
-        Ok(Vec::new())
+        Ok(crate::Resources::new(Vec::new()))
     }
 }
