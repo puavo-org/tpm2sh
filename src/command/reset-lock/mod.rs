@@ -3,9 +3,9 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, ResetLock},
+    cli::{DeviceCommand, ResetLock},
     session::session_from_args,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 use std::io::Write;
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
@@ -18,18 +18,17 @@ impl DeviceCommand for ResetLock {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        _writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
         let handles = [TpmRh::Lockout as u32];
-        let sessions = session_from_args(&command, &handles, cli)?;
+        let sessions = session_from_args(&command, &handles, context.cli)?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        Ok(crate::Resources::new(Vec::new()))
+        Ok(())
     }
 }

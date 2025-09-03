@@ -3,8 +3,8 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, Save},
-    CliError, TpmDevice,
+    cli::{DeviceCommand, Save},
+    CliError, Context, TpmDevice,
 };
 use std::io::Write;
 use tpm2_protocol::TpmPersistent;
@@ -17,14 +17,13 @@ impl DeviceCommand for Save {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let (object_handle, _) = device.context_load(&self.in_uri)?;
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
-        device.evict_control(cli, object_handle.0, persistent_handle)?;
-        writeln!(writer, "tpm://{persistent_handle:#010x}")?;
-        Ok(crate::Resources::new(Vec::new()))
+        device.evict_control(context.cli, object_handle.0, persistent_handle)?;
+        writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
+        Ok(())
     }
 }

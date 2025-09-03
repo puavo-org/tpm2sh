@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, Import},
+    cli::{DeviceCommand, Import},
     crypto::{
         crypto_ecdh_p256, crypto_ecdh_p384, crypto_ecdh_p521, crypto_hmac, crypto_kdfa,
         crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
@@ -13,7 +13,7 @@ use crate::{
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -260,16 +260,13 @@ impl DeviceCommand for Import {
     /// Returns a `CliError`.
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
-        let handles_to_flush = if needs_flush {
-            vec![parent_handle]
-        } else {
-            Vec::new()
-        };
+        if needs_flush {
+            context.handles.push((parent_handle, true));
+        }
         let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
         let (_, public, sensitive_blob) = prepare_key_for_import(&self.key, parent_name_alg)?;
@@ -296,7 +293,7 @@ impl DeviceCommand for Import {
             symmetric_alg,
         };
         let handles = [parent_handle.into()];
-        let sessions = session_from_args(&import_cmd, &handles, cli)?;
+        let sessions = session_from_args(&import_cmd, &handles, context.cli)?;
         let (resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
@@ -304,16 +301,15 @@ impl DeviceCommand for Import {
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
         writeln!(
-            writer,
+            context.writer,
             "data://base64,{}",
             base64_engine.encode(pub_key_bytes)
         )?;
         writeln!(
-            writer,
+            context.writer,
             "data://base64,{}",
             base64_engine.encode(priv_key_bytes)
         )?;
-        let handles = handles_to_flush.into_iter().map(|h| (h, true)).collect();
-        Ok(crate::Resources::new(handles))
+        Ok(())
     }
 }

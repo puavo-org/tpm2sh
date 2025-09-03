@@ -3,10 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, PcrEvent},
+    cli::{DeviceCommand, PcrEvent},
     pcr::pcr_get_count,
     session::session_from_args,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 
 use std::io::Write;
@@ -21,10 +21,9 @@ impl DeviceCommand for PcrEvent {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        _writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let pcr_count = pcr_get_count(device)?;
         let selection = self.pcr.to_pcr_selection(pcr_count)?;
         if selection.len() != 1 {
@@ -65,10 +64,10 @@ impl DeviceCommand for PcrEvent {
             pcr_handle: handles[0],
             event_data,
         };
-        let sessions = session_from_args(&command, &handles, cli)?;
+        let sessions = session_from_args(&command, &handles, context.cli)?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        Ok(crate::Resources::new(Vec::new()))
+        Ok(())
     }
 }

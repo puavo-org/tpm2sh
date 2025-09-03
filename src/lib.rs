@@ -31,14 +31,20 @@ use std::{
 use tpm2_protocol::{message::TpmFlushContextCommand, TpmTransient};
 
 #[derive(Debug)]
-pub struct Resources {
+pub struct Context<'a, W> {
+    pub cli: &'a Cli,
     pub handles: Vec<(TpmTransient, bool)>,
+    pub writer: &'a mut W,
 }
 
-impl Resources {
+impl<'a, W> Context<'a, W> {
     #[must_use]
-    pub fn new(handles: Vec<(TpmTransient, bool)>) -> Self {
-        Self { handles }
+    pub fn new(cli: &'a Cli, writer: &'a mut W) -> Context<'a, W> {
+        Self {
+            cli,
+            handles: Vec::new(),
+            writer,
+        }
     }
 }
 
@@ -54,10 +60,9 @@ pub trait Command {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: Option<Arc<Mutex<TpmDevice>>>,
-        writer: &mut W,
-    ) -> Result<Resources, CliError>;
+        context: &mut Context<W>,
+    ) -> Result<(), CliError>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -80,11 +85,11 @@ pub fn execute_cli() -> Result<(), CliError> {
             let device = TpmDevice::new(file, cli.log_format);
             Some(Arc::new(Mutex::new(device)))
         };
-
-        let resources = command.run(&cli, device_arc.clone(), &mut io::stdout())?;
-
+        let mut writer = io::stdout();
+        let mut context = Context::new(&cli, &mut writer);
+        let result = command.run(device_arc.clone(), &mut context);
         if let Some(device_arc) = device_arc {
-            let handles_to_flush: Vec<_> = resources
+            let handles_to_flush: Vec<_> = context
                 .handles
                 .into_iter()
                 .filter(|&(_, should_flush)| should_flush)
@@ -105,7 +110,7 @@ pub fn execute_cli() -> Result<(), CliError> {
                 }
             }
         }
-        Ok(())
+        result
     } else {
         Cli::command()
             .help_template(cli::USAGE_TEMPLATE)

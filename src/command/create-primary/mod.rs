@@ -3,11 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Cli, CreatePrimary, DeviceCommand},
+    cli::{CreatePrimary, DeviceCommand},
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
-    TpmDevice,
+    Context, TpmDevice,
 };
 use std::io::Write;
 
@@ -87,10 +87,9 @@ impl DeviceCommand for CreatePrimary {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -108,22 +107,20 @@ impl DeviceCommand for CreatePrimary {
             outside_info: Tpm2bData::default(),
             creation_pcr: TpmlPcrSelection::default(),
         };
-        let sessions = session_from_args(&cmd, &handles, cli)?;
+        let sessions = session_from_args(&cmd, &handles, context.cli)?;
         let (resp, _) = device.execute(&cmd, &sessions)?;
-        let create_primary_resp = resp
+        let resp = resp
             .CreatePrimary()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let object_handle = create_primary_resp.object_handle;
-
+        context.handles.push((resp.object_handle, true));
         if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
-            device.evict_control(cli, object_handle.0, persistent_handle)?;
-
-            writeln!(writer, "tpm://{persistent_handle:#010x}")?;
-            Ok(crate::Resources::new(Vec::new()))
+            device.evict_control(context.cli, context.handles[0].0.into(), persistent_handle)?;
+            context.handles.clear();
+            writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
         } else {
-            device.context_save(object_handle, writer)?;
-            Ok(crate::Resources::new(vec![(object_handle, true)]))
+            device.context_save(context.handles[0].0, &mut context.writer)?;
         }
+        Ok(())
     }
 }

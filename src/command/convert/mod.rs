@@ -3,9 +3,9 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Cli, Convert, KeyFormat, LocalCommand},
+    cli::{Convert, KeyFormat, LocalCommand},
     key::TpmKey,
-    CliError,
+    CliError, Context,
 };
 use std::io::Write;
 
@@ -15,7 +15,7 @@ impl LocalCommand for Convert {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(&self, _cli: &Cli, writer: &mut W) -> Result<crate::Resources, CliError> {
+    fn run<W: Write>(&self, context: &mut Context<W>) -> Result<(), CliError> {
         if self.from == self.to {
             return Err(CliError::Usage(
                 "input and output formats cannot be the same".to_string(),
@@ -29,13 +29,13 @@ impl LocalCommand for Convert {
         match self.to {
             KeyFormat::Pem => {
                 let pem_string = tpm_key.to_pem()?;
-                write!(writer, "{pem_string}")?;
+                write!(context.writer, "{pem_string}")?;
             }
             KeyFormat::Der => {
                 let der_bytes = tpm_key.to_der()?;
-                writer.write_all(&der_bytes)?;
+                context.writer.write_all(&der_bytes)?;
             }
         }
-        Ok(crate::Resources::new(Vec::new()))
+        Ok(())
     }
 }

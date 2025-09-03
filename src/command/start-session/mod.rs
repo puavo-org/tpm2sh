@@ -3,9 +3,9 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, StartSession},
+    cli::{DeviceCommand, StartSession},
     session::AuthSession,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 use rand::{thread_rng, RngCore};
 use std::io::Write;
@@ -26,10 +26,9 @@ impl DeviceCommand for StartSession {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        _cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;
@@ -59,7 +58,7 @@ impl DeviceCommand for StartSession {
             hmac_key: Tpm2bAuth::default(),
             auth_hash,
         };
-        writeln!(writer, "session://{session}")?;
-        Ok(crate::Resources::new(Vec::new()))
+        writeln!(context.writer, "session://{session}")?;
+        Ok(())
     }
 }

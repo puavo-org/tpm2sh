@@ -3,9 +3,9 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, Load},
+    cli::{DeviceCommand, Load},
     session::session_from_args,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 
 use std::io::Write;
@@ -24,14 +24,12 @@ impl DeviceCommand for Load {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let (parent_handle, parent_needs_flush) = device.context_load(&self.parent.parent)?;
-        let mut handles_to_flush = Vec::new();
         if parent_needs_flush {
-            handles_to_flush.push(parent_handle);
+            context.handles.push((parent_handle, true));
         }
         let pub_bytes = self.public.to_bytes()?;
         let priv_bytes = self.private.to_bytes()?;
@@ -43,15 +41,14 @@ impl DeviceCommand for Load {
             in_public,
         };
         let handles = [parent_handle.into()];
-        let sessions = session_from_args(&load_cmd, &handles, cli)?;
+        let sessions = session_from_args(&load_cmd, &handles, context.cli)?;
         let (resp, _) = device.execute(&load_cmd, &sessions)?;
         let load_resp = resp
             .Load()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
         let save_handle = load_resp.object_handle;
-        handles_to_flush.push(save_handle);
-        device.context_save(save_handle, writer)?;
-        let handles = handles_to_flush.into_iter().map(|h| (h, true)).collect();
-        Ok(crate::Resources::new(handles))
+        context.handles.push((save_handle, true));
+        device.context_save(save_handle, &mut context.writer)?;
+        Ok(())
     }
 }

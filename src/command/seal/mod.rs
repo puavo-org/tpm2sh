@@ -3,10 +3,10 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, Seal},
+    cli::{DeviceCommand, Seal},
     session::session_from_args,
     util::build_to_vec,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::io::Write;
@@ -27,14 +27,12 @@ impl DeviceCommand for Seal {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
-        let mut handles_to_flush = Vec::new();
         if needs_flush {
-            handles_to_flush.push(parent_handle);
+            context.handles.push((parent_handle, true));
         }
         let data_to_seal = self.data.to_bytes()?;
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
@@ -69,7 +67,7 @@ impl DeviceCommand for Seal {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let handles = [parent_handle.into()];
-        let sessions = session_from_args(&cmd, &handles, cli)?;
+        let sessions = session_from_args(&cmd, &handles, context.cli)?;
         let (resp, _) = device.execute(&cmd, &sessions)?;
 
         let create_resp = resp.Create().map_err(|e| {
@@ -77,9 +75,16 @@ impl DeviceCommand for Seal {
         })?;
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;
-        writeln!(writer, "data://base64,{}", base64_engine.encode(pub_bytes))?;
-        writeln!(writer, "data://base64,{}", base64_engine.encode(priv_bytes))?;
-        let handles = handles_to_flush.into_iter().map(|h| (h, true)).collect();
-        Ok(crate::Resources::new(handles))
+        writeln!(
+            context.writer,
+            "data://base64,{}",
+            base64_engine.encode(pub_bytes)
+        )?;
+        writeln!(
+            context.writer,
+            "data://base64,{}",
+            base64_engine.encode(priv_bytes)
+        )?;
+        Ok(())
     }
 }

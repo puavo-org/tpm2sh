@@ -8,7 +8,7 @@ use crate::{
     pcr::{pcr_composite_digest, pcr_get_count},
     session::session_from_args,
     uri::pcr_selection_to_list,
-    CliError, TpmDevice,
+    CliError, Context, TpmDevice,
 };
 use std::io::Write;
 use tpm2_protocol::{
@@ -203,19 +203,18 @@ impl DeviceCommand for Policy {
     /// Returns a `CliError` on failure.
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<crate::Resources, CliError> {
+        context: &mut Context<W>,
+    ) -> Result<(), CliError> {
         let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
         let session_handle =
-            start_trial_session(device, cli, SessionType::Trial, TpmAlgId::Sha256)?;
+            start_trial_session(device, context.cli, SessionType::Trial, TpmAlgId::Sha256)?;
         let mut executor = PolicyExecutor { pcr_count, device };
-        executor.execute_policy_ast(cli, session_handle, &ast)?;
-        let final_digest = get_policy_digest(executor.device, cli, session_handle)?;
-        flush_session(executor.device, cli, session_handle)?;
-        writeln!(writer, "{}", hex::encode(&*final_digest))?;
-        Ok(crate::Resources::new(Vec::new()))
+        executor.execute_policy_ast(context.cli, session_handle, &ast)?;
+        let final_digest = get_policy_digest(executor.device, context.cli, session_handle)?;
+        flush_session(executor.device, context.cli, session_handle)?;
+        writeln!(context.writer, "{}", hex::encode(&*final_digest))?;
+        Ok(())
     }
 }

@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command, Resources};
+use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command, Context};
 use clap::{
     builder::styling::{AnsiColor, Color, Style, Styles},
     Args, Parser, Subcommand, ValueEnum,
@@ -21,7 +21,7 @@ pub trait LocalCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(&self, cli: &Cli, writer: &mut W) -> Result<Resources, CliError>;
+    fn run<W: Write>(&self, context: &mut Context<W>) -> Result<(), CliError>;
 }
 
 /// Subcommand requiring TPM device access.
@@ -33,10 +33,9 @@ pub trait DeviceCommand {
     /// Returns a `CliError` if the execution fails
     fn run<W: Write>(
         &self,
-        cli: &Cli,
         device: &mut TpmDevice,
-        writer: &mut W,
-    ) -> Result<Resources, CliError>;
+        context: &mut Context<W>,
+    ) -> Result<(), CliError>;
 }
 
 const STYLES: Styles = Styles::styled()
@@ -189,7 +188,7 @@ impl fmt::Display for KeyFormat {
     }
 }
 
-macro_rules! tpm2sh_command {
+macro_rules! subcommand {
     (
         local: [$($local_command:ident),* $(,)?],
         device: [$($device_command:ident),* $(,)?]
@@ -209,16 +208,11 @@ macro_rules! tpm2sh_command {
                 }
             }
 
-            fn run<W: Write>(
-                &self,
-                cli: &Cli,
-                device: Option<Arc<Mutex<TpmDevice>>>,
-                writer: &mut W,
-            ) -> Result<Resources, CliError> {
+            fn run<W: Write>(&self, device: Option<Arc<Mutex<TpmDevice>>>, context: &mut Context<W>) -> Result<(), CliError> {
                 match self {
                     $(
                         Self::$local_command(args) => {
-                            args.run(cli, writer)
+                            args.run(context)
                         }
                     ,)*
                     $(
@@ -230,7 +224,7 @@ macro_rules! tpm2sh_command {
                                 .lock()
                                 .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
 
-                            args.run(cli, &mut guard, writer)
+                            args.run(&mut guard, context)
                         }
                     ,)*
                 }
@@ -239,7 +233,7 @@ macro_rules! tpm2sh_command {
     };
 }
 
-tpm2sh_command!(
+subcommand!(
     local: [Convert, PrintError],
     device: [
         Algorithms,
