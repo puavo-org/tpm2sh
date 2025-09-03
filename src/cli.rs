@@ -370,7 +370,7 @@ pub struct PcrRead {
 pub struct Policy {
     #[arg(
         value_name = "EXPRESSION",
-        help = "Policy expression (e.g., 'pcr(\"sha256:0\",\"...\")')"
+        help = "Policy expression (e.g., 'pcr(sha256:0,...)'"
     )]
     pub expression: String,
 }

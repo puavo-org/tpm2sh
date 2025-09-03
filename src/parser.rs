@@ -111,9 +111,26 @@ fn pcr_selection_body(input: &str) -> IResult<&str, String> {
     })(input)
 }
 
-fn quoted_string(input: &str) -> IResult<&str, String> {
+fn unquoted_string(input: &str) -> IResult<&str, &str> {
+    take_while1(|c: char| c != ',' && c != ')' && !c.is_whitespace())(input)
+}
+
+fn string_argument(input: &str) -> IResult<&str, String> {
     map(
-        delimited(char('\"'), recognize(many0(is_not("\""))), char('\"')),
+        alt((
+            delimited(char('\"'), recognize(many0(is_not("\""))), char('\"')),
+            unquoted_string,
+        )),
+        |s: &str| s.to_string(),
+    )(input)
+}
+
+fn pcr_selection_argument(input: &str) -> IResult<&str, String> {
+    map(
+        alt((
+            delimited(char('\"'), recognize(many0(is_not("\""))), char('\"')),
+            recognize(pcr_selection_body),
+        )),
         |s: &str| s.to_string(),
     )(input)
 }
@@ -135,8 +152,8 @@ where
 fn pcr_expression(input: &str) -> IResult<&str, PolicyExpr> {
     map(
         tuple((
-            quoted_string,
-            opt(comma_sep(quoted_string)),
+            pcr_selection_argument,
+            opt(comma_sep(string_argument)),
             opt(comma_sep(count_parameter)),
         )),
         |(selection, digest, count)| PolicyExpr::Pcr {
@@ -149,7 +166,7 @@ fn pcr_expression(input: &str) -> IResult<&str, PolicyExpr> {
 
 fn secret_expression(input: &str) -> IResult<&str, PolicyExpr> {
     map(
-        tuple((parse_policy_expr, opt(comma_sep(quoted_string)))),
+        tuple((parse_policy_expr, opt(comma_sep(string_argument)))),
         |(uri_expr, password)| PolicyExpr::Secret {
             auth_handle_uri: Box::new(uri_expr),
             password,
@@ -187,9 +204,10 @@ fn tpm_uri(input: &str) -> IResult<&str, PolicyExpr> {
 }
 
 fn file_uri(input: &str) -> IResult<&str, PolicyExpr> {
-    map(preceded(tag("file://"), is_not("")), |s: &str| {
-        PolicyExpr::FilePath(s.to_string())
-    })(input)
+    map(
+        preceded(tag("file://"), take_while1(|c| c != ',' && c != ')')),
+        |s: &str| PolicyExpr::FilePath(s.to_string()),
+    )(input)
 }
 
 fn data_uri(input: &str) -> IResult<&str, PolicyExpr> {
@@ -199,7 +217,7 @@ fn data_uri(input: &str) -> IResult<&str, PolicyExpr> {
             separated_pair(
                 alt((tag("utf8"), tag("hex"), tag("base64"))),
                 char(','),
-                is_not(""),
+                take_while(|c: char| c != ',' && c != ')'),
             ),
         ),
         |(enc, val): (&str, &str)| PolicyExpr::Data {
