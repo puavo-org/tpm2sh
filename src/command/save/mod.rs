@@ -3,11 +3,40 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, Save},
+    cli::{handle_help, required, DeviceCommand, Subcommand},
+    uri::Uri,
     CliError, Context, TpmDevice,
 };
-use std::io::Write;
+use lexopt::{Arg, Parser, ValueExt};
+
 use tpm2_protocol::TpmPersistent;
+
+#[derive(Debug, Default)]
+pub struct Save {
+    pub to_uri: Uri,
+    pub in_uri: Uri,
+}
+
+impl Subcommand for Save {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut to_uri = None;
+        let mut in_uri = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("to-uri") => to_uri = Some(parser.value()?.parse()?),
+                Arg::Long("in") => in_uri = Some(parser.value()?.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Save {
+            to_uri: required(to_uri, "--to-uri")?,
+            in_uri: required(in_uri, "--in")?,
+        })
+    }
+}
 
 impl DeviceCommand for Save {
     /// Runs `save`.
@@ -15,11 +44,7 @@ impl DeviceCommand for Save {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let (object_handle, _) = device.context_load(&self.in_uri)?;
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
         device.evict_control(context.cli, object_handle.0, persistent_handle)?;

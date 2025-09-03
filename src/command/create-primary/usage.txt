@@ -1,0 +1,3 @@
+Usage: tpm2sh create-primary --algorithm <ALGORITHM>
+
+For more information, try '--help'.

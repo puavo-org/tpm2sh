@@ -3,12 +3,27 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, ResetLock},
+    cli::{handle_help, DeviceCommand, Subcommand},
     session::session_from_args,
     CliError, Context, TpmDevice,
 };
-use std::io::Write;
+use lexopt::Parser;
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
+
+#[derive(Debug, Default)]
+pub struct ResetLock;
+
+impl Subcommand for ResetLock {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        while let Some(arg) = parser.next()? {
+            handle_help(arg)?;
+        }
+        Ok(ResetLock)
+    }
+}
 
 impl DeviceCommand for ResetLock {
     /// Runs `reset-lock`.
@@ -16,11 +31,7 @@ impl DeviceCommand for ResetLock {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };

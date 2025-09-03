@@ -1,0 +1,3 @@
+Usage: tpm2sh load --parent <URI> --public <URI> --private <URI>
+
+For more information, try '--help'.

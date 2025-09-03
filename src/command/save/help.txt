@@ -1,0 +1,12 @@
+Saves to non-volatile memory
+
+Usage: tpm2sh save [OPTIONS] --to-uri <HANDLE> --in <CONTEXT>
+
+Options:
+  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
+      --to-uri <HANDLE>          URI for the persistent object to be created (e.g., 'tpm://0x81000001')
+      --in <CONTEXT>             URI of the transient object context to save (e.g., 'file:///path/to/context.bin')
+      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
+  -p, --password <PASSWORD>      Default authorization password for objects and sessions
+  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                     Print help

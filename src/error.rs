@@ -21,8 +21,6 @@ pub enum ParseError {
     Pem(#[from] pem::PemError),
     #[error("PKCS#8 parsing failed: {0}")]
     Pkcs8(#[from] pkcs8::Error),
-    #[error("invalid URI: {0}")]
-    Uri(#[from] url::ParseError),
     #[error("UTF-8 decoding failed: {0}")]
     Utf8(#[from] Utf8Error),
 }
@@ -55,76 +53,10 @@ pub enum CliError {
 
     #[error("TPM unexpected: {0}")]
     UnexpectedResponse(String),
-
-    #[error("{0}")]
-    Usage(String),
-}
-
-impl CliError {
-    /// Checks if the error is related to user input or usage.
-    #[must_use]
-    pub fn is_usage_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Usage(_)
-                | Self::Parse(_)
-                | Self::PcrSelection(_)
-                | Self::InvalidHandle(_)
-                | Self::File(_, _)
-        )
-    }
-}
-
-impl From<base64::DecodeError> for CliError {
-    fn from(err: base64::DecodeError) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<hex::FromHexError> for CliError {
-    fn from(err: hex::FromHexError) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<ParseIntError> for CliError {
-    fn from(err: ParseIntError) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<pkcs8::der::Error> for CliError {
-    fn from(err: pkcs8::der::Error) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<pkcs8::Error> for CliError {
-    fn from(err: pkcs8::Error) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<pem::PemError> for CliError {
-    fn from(err: pem::PemError) -> Self {
-        ParseError::from(err).into()
-    }
 }
 
 impl From<TpmErrorKind> for CliError {
     fn from(err: TpmErrorKind) -> Self {
         CliError::Build(err)
-    }
-}
-
-impl From<Utf8Error> for CliError {
-    fn from(err: Utf8Error) -> Self {
-        ParseError::from(err).into()
-    }
-}
-
-impl From<url::ParseError> for CliError {
-    fn from(err: url::ParseError) -> Self {
-        ParseError::from(err).into()
     }
 }

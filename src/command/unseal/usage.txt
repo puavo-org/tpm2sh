@@ -1,0 +1,3 @@
+Usage: tpm2sh unseal --handle <HANDLE>
+
+For more information, try '--help'.

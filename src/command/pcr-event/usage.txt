@@ -1,0 +1,3 @@
+Usage: tpm2sh pcr-event <PCR> <DATA>
+
+For more information, try '--help'.

@@ -3,15 +3,41 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, PcrEvent},
+    cli::{handle_help, required, DeviceCommand, Subcommand},
     pcr::pcr_get_count,
     session::session_from_args,
+    uri::Uri,
     CliError, Context, TpmDevice,
 };
-
-use std::io::Write;
-
+use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
+
+#[derive(Debug, Default)]
+pub struct PcrEvent {
+    pub pcr: Uri,
+    pub data: Uri,
+}
+
+impl Subcommand for PcrEvent {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut pcr = None;
+        let mut data = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Value(val) if pcr.is_none() => pcr = Some(val.parse()?),
+                Arg::Value(val) if data.is_none() => data = Some(val.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(PcrEvent {
+            pcr: required(pcr, "<PCR>")?,
+            data: required(data, "<DATA>")?,
+        })
+    }
+}
 
 impl DeviceCommand for PcrEvent {
     /// Runs `pcr-event`.
@@ -19,15 +45,11 @@ impl DeviceCommand for PcrEvent {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let pcr_count = pcr_get_count(device)?;
         let selection = self.pcr.to_pcr_selection(pcr_count)?;
         if selection.len() != 1 {
-            return Err(CliError::Usage(
+            return Err(CliError::Execution(
                 "pcr-event requires a selection of exactly one PCR bank".to_string(),
             ));
         }
@@ -38,7 +60,7 @@ impl DeviceCommand for PcrEvent {
             .map(|byte| byte.count_ones())
             .sum::<u32>();
         if set_bits_count != 1 {
-            return Err(CliError::Usage(format!(
+            return Err(CliError::Execution(format!(
                 "pcr-event requires a selection of exactly one PCR (provided selection '{}' contains {})",
                 self.pcr, set_bits_count
             )));

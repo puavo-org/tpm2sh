@@ -1,0 +1,3 @@
+Usage: tpm2sh seal --parent <URI> --data <URI>
+
+For more information, try '--help'.

@@ -26,12 +26,7 @@ fn main() {
     }
 
     if let Err(err) = execute_cli() {
-        if err.is_usage_error() {
-            eprintln!("{err}");
-            std::process::exit(2);
-        } else {
-            error!("{err}");
-            std::process::exit(1);
-        }
+        error!("{err}");
+        std::process::exit(1);
     }
 }

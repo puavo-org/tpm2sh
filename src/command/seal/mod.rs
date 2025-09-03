@@ -3,13 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, Seal},
+    cli::{handle_help, required, DeviceCommand, Subcommand},
     session::session_from_args,
+    uri::Uri,
     util::build_to_vec,
     CliError, Context, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use std::io::Write;
+use lexopt::{Arg, Parser, ValueExt};
+
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
@@ -19,18 +21,45 @@ use tpm2_protocol::{
     message::TpmCreateCommand,
 };
 
+#[derive(Debug, Default)]
+pub struct Seal {
+    pub parent: Uri,
+    pub data: Uri,
+    pub object_password: Option<String>,
+}
+
+impl Subcommand for Seal {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut parent = None;
+        let mut data = None;
+        let mut object_password = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("parent") | Arg::Short('P') => parent = Some(parser.value()?.parse()?),
+                Arg::Long("data") => data = Some(parser.value()?.parse()?),
+                Arg::Long("object-password") => object_password = Some(parser.value()?.string()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Seal {
+            parent: required(parent, "--parent")?,
+            data: required(data, "--data")?,
+            object_password,
+        })
+    }
+}
+
 impl DeviceCommand for Seal {
     /// Runs `seal`.
     ///
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
-        let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+        let (parent_handle, needs_flush) = device.context_load(&self.parent)?;
         if needs_flush {
             context.handles.push((parent_handle, true));
         }

@@ -3,11 +3,43 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Convert, KeyFormat, LocalCommand},
+    cli::{handle_help, required, KeyFormat, LocalCommand, Subcommand},
     key::TpmKey,
+    uri::Uri,
     CliError, Context,
 };
-use std::io::Write;
+use lexopt::{Arg, Parser, ValueExt};
+
+#[derive(Debug, Default)]
+pub struct Convert {
+    pub from: KeyFormat,
+    pub to: KeyFormat,
+    pub input: Uri,
+}
+
+impl Subcommand for Convert {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut from = KeyFormat::Pem;
+        let mut to = KeyFormat::Der;
+        let mut input = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("from") => from = parser.value()?.parse()?,
+                Arg::Long("to") => to = parser.value()?.parse()?,
+                Arg::Value(val) if input.is_none() => input = Some(val.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Convert {
+            from,
+            to,
+            input: required(input, "<INPUT>")?,
+        })
+    }
+}
 
 impl LocalCommand for Convert {
     /// Runs `convert`.
@@ -15,9 +47,9 @@ impl LocalCommand for Convert {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(&self, context: &mut Context<W>) -> Result<(), CliError> {
+    fn run(&self, context: &mut Context) -> Result<(), CliError> {
         if self.from == self.to {
-            return Err(CliError::Usage(
+            return Err(CliError::Execution(
                 "input and output formats cannot be the same".to_string(),
             ));
         }

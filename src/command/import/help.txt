@@ -1,0 +1,12 @@
+Imports an external key
+
+Usage: tpm2sh import [OPTIONS] --parent <URI> --key <KEY>
+
+Options:
+  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
+  -P, --parent <URI>             Parent object URI (e.g., 'tpm://0x80000001', 'file:///context.bin')
+      --key <KEY>                URI of the external private key to import (e.g., 'file:///path/to/key.pem')
+      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
+  -p, --password <PASSWORD>      Default authorization password for objects and sessions
+  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                     Print help

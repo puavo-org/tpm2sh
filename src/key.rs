@@ -56,16 +56,16 @@ impl Default for Alg {
 }
 
 impl FromStr for Alg {
-    type Err = CliError;
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
         match parts.as_slice() {
             ["rsa", key_bits_str, name_alg_str] => {
-                let key_bits: u16 = key_bits_str.parse().map_err(|_| {
-                    CliError::Usage(format!("Invalid RSA key bits value: '{key_bits_str}'"))
-                })?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let key_bits: u16 = key_bits_str
+                    .parse()
+                    .map_err(|_| format!("Invalid RSA key bits value: '{key_bits_str}'"))?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Rsa,
@@ -74,8 +74,8 @@ impl FromStr for Alg {
                 })
             }
             ["ecc", curve_id_str, name_alg_str] => {
-                let curve_id = tpm_ecc_curve_from_str(curve_id_str).map_err(CliError::Usage)?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let curve_id = tpm_ecc_curve_from_str(curve_id_str)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Ecc,
@@ -84,7 +84,7 @@ impl FromStr for Alg {
                 })
             }
             ["keyedhash", name_alg_str] => {
-                let name_alg = tpm_alg_id_from_str(name_alg_str).map_err(CliError::Usage)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::KeyedHash,
@@ -92,7 +92,7 @@ impl FromStr for Alg {
                     params: AlgInfo::KeyedHash,
                 })
             }
-            _ => Err(CliError::Usage(format!("Invalid algorithm format: '{s}'"))),
+            _ => Err(format!("Invalid algorithm format: '{s}'")),
         }
     }
 }
@@ -162,7 +162,16 @@ pub(crate) fn tpm_ecc_curve_from_str(s: &str) -> Result<TpmEccCurve, String> {
         "nist-p256" => Ok(TpmEccCurve::NistP256),
         "nist-p384" => Ok(TpmEccCurve::NistP384),
         "nist-p521" => Ok(TpmEccCurve::NistP521),
-        _ => Err(format!("Unsupported ECC curve '{s}'")),
+        "bn-p638" => Ok(TpmEccCurve::BnP638),
+        "sm2-p256" => Ok(TpmEccCurve::Sm2P256),
+        "bp-p256-r1" => Ok(TpmEccCurve::BpP256R1),
+        "bp-p384-r1" => Ok(TpmEccCurve::BpP384R1),
+        "bp-p512-r1" => Ok(TpmEccCurve::BpP512R1),
+        "bn-p256" => Ok(TpmEccCurve::BnP256),
+        "curve-448" => Ok(TpmEccCurve::Curve448),
+        "curve-25519" => Ok(TpmEccCurve::Curve25519),
+        "none" => Ok(TpmEccCurve::None),
+        _ => Err(format!("unknown '{s}'")),
     }
 }
 
@@ -174,6 +183,14 @@ pub(crate) fn tpm_ecc_curve_to_str(curve: TpmEccCurve) -> &'static str {
         TpmEccCurve::NistP256 => "nist-p256",
         TpmEccCurve::NistP384 => "nist-p384",
         TpmEccCurve::NistP521 => "nist-p521",
+        TpmEccCurve::BnP638 => "bn-p638",
+        TpmEccCurve::Sm2P256 => "sm2-p256",
+        TpmEccCurve::BpP256R1 => "bp-p256-r1",
+        TpmEccCurve::BpP384R1 => "bn-p384-r1",
+        TpmEccCurve::BpP512R1 => "bn-p512-r1",
+        TpmEccCurve::BnP256 => "bn-p256",
+        TpmEccCurve::Curve448 => "curve-448",
+        TpmEccCurve::Curve25519 => "curve-25519",
         TpmEccCurve::None => "none",
     }
 }
@@ -250,7 +267,7 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the PEM bytes cannot be parsed.
     pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, CliError> {
-        let pem = pem::parse(pem_bytes)?;
+        let pem = pem::parse(pem_bytes).map_err(ParseError::from)?;
         if pem.tag() != "TSS2 PRIVATE KEY" {
             return Err(ParseError::Custom("invalid PEM tag".to_string()).into());
         }
@@ -263,7 +280,7 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the DER bytes cannot be parsed into a valid `TpmKeyAsn1` data.
     pub fn from_der(der_bytes: &[u8]) -> Result<Self, CliError> {
-        Ok(Decode::from_der(der_bytes)?)
+        Ok(Decode::from_der(der_bytes).map_err(ParseError::from)?)
     }
 }
 
@@ -273,23 +290,23 @@ impl TpmKey {
 ///
 /// Returns `CliError` on parsing failure.
 pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliError> {
-    let pem_str = std::str::from_utf8(pem_bytes)?;
-    let pem_block = pem::parse(pem_str)?;
+    let pem_str = std::str::from_utf8(pem_bytes).map_err(ParseError::from)?;
+    let pem_block = pem::parse(pem_str).map_err(ParseError::from)?;
 
     if pem_block.tag() != "PRIVATE KEY" {
         return Err(ParseError::Custom(format!("invalid PEM tag: {}", pem_block.tag())).into());
     }
 
     let contents = pem_block.contents();
-    let private_key_info = PrivateKeyInfo::from_der(contents)?;
+    let private_key_info = PrivateKeyInfo::from_der(contents).map_err(ParseError::from)?;
     let oid = private_key_info.algorithm.oid;
 
     let key = match oid {
         oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
-            PrivateKey::Rsa(RsaPrivateKey::from_pkcs8_der(contents)?)
+            PrivateKey::Rsa(RsaPrivateKey::from_pkcs8_der(contents).map_err(ParseError::from)?)
         }
         oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
-            PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents)?)
+            PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents).map_err(ParseError::from)?)
         }
         _ => {
             return Err(

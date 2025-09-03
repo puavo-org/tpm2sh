@@ -1,0 +1,13 @@
+Seals a keyedhash object
+
+Usage: tpm2sh seal [OPTIONS] --parent <URI> --data <URI>
+
+Options:
+  -d, --device <DEVICE>             TPM device path [default: /dev/tpmrm0]
+  -P, --parent <URI>                Parent object URI (e.g., 'tpm://0x80000001', 'file:///context.bin')
+      --data <URI>                  URI of the secret to seal (e.g., 'data://utf8,mysecret')
+      --log-format <LOG_FORMAT>     Logging format [default: plain] [possible values: plain, pretty]
+      --object-password <PASSWORD>  Authorization for the new sealed object
+  -p, --password <PASSWORD>         Default authorization password for objects and sessions
+  -S, --session <URI>               Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                        Print help

@@ -1,0 +1,11 @@
+Unseals a keyedhash object
+
+Usage: tpm2sh unseal [OPTIONS] --handle <HANDLE>
+
+Options:
+  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
+      --handle <HANDLE>          URI of the loaded sealed object to unseal (e.g., 'tpm://0x80000000')
+      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
+  -p, --password <PASSWORD>      Default authorization password for objects and sessions
+  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                     Print help

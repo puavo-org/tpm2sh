@@ -1,0 +1,3 @@
+Usage: tpm2sh import --parent <URI> --key <KEY>
+
+For more information, try '--help'.

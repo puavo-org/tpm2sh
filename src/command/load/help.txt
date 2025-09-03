@@ -1,0 +1,13 @@
+Loads a TPM key
+
+Usage: tpm2sh load [OPTIONS] --parent <URI> --public <URI> --private <URI>
+
+Options:
+  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
+  -P, --parent <URI>             Parent object URI (e.g., 'tpm://0x80000001', 'file:///context.bin')
+      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
+      --public <URI>             URI of the public part of the key
+  -p, --password <PASSWORD>      Default authorization password for objects and sessions
+      --private <URI>            URI of the private part of the key
+  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                     Print help

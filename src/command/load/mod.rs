@@ -3,18 +3,48 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, Load},
+    cli::{handle_help, required, DeviceCommand, Subcommand},
     session::session_from_args,
+    uri::Uri,
     CliError, Context, TpmDevice,
 };
-
-use std::io::Write;
-
+use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
     data::{Tpm2bPrivate, Tpm2bPublic},
     message::TpmLoadCommand,
     TpmParse,
 };
+
+#[derive(Debug, Default)]
+pub struct Load {
+    pub parent: Uri,
+    pub public: Uri,
+    pub private: Uri,
+}
+
+impl Subcommand for Load {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut parent = None;
+        let mut public = None;
+        let mut private = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("parent") | Arg::Short('P') => parent = Some(parser.value()?.parse()?),
+                Arg::Long("public") => public = Some(parser.value()?.parse()?),
+                Arg::Long("private") => private = Some(parser.value()?.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Load {
+            parent: required(parent, "--parent")?,
+            public: required(public, "--public")?,
+            private: required(private, "--private")?,
+        })
+    }
+}
 
 impl DeviceCommand for Load {
     /// Runs `load`.
@@ -22,12 +52,8 @@ impl DeviceCommand for Load {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
-        let (parent_handle, parent_needs_flush) = device.context_load(&self.parent.parent)?;
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+        let (parent_handle, parent_needs_flush) = device.context_load(&self.parent)?;
         if parent_needs_flush {
             context.handles.push((parent_handle, true));
         }

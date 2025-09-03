@@ -37,7 +37,7 @@ pub(crate) fn pcr_selection_to_list(
 
         let mut pcr_select_bytes = vec![0u8; pcr_select_size];
         for index_str in indices_str.split(',') {
-            let pcr_index: usize = index_str.parse()?;
+            let pcr_index: usize = index_str.parse().map_err(ParseError::from)?;
 
             if pcr_index >= pcr_count {
                 return Err(CliError::PcrSelection(format!(
@@ -117,8 +117,8 @@ impl Uri {
             }
             PolicyExpr::Data { encoding, value } => match encoding.as_str() {
                 "utf8" => Ok(value.as_bytes().to_vec()),
-                "hex" => Ok(hex::decode(value)?),
-                "base64" => Ok(base64_engine.decode(value)?),
+                "hex" => Ok(hex::decode(value).map_err(ParseError::from)?),
+                "base64" => Ok(base64_engine.decode(value).map_err(ParseError::from)?),
                 _ => Err(ParseError::Custom(format!(
                     "Unsupported data URI encoding: '{encoding}'"
                 ))

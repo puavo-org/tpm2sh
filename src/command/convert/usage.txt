@@ -1,0 +1,3 @@
+Usage: tpm2sh convert <INPUT>
+
+For more information, try '--help'.

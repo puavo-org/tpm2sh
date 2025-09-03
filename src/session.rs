@@ -90,14 +90,14 @@ fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, 
 ///
 /// # Errors
 ///
-/// Returns a `CliError::Usage` if authorization is not valid.
+/// Returns a `CliError::Execution` if authorization is not valid.
 pub fn session_from_args<C: TpmHeader>(
     command: &C,
     handles: &[u32],
     cli: &Cli,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
     match (&cli.session, &cli.password) {
-        (Some(_), Some(_)) => Err(CliError::Usage(
+        (Some(_), Some(_)) => Err(CliError::Execution(
             "'--session' and '--password' are mutually exclusive".to_string(),
         )),
         (Some(uri), None) => {
@@ -105,12 +105,13 @@ pub fn session_from_args<C: TpmHeader>(
                 PolicyExpr::Session { .. } => AuthSession::from_ast(uri.ast())?,
                 PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
                     let session_bytes = uri.to_bytes()?;
-                    let session_str = std::str::from_utf8(&session_bytes)?;
+                    let session_str =
+                        std::str::from_utf8(&session_bytes).map_err(ParseError::from)?;
                     let ast = crate::parser::parse_policy(session_str)?;
                     AuthSession::from_ast(&ast)?
                 }
                 _ => {
-                    return Err(CliError::Usage(
+                    return Err(CliError::Execution(
                         "the '--session' argument requires a 'file://', 'data://', or 'session://' URI"
                             .to_string(),
                     ));
@@ -119,7 +120,7 @@ pub fn session_from_args<C: TpmHeader>(
 
             let params = build_to_vec(command)?;
             let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
-                CliError::Usage(format!("'{}' is unknown algorithm", session.auth_hash))
+                CliError::Execution(format!("'{}' is unknown algorithm", session.auth_hash))
             })?;
             let mut nonce_bytes = vec![0; nonce_size];
             rand::thread_rng().fill_bytes(&mut nonce_bytes);

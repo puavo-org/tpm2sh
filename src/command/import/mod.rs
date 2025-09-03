@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, Import},
+    cli::{handle_help, required, DeviceCommand, Subcommand},
     crypto::{
         crypto_ecdh_p256, crypto_ecdh_p384, crypto_ecdh_p521, crypto_hmac, crypto_kdfa,
         crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
@@ -19,12 +19,13 @@ use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
+use lexopt::{Arg, Parser, ValueExt};
 use num_traits::FromPrimitive;
 use rand::{thread_rng, RngCore};
 use rsa::{Oaep, RsaPublicKey};
 use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
-use std::io::Write;
+
 use tpm2_protocol::{
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmEccCurve,
@@ -34,6 +35,33 @@ use tpm2_protocol::{
     message::TpmImportCommand,
     TpmBuild, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
+
+#[derive(Debug, Default)]
+pub struct Import {
+    pub parent: Uri,
+    pub key: Uri,
+}
+
+impl Subcommand for Import {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut parent = None;
+        let mut key = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("parent") | Arg::Short('P') => parent = Some(parser.value()?.parse()?),
+                Arg::Long("key") => key = Some(parser.value()?.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Import {
+            parent: required(parent, "--parent")?,
+            key: required(key, "--key")?,
+        })
+    }
+}
 
 /// Encrypts the import seed using the parent's RSA public key.
 ///
@@ -258,12 +286,8 @@ impl DeviceCommand for Import {
     /// # Errors
     ///
     /// Returns a `CliError`.
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
-        let (parent_handle, needs_flush) = device.context_load(&self.parent.parent)?;
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+        let (parent_handle, needs_flush) = device.context_load(&self.parent)?;
         if needs_flush {
             context.handles.push((parent_handle, true));
         }

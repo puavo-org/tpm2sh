@@ -43,13 +43,13 @@ aes = "0.8"
 base64 = "0.22"
 cfb-mode = "0.8"
 cipher = "0.4"
-clap = { version = "4.5", features = ["derive", "env"] }
 const-oid = { version = "0.9", features = ["db"] }
 ctrlc = "3.4"
 directories = "6.0"
 env_logger = "0.11"
 hex = "0.4"
 hmac = "0.12"
+lexopt = "0.3"
 log = "0.4"
 nom = "7.1"
 num-traits = "0.2"
@@ -58,14 +58,12 @@ p384 = { version = "0.13", features = ["ecdh"] }
 p521 = { version = "0.13", features = ["ecdh"] }
 pem = "3.0"
 pkcs8 = { version = "0.10", features = ["pem", "alloc"] }
-polling = "3.10"
 rand = "0.8"
 rsa = { version = "0.9", features = ["sha1", "sha2"] }
 sha1 = "0.10"
 sha2 = "0.10"
 thiserror = "2.0"
 tpm2-protocol = "0.10"
-url = "2.5"
 
 [dev-dependencies]
 rstest = "0.26"

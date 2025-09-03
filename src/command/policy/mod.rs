@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{self, Cli, DeviceCommand, Policy, SessionType},
+    cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
     error::ParseError,
     parser::{parse_policy, PolicyExpr},
     pcr::{pcr_composite_digest, pcr_get_count},
@@ -10,7 +10,8 @@ use crate::{
     uri::pcr_selection_to_list,
     CliError, Context, TpmDevice,
 };
-use std::io::Write;
+use lexopt::{Arg, Parser, ValueExt};
+
 use tpm2_protocol::{
     data::{
         Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest,
@@ -22,6 +23,29 @@ use tpm2_protocol::{
     },
     TpmSession,
 };
+
+#[derive(Debug, Default)]
+pub struct Policy {
+    pub expression: String,
+}
+
+impl Subcommand for Policy {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut expression = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Value(val) if expression.is_none() => expression = Some(val.string()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(Policy {
+            expression: required(expression, "<EXPRESSION>")?,
+        })
+    }
+}
 
 struct PolicyExecutor<'a> {
     pcr_count: usize,
@@ -38,7 +62,7 @@ impl PolicyExecutor<'_> {
         _count: Option<&u32>,
     ) -> Result<(), CliError> {
         let pcr_digest_bytes = if let Some(digest_hex) = digest {
-            hex::decode(digest_hex)?
+            hex::decode(digest_hex).map_err(ParseError::from)?
         } else {
             let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
             let read_resp = self.device.pcr_read(&pcr_selection_in)?;
@@ -201,11 +225,7 @@ impl DeviceCommand for Policy {
     /// # Errors
     ///
     /// Returns a `CliError` on failure.
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
         let session_handle =

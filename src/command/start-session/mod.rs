@@ -3,12 +3,13 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, StartSession},
+    cli::{handle_help, DeviceCommand, SessionType, Subcommand},
     session::AuthSession,
     CliError, Context, TpmDevice,
 };
+use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
-use std::io::Write;
+
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmaSession,
@@ -18,17 +19,36 @@ use tpm2_protocol::{
     tpm_hash_size,
 };
 
+#[derive(Debug, Default)]
+pub struct StartSession {
+    pub session_type: SessionType,
+}
+
+impl Subcommand for StartSession {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut session_type = SessionType::default();
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("session-type") | Arg::Short('s') => {
+                    session_type = parser.value()?.parse()?;
+                }
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(StartSession { session_type })
+    }
+}
+
 impl DeviceCommand for StartSession {
     /// Runs `start-session`.
     ///
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;

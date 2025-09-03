@@ -1,0 +1,3 @@
+Usage: tpm2sh print-error <RC>
+
+For more information, try '--help'.

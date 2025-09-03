@@ -1,0 +1,3 @@
+Usage: tpm2sh policy <EXPRESSION>
+
+For more information, try '--help'.

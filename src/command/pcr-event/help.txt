@@ -1,0 +1,14 @@
+Extends a PCR with an event
+
+Usage: tpm2sh pcr-event [OPTIONS] <PCR> <DATA>
+
+Arguments:
+  <PCR>   PCR to extend (e.g., 'pcr://sha256:7')
+  <DATA>  URI of the data (e.g., 'data://hex,deadbeef')
+
+Options:
+  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
+      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
+  -p, --password <PASSWORD>      Default authorization password for objects and sessions
+  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                     Print help

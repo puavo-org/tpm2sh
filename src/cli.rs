@@ -2,17 +2,37 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device::TpmDevice, error::CliError, key::Alg, uri::Uri, Command, Context};
-use clap::{
-    builder::styling::{AnsiColor, Color, Style, Styles},
-    Args, Parser, Subcommand, ValueEnum,
+use crate::{
+    command::{
+        algorithms::Algorithms, convert::Convert, create_primary::CreatePrimary, delete::Delete,
+        import::Import, load::Load, objects::Objects, pcr_event::PcrEvent, pcr_read::PcrRead,
+        policy::Policy, print_error::PrintError, reset_lock::ResetLock, save::Save, seal::Seal,
+        start_session::StartSession, unseal::Unseal,
+    },
+    device::TpmDevice,
+    error::CliError,
+    uri::Uri,
+    Command, Context, ParseResult,
 };
+use lexopt::{Arg, Parser, ValueExt};
 use std::{
-    fmt,
-    io::Write,
+    str::FromStr,
     sync::{Arc, Mutex},
 };
-use tpm2_protocol::data::{TpmRc, TpmRh, TpmSe};
+use tpm2_protocol::data::{TpmRh, TpmSe};
+
+/// A trait for CLI subcommands.
+pub trait Subcommand: Sized {
+    const USAGE: &'static str;
+    const HELP: &'static str;
+
+    /// Parse subcommand.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `lexopt::Error` if parsing fails.
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error>;
+}
 
 /// Subcommand not requiring TPM device access.
 pub trait LocalCommand {
@@ -21,7 +41,7 @@ pub trait LocalCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(&self, context: &mut Context<W>) -> Result<(), CliError>;
+    fn run(&self, context: &mut Context) -> Result<(), CliError>;
 }
 
 /// Subcommand requiring TPM device access.
@@ -31,92 +51,38 @@ pub trait DeviceCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError>;
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError>;
 }
 
-const STYLES: Styles = Styles::styled()
-    .header(Style::new().bold())
-    .usage(Style::new().bold())
-    .literal(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
-    .placeholder(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow))));
-
-pub(crate) const USAGE_TEMPLATE: &str = "
-{about-with-newline}
-{usage-heading} {usage}
-
-{options-heading}
-{options}
-";
-
-const HELP_TEMPLATE: &str = "
-{about-with-newline}
-{usage-heading} {usage}
-
-{subcommands-heading}
-{subcommands}
-
-{options-heading}
-{options}
-";
-
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LogFormat {
     #[default]
     Plain,
     Pretty,
 }
 
-impl fmt::Display for LogFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Plain => write!(f, "Plain"),
-            Self::Pretty => write!(f, "Pretty"),
+impl FromStr for LogFormat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "plain" => Ok(Self::Plain),
+            "pretty" => Ok(Self::Pretty),
+            _ => Err("invalid log format".to_string()),
         }
     }
 }
 
 /// TPM 2.0 shell
-#[derive(Parser, Debug, Default)]
-#[command(version, about, styles = STYLES, help_template = HELP_TEMPLATE)]
+#[derive(Debug, Default)]
 pub struct Cli {
-    #[arg(
-        short = 'd',
-        long,
-        default_value = "/dev/tpmrm0",
-        global = true,
-        help = "TPM device path"
-    )]
     pub device: String,
-
-    #[arg(long, value_enum, default_value_t = LogFormat::Plain, global = true, help = "Logging format")]
     pub log_format: LogFormat,
-
-    #[arg(
-        short = 'p',
-        long,
-        global = true,
-        help = "Default authorization password for objects and sessions"
-    )]
     pub password: Option<String>,
-
-    #[arg(
-        short = 'S',
-        long,
-        global = true,
-        value_name = "URI",
-        help = "Session object URI (e.g., 'tpm://0x03000000')"
-    )]
     pub session: Option<Uri>,
-
-    #[command(subcommand)]
     pub command: Option<Commands>,
 }
 
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Hierarchy {
     #[default]
     Owner,
@@ -124,12 +90,14 @@ pub enum Hierarchy {
     Endorsement,
 }
 
-impl fmt::Display for Hierarchy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Owner => write!(f, "Owner"),
-            Self::Platform => write!(f, "Platform"),
-            Self::Endorsement => write!(f, "Endorsement"),
+impl FromStr for Hierarchy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "owner" => Ok(Self::Owner),
+            "platform" => Ok(Self::Platform),
+            "endorsement" => Ok(Self::Endorsement),
+            _ => Err("invalid hierarchy".to_string()),
         }
     }
 }
@@ -144,7 +112,7 @@ impl From<Hierarchy> for TpmRh {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SessionType {
     #[default]
     Hmac,
@@ -152,12 +120,14 @@ pub enum SessionType {
     Trial,
 }
 
-impl fmt::Display for SessionType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Hmac => write!(f, "Hmac"),
-            Self::Policy => write!(f, "Policy"),
-            Self::Trial => write!(f, "Trial"),
+impl FromStr for SessionType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "hmac" => Ok(Self::Hmac),
+            "policy" => Ok(Self::Policy),
+            "trial" => Ok(Self::Trial),
+            _ => Err("invalid session type".to_string()),
         }
     }
 }
@@ -172,18 +142,20 @@ impl From<SessionType> for TpmSe {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KeyFormat {
     #[default]
     Pem,
     Der,
 }
 
-impl fmt::Display for KeyFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Pem => write!(f, "Pem"),
-            Self::Der => write!(f, "Der"),
+impl FromStr for KeyFormat {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "pem" => Ok(Self::Pem),
+            "der" => Ok(Self::Der),
+            _ => Err("invalid key format".to_string()),
         }
     }
 }
@@ -194,7 +166,7 @@ macro_rules! subcommand {
         device: [$($device_command:ident),* $(,)?]
         $(,)?
     ) => {
-        #[derive(Subcommand, Debug)]
+        #[derive(Debug)]
         pub enum Commands {
             $($local_command($local_command),)*
             $($device_command($device_command),)*
@@ -208,7 +180,7 @@ macro_rules! subcommand {
                 }
             }
 
-            fn run<W: Write>(&self, device: Option<Arc<Mutex<TpmDevice>>>, context: &mut Context<W>) -> Result<(), CliError> {
+            fn run(&self, device: Option<Arc<Mutex<TpmDevice>>>, context: &mut Context) -> Result<(), CliError> {
                 match self {
                     $(
                         Self::$local_command(args) => {
@@ -253,180 +225,214 @@ subcommand!(
     ],
 );
 
-/// Lists available algorithms
-#[derive(Args, Debug, Default)]
-pub struct Algorithms;
+const HELP_ERROR: &str = "help-error";
 
-/// Converts keys between ASN.1 formats
-#[derive(Args, Debug, Default)]
-pub struct Convert {
-    #[arg(long, value_enum, default_value_t = KeyFormat::Pem, help = "Input format")]
-    pub from: KeyFormat,
-    #[arg(long, value_enum, default_value_t = KeyFormat::Der, help = "Output format")]
-    pub to: KeyFormat,
-    #[arg(help = "URI of the input object (e.g., 'file:///path/to/key.pem')")]
-    pub input: Uri,
+/// Emit `HELP_ERROR` on `-h` or `--help`.
+///
+/// # Errors
+///
+/// Returns a `lexopt::Error` if parsing fails.
+pub fn handle_help<T>(arg: Arg) -> Result<T, lexopt::Error> {
+    if arg == Arg::Short('h') || arg == Arg::Long("help") {
+        return Err(HELP_ERROR.into());
+    }
+    Err(arg.unexpected())
 }
 
-/// Creates a primary key
-#[derive(Args, Debug, Default)]
-pub struct CreatePrimary {
-    #[arg(short = 'H', long, value_enum, default_value_t = Hierarchy::Owner, help = "Hierarchy for the new key")]
-    pub hierarchy: Hierarchy,
-    #[arg(long, help = "Public key algorithm. Run 'algorithms' for options")]
-    pub algorithm: Alg,
-    #[arg(
-        long,
-        value_name = "HANDLEURI",
-        help = "Store object to non-volatile memory (e.g., 'tpm://0x81000001')"
-    )]
-    pub handle: Option<Uri>,
+/// Helper for enforcing a required command argument.
+///
+/// # Errors
+///
+/// Returns a `lexopt::Error` if parsing fails.
+pub fn required<T>(arg: Option<T>, name: &'static str) -> Result<T, lexopt::Error> {
+    arg.ok_or_else(|| format!("missing required argument {name}").into())
 }
 
-/// Deletes a transient or persistent object
-#[derive(Args, Debug, Default)]
-pub struct Delete {
-    #[arg(
-        value_name = "HANDLE",
-        help = "URI of the object to delete (e.g. 'tpm://0x81000001')"
-    )]
-    pub handle: Uri,
+/// Helper to dispatch parsing to the correct `Subcommand` impl.
+///
+/// # Errors
+///
+/// Returns a `Result<ParseResult, lexopt::Error` if dispatching fails.
+#[allow(clippy::result_large_err)]
+fn dispatch<S, W>(
+    parser: &mut Parser,
+    wrapper: W,
+) -> Result<Commands, Result<ParseResult, lexopt::Error>>
+where
+    S: Subcommand,
+    W: Fn(S) -> Commands,
+{
+    match S::parse(parser) {
+        Ok(args) => Ok(wrapper(args)),
+        Err(e) if e.to_string() == HELP_ERROR => Err(Ok(ParseResult::Help(S::HELP))),
+        Err(e) => Err(Ok(ParseResult::ErrorAndUsage {
+            error: e.to_string(),
+            usage: S::USAGE,
+        })),
+    }
 }
 
-/// Arguments for commands requiring a parent object.
-#[derive(Args, Debug, Default)]
-pub struct ParentArgs {
-    #[arg(
-        short = 'P',
-        long,
-        required = true,
-        value_name = "URI",
-        help = "Parent object URI (e.g., 'tpm://0x80000001', 'file:///context.bin')"
-    )]
-    pub parent: Uri,
+struct SubcommandObject {
+    name: &'static str,
+    help: &'static str,
+    dispatch: fn(&mut Parser) -> Result<Commands, Result<ParseResult, lexopt::Error>>,
 }
 
-/// Imports an external key
-#[derive(Args, Debug, Default)]
-pub struct Import {
-    #[command(flatten)]
-    pub parent: ParentArgs,
-    #[arg(
-        long,
-        value_name = "KEY",
-        help = "URI of the external private key to import (e.g., 'file:///path/to/key.pem')"
-    )]
-    pub key: Uri,
-}
+static SUBCOMMANDS: &[SubcommandObject] = &[
+    SubcommandObject {
+        name: "algorithms",
+        help: Algorithms::HELP,
+        dispatch: |p| dispatch(p, Commands::Algorithms),
+    },
+    SubcommandObject {
+        name: "convert",
+        help: Convert::HELP,
+        dispatch: |p| dispatch(p, Commands::Convert),
+    },
+    SubcommandObject {
+        name: "create-primary",
+        help: CreatePrimary::HELP,
+        dispatch: |p| dispatch(p, Commands::CreatePrimary),
+    },
+    SubcommandObject {
+        name: "delete",
+        help: Delete::HELP,
+        dispatch: |p| dispatch(p, Commands::Delete),
+    },
+    SubcommandObject {
+        name: "import",
+        help: Import::HELP,
+        dispatch: |p| dispatch(p, Commands::Import),
+    },
+    SubcommandObject {
+        name: "load",
+        help: Load::HELP,
+        dispatch: |p| dispatch(p, Commands::Load),
+    },
+    SubcommandObject {
+        name: "objects",
+        help: Objects::HELP,
+        dispatch: |p| dispatch(p, Commands::Objects),
+    },
+    SubcommandObject {
+        name: "pcr-event",
+        help: PcrEvent::HELP,
+        dispatch: |p| dispatch(p, Commands::PcrEvent),
+    },
+    SubcommandObject {
+        name: "pcr-read",
+        help: PcrRead::HELP,
+        dispatch: |p| dispatch(p, Commands::PcrRead),
+    },
+    SubcommandObject {
+        name: "policy",
+        help: Policy::HELP,
+        dispatch: |p| dispatch(p, Commands::Policy),
+    },
+    SubcommandObject {
+        name: "print-error",
+        help: PrintError::HELP,
+        dispatch: |p| dispatch(p, Commands::PrintError),
+    },
+    SubcommandObject {
+        name: "reset-lock",
+        help: ResetLock::HELP,
+        dispatch: |p| dispatch(p, Commands::ResetLock),
+    },
+    SubcommandObject {
+        name: "save",
+        help: Save::HELP,
+        dispatch: |p| dispatch(p, Commands::Save),
+    },
+    SubcommandObject {
+        name: "seal",
+        help: Seal::HELP,
+        dispatch: |p| dispatch(p, Commands::Seal),
+    },
+    SubcommandObject {
+        name: "start-session",
+        help: StartSession::HELP,
+        dispatch: |p| dispatch(p, Commands::StartSession),
+    },
+    SubcommandObject {
+        name: "unseal",
+        help: Unseal::HELP,
+        dispatch: |p| dispatch(p, Commands::Unseal),
+    },
+];
 
-/// Loads a TPM key
-#[derive(Args, Debug, Default)]
-pub struct Load {
-    #[command(flatten)]
-    pub parent: ParentArgs,
-    #[arg(long, value_name = "URI", help = "URI of the public part of the key")]
-    pub public: Uri,
-    #[arg(long, value_name = "URI", help = "URI of the private part of the key")]
-    pub private: Uri,
-}
+/// The main entry point for command-line argument parsing.
+#[allow(clippy::too_many_lines, clippy::missing_errors_doc)]
+pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
+    let mut cli = Cli {
+        device: "/dev/tpmrm0".to_string(),
+        ..Default::default()
+    };
+    let mut parser = lexopt::Parser::from_env();
+    let mut cmd_name_opt = None;
 
-/// Lists objects in volatile and non-volatile memory
-#[derive(Args, Debug, Default)]
-pub struct Objects;
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Arg::Short('h') | Arg::Long("help") => {
+                let help_text = if let Some(Arg::Value(val)) = parser.next()? {
+                    let cmd_name = val.to_string_lossy();
+                    SUBCOMMANDS
+                        .iter()
+                        .find(|cmd| cmd.name == cmd_name.as_ref())
+                        .map(|cmd| cmd.help)
+                        .ok_or_else(|| {
+                            lexopt::Error::from(format!("unknown command '{cmd_name}'"))
+                        })?
+                } else {
+                    include_str!("help.txt")
+                };
+                return Ok(ParseResult::Help(help_text));
+            }
+            Arg::Short('V') | Arg::Long("version") => {
+                println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            Arg::Short('d') | Arg::Long("device") => {
+                cli.device = parser.value()?.string()?;
+            }
+            Arg::Long("log-format") => {
+                cli.log_format = parser.value()?.parse()?;
+            }
+            Arg::Short('p') | Arg::Long("password") => {
+                cli.password = Some(parser.value()?.string()?);
+            }
+            Arg::Short('S') | Arg::Long("session") => {
+                cli.session = Some(parser.value()?.parse()?);
+            }
+            Arg::Value(cmd) => {
+                cmd_name_opt = Some(cmd.string()?);
+                break;
+            }
+            _ => {
+                return Err(arg.unexpected());
+            }
+        }
+    }
 
-/// Extends a PCR with an event
-#[derive(Args, Debug, Default)]
-pub struct PcrEvent {
-    #[arg(value_name = "PCR", help = "PCR to extend (e.g., 'pcr://sha256:7')")]
-    pub pcr: Uri,
-    #[arg(
-        value_name = "DATA",
-        help = "URI of the data (e.g., 'data://hex,deadbeef')"
-    )]
-    pub data: Uri,
-}
+    let Some(cmd_name) = cmd_name_opt else {
+        return Ok(ParseResult::Usage(include_str!("usage.txt")));
+    };
 
-/// Reads PCRs
-#[derive(Args, Debug, Default)]
-pub struct PcrRead {
-    #[arg(
-        value_name = "PCR",
-        help = "PCR selection (e.g. 'pcr://sha256:0,1,2+sha1:0')"
-    )]
-    pub pcr: Uri,
-}
+    if cmd_name == "help" {
+        return Ok(ParseResult::Help(include_str!("help.txt")));
+    }
 
-/// Builds a policy using a policy expression
-#[derive(Args, Debug, Default)]
-pub struct Policy {
-    #[arg(
-        value_name = "EXPRESSION",
-        help = "Policy expression (e.g., 'pcr(sha256:0,...)'"
-    )]
-    pub expression: String,
-}
+    let Some(subcommand) = SUBCOMMANDS.iter().find(|c| c.name == cmd_name) else {
+        return Err(format!("unknown command '{cmd_name}'").into());
+    };
 
-/// Encodes and print a TPM error code
-#[derive(Args, Debug)]
-pub struct PrintError {
-    #[arg(value_parser = crate::util::parse_tpm_rc_str, help = "TPM error code (e.g., '0x100')")]
-    pub rc: TpmRc,
-}
+    let result = (subcommand.dispatch)(&mut parser);
 
-/// Resets the dictionary attack lockout timer
-#[derive(Args, Debug, Default)]
-pub struct ResetLock;
-
-/// Saves to non-volatile memory
-#[derive(Args, Debug, Default)]
-pub struct Save {
-    #[arg(
-        long,
-        value_name = "HANDLE",
-        help = "URI for the persistent object to be created (e.g., 'tpm://0x81000001')"
-    )]
-    pub to_uri: Uri,
-    #[arg(
-        long = "in",
-        value_name = "CONTEXT",
-        help = "URI of the transient object context to save (e.g., 'file:///path/to/context.bin')"
-    )]
-    pub in_uri: Uri,
-}
-
-/// Seals a keyedhash object
-#[derive(Args, Debug, Default)]
-pub struct Seal {
-    #[command(flatten)]
-    pub parent: ParentArgs,
-    #[arg(
-        long,
-        value_name = "URI",
-        help = "URI of the secret to seal (e.g., 'data://utf8,mysecret')"
-    )]
-    pub data: Uri,
-    #[arg(
-        long,
-        value_name = "PASSWORD",
-        help = "Authorization for the new sealed object"
-    )]
-    pub object_password: Option<String>,
-}
-
-/// Starts an authorization session
-#[derive(Args, Debug, Default)]
-pub struct StartSession {
-    #[arg(short, long, value_enum, default_value_t = SessionType::Hmac, help = "Session type")]
-    pub session_type: SessionType,
-}
-
-/// Unseals a keyedhash object
-#[derive(Args, Debug, Default)]
-pub struct Unseal {
-    #[arg(
-        long,
-        value_name = "HANDLE",
-        help = "URI of the loaded sealed object to unseal (e.g., 'tpm://0x80000000')"
-    )]
-    pub handle: Uri,
+    match result {
+        Ok(command) => {
+            cli.command = Some(command);
+            Ok(ParseResult::Command(cli))
+        }
+        Err(parse_result) => parse_result,
+    }
 }

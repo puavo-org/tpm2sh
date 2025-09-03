@@ -3,13 +3,14 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{CreatePrimary, DeviceCommand},
+    cli::{handle_help, required, DeviceCommand, Hierarchy, Subcommand},
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
+    uri::Uri,
     Context, TpmDevice,
 };
-use std::io::Write;
+use lexopt::{Arg, Parser, ValueExt};
 
 use tpm2_protocol::{
     data::{
@@ -21,6 +22,37 @@ use tpm2_protocol::{
     message::TpmCreatePrimaryCommand,
     TpmPersistent,
 };
+
+#[derive(Debug, Default)]
+pub struct CreatePrimary {
+    pub hierarchy: Hierarchy,
+    pub algorithm: Alg,
+    pub handle: Option<Uri>,
+}
+
+impl Subcommand for CreatePrimary {
+    const USAGE: &'static str = include_str!("usage.txt");
+    const HELP: &'static str = include_str!("help.txt");
+
+    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut hierarchy = Hierarchy::default();
+        let mut algorithm = None;
+        let mut handle = None;
+        while let Some(arg) = parser.next()? {
+            match arg {
+                Arg::Long("hierarchy") | Arg::Short('H') => hierarchy = parser.value()?.parse()?,
+                Arg::Long("algorithm") => algorithm = Some(parser.value()?.parse()?),
+                Arg::Long("handle") => handle = Some(parser.value()?.parse()?),
+                _ => return handle_help(arg),
+            }
+        }
+        Ok(CreatePrimary {
+            hierarchy,
+            algorithm: required(algorithm, "--algorithm")?,
+            handle,
+        })
+    }
+}
 
 fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
     let mut object_attributes = TpmaObject::USER_WITH_AUTH
@@ -85,11 +117,7 @@ impl DeviceCommand for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run<W: Write>(
-        &self,
-        device: &mut TpmDevice,
-        context: &mut Context<W>,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -112,14 +140,15 @@ impl DeviceCommand for CreatePrimary {
         let resp = resp
             .CreatePrimary()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        context.handles.push((resp.object_handle, true));
+
+        let object_handle = resp.object_handle;
         if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
-            device.evict_control(context.cli, context.handles[0].0.into(), persistent_handle)?;
-            context.handles.clear();
+            device.evict_control(context.cli, object_handle.into(), persistent_handle)?;
             writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
         } else {
-            device.context_save(context.handles[0].0, &mut context.writer)?;
+            context.handles.push((object_handle, true));
+            device.context_save(object_handle, &mut context.writer)?;
         }
         Ok(())
     }
