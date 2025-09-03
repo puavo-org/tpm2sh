@@ -5,7 +5,7 @@
 use cli::{
     cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects, ParentArgs},
     device::TpmDevice,
-    Command,
+    Command, Context,
 };
 use std::{
     sync::{Arc, Mutex},
@@ -42,14 +42,11 @@ fn test_context() -> TestFixture {
 
 #[rstest]
 fn test_subcommand_algorithms(test_context: TestFixture) {
-    let algorithms_cmd = Commands::Algorithms(Algorithms { filter: None });
+    let algorithms_cmd = Commands::Algorithms(Algorithms);
     let mut out_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut out_buf);
     algorithms_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut out_buf,
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let output = String::from_utf8(out_buf).unwrap();
 
@@ -73,26 +70,6 @@ fn test_subcommand_algorithms(test_context: TestFixture) {
     expected.sort();
 
     assert_eq!(results, expected);
-
-    let filtered_cmd = Commands::Algorithms(Algorithms {
-        filter: Some("rsa:2048".to_string()),
-    });
-    let mut out_buf = Vec::new();
-    filtered_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut out_buf,
-        )
-        .unwrap();
-    let filtered_output = String::from_utf8(out_buf).unwrap();
-    let mut filtered_results: Vec<String> = filtered_output.lines().map(String::from).collect();
-    filtered_results.sort();
-
-    let mut expected_filtered = vec!["rsa:2048:sha256", "rsa:2048:sha384", "rsa:2048:sha512"];
-    expected_filtered.sort();
-
-    assert_eq!(filtered_results, expected_filtered);
 }
 
 #[rstest]
@@ -102,29 +79,20 @@ fn test_subcommand_objects(test_context: TestFixture) {
         ..Default::default()
     });
 
+    let mut dummy_writer = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut dummy_writer);
     create_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut Vec::new(),
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     create_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut Vec::new(),
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
 
     let objects_cmd = Commands::Objects(Objects);
     let mut out_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut out_buf);
     objects_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut out_buf,
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let output = String::from_utf8(out_buf).unwrap();
 
@@ -150,12 +118,9 @@ fn test_subcommand_import(test_context: TestFixture) {
     });
 
     let mut parent_context_uri_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut parent_context_uri_buf);
     create_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut parent_context_uri_buf,
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let returned_parent_uri = String::from_utf8(parent_context_uri_buf)
         .unwrap()
@@ -178,12 +143,9 @@ fn test_subcommand_import(test_context: TestFixture) {
             .unwrap(),
     });
     let mut import_output_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut import_output_buf);
     import_cmd
-        .run(
-            &test_context.cli,
-            Some(test_context.device.clone()),
-            &mut import_output_buf,
-        )
+        .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let output_text = String::from_utf8(import_output_buf).unwrap();
     let lines: Vec<&str> = output_text.trim().lines().collect();

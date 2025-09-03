@@ -428,6 +428,9 @@ impl TpmDevice {
                         .map(|c| (c.bits() & TpmaCc::COMMAND_INDEX.bits()) + 1),
                     TpmuCapabilities::Pcrs(_) => None,
                     TpmuCapabilities::EccCurves(curves) => curves.last().map(|&c| c as u32 + 1),
+                    TpmuCapabilities::TpmProperties(props) => {
+                        props.last().map(|p| p.property as u32 + 1)
+                    }
                 }
             } else {
                 None

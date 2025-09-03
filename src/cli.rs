@@ -255,10 +255,7 @@ subcommand!(
 
 /// Lists available algorithms
 #[derive(Args, Debug, Default)]
-pub struct Algorithms {
-    #[arg(help = "A regex to filter the algorithm names")]
-    pub filter: Option<String>,
-}
+pub struct Algorithms;
 
 /// Converts keys between ASN.1 formats
 #[derive(Args, Debug, Default)]

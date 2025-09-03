@@ -7,13 +7,13 @@ use std::vec::Vec;
 use tpm2_protocol::{
     self,
     data::{
-        self, Tpm2bPublic, Tpm2bSensitiveCreate, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh,
-        TpmSe, TpmSt, TpmaAlgorithm, TpmaCc, TpmaLocality, TpmaNv, TpmaObject, TpmaSession,
+        self, Tpm2bPublic, Tpm2bSensitiveCreate, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmPt,
+        TpmRh, TpmSe, TpmSt, TpmaAlgorithm, TpmaCc, TpmaLocality, TpmaNv, TpmaObject, TpmaSession,
         TpmiYesNo, TpmsAlgProperty, TpmsAuthCommand, TpmsCapabilityData, TpmsContext,
         TpmsCreationData, TpmsEccPoint, TpmsKeyedhashParms, TpmsPcrSelection, TpmsSensitiveCreate,
-        TpmsSymcipherParms, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtPublicParms, TpmtScheme,
-        TpmtSymDefObject, TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa, TpmuPublicId,
-        TpmuPublicParms, TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
+        TpmsSymcipherParms, TpmsTaggedProperty, TpmtHa, TpmtKdfScheme, TpmtPublic, TpmtPublicParms,
+        TpmtScheme, TpmtSymDefObject, TpmtTkCreation, TpmtTkHashcheck, TpmuCapabilities, TpmuHa,
+        TpmuPublicId, TpmuPublicParms, TpmuSensitiveComposite, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{
         TpmCommandBody, TpmContextLoadCommand, TpmContextLoadResponse, TpmContextSaveCommand,
@@ -86,6 +86,7 @@ tpm_print_simple!(u64, "{:#018x}");
 tpm_print_simple!(i32, "{}");
 tpm_print_simple!(TpmAlgId, "{}");
 tpm_print_simple!(TpmCc, "{}");
+tpm_print_simple!(TpmPt, "{}");
 tpm_print_simple!(TpmRh, "{}");
 tpm_print_simple!(TpmCap, "{}");
 tpm_print_simple!(TpmSe, "{:?}");
@@ -122,7 +123,7 @@ impl<const CAPACITY: usize> TpmPrint for TpmBuffer<CAPACITY> {
 
 impl<T, const CAPACITY: usize> TpmPrint for TpmList<T, CAPACITY>
 where
-    T: TpmPrint + Copy + Default,
+    T: TpmPrint + Copy,
 {
     fn print(&self, name: &str, indent: usize) {
         let prefix = " ".repeat(indent * INDENT);
@@ -155,6 +156,7 @@ macro_rules! tpm_print_struct {
 }
 
 tpm_print_struct!(TpmsAlgProperty, alg => "alg", alg_properties => "algProperties");
+tpm_print_struct!(TpmsTaggedProperty, property => "property", value => "value");
 tpm_print_struct!(TpmsPcrSelection, hash => "hash", pcr_select => "pcrSelect");
 tpm_print_struct!(TpmsKeyedhashParms, scheme => "scheme");
 tpm_print_struct!(TpmsSymcipherParms, sym => "sym");
@@ -268,6 +270,7 @@ impl TpmPrint for TpmuCapabilities {
             Self::Commands(commands) => commands.print(name, indent),
             Self::Pcrs(pcrs) => pcrs.print(name, indent),
             Self::EccCurves(curves) => curves.print(name, indent),
+            Self::TpmProperties(props) => props.print(name, indent),
         }
     }
 }

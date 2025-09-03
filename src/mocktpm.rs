@@ -33,7 +33,7 @@ use tpm2_protocol::{
     data::{
         Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
         TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc,
-        TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle, TpmsAlgProperty,
+        TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle, TpmlTaggedTpmProperty, TpmsAlgProperty,
         TpmsAlgorithmDetailEcc, TpmtPublic, TpmtSensitive, TpmtTkCreation, TpmuCapabilities,
         TpmuPublicId, TpmuPublicParms,
     },
@@ -598,6 +598,10 @@ fn mocktpm_get_capability(tpm: &mut MockTpm, cmd: &TpmGetCapabilityCommand) -> M
             list.try_push(TpmEccCurve::NistP384).unwrap();
             list.try_push(TpmEccCurve::NistP521).unwrap();
             TpmuCapabilities::EccCurves(list)
+        }
+        TpmCap::TpmProperties => {
+            let list = TpmlTaggedTpmProperty::new();
+            TpmuCapabilities::TpmProperties(list)
         }
         TpmCap::Pcrs => {
             return Err(TpmRc::from(TpmRcBase::Value));
