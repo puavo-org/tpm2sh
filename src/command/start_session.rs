@@ -3,15 +3,16 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{Cli, DeviceCommand, SessionType, StartSession},
+    cli::{Cli, DeviceCommand, StartSession},
+    session::AuthSession,
     CliError, TpmDevice,
 };
 use rand::{thread_rng, RngCore};
 use std::io::Write;
 use tpm2_protocol::{
     data::{
-        Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmtSymDefObject, TpmuSymKeyBits,
-        TpmuSymMode,
+        Tpm2bAuth, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmaSession,
+        TpmtSymDefObject, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmStartAuthSessionCommand,
     tpm_hash_size,
@@ -51,12 +52,14 @@ impl DeviceCommand for StartSession {
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let handle = start_auth_session_resp.session_handle;
-        if self.session_type == SessionType::Policy {
-            let digest = hex::encode(Vec::<u8>::new());
-            writeln!(writer, "digest://sha256,{digest}")?;
-        }
-        writeln!(writer, "tpm://{handle:#010x}")?;
+        let session = AuthSession {
+            handle: start_auth_session_resp.session_handle,
+            nonce_tpm: start_auth_session_resp.nonce_tpm,
+            attributes: TpmaSession::empty(),
+            hmac_key: Tpm2bAuth::default(),
+            auth_hash,
+        };
+        writeln!(writer, "session://{session}")?;
         Ok(crate::Resources::new(Vec::new()))
     }
 }
