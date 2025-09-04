@@ -157,7 +157,6 @@ impl<'a> Context<'a> {
         device: &mut TpmDevice,
         handle: TpmTransient,
     ) -> Result<(), CliError> {
-        self.existence_invariant(handle)?;
         let cmd = TpmFlushContextCommand {
             flush_handle: handle.into(),
         };
