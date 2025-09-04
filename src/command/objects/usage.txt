@@ -1,0 +1,3 @@
+Usage: tpm2sh objects
+
+For more information, try '--help'.

@@ -1,0 +1,3 @@
+Usage: tpm2sh reset-lock
+
+For more information, try '--help'.

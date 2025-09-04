@@ -1,0 +1,3 @@
+Usage: tpm2sh algorithms
+
+For more information, try '--help'.
