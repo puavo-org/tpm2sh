@@ -4,6 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    key::tpm_alg_id_from_str,
     pcr::{pcr_composite_digest, pcr_get_count},
     uri::Uri,
     CliError, Context, TpmDevice,
@@ -12,6 +13,7 @@ use lexopt::{Arg, Parser, ValueExt};
 
 #[derive(Debug, Default)]
 pub struct PcrRead {
+    pub alg: String,
     pub pcr: Uri,
 }
 
@@ -20,14 +22,17 @@ impl Subcommand for PcrRead {
     const HELP: &'static str = include_str!("help.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut alg = None;
         let mut pcr = None;
         while let Some(arg) = parser.next()? {
             match arg {
+                Arg::Value(val) if alg.is_none() => alg = Some(val.string()?),
                 Arg::Value(val) if pcr.is_none() => pcr = Some(val.parse()?),
                 _ => return handle_help(arg),
             }
         }
         Ok(PcrRead {
+            alg: required(alg, "<ALG>")?,
             pcr: required(pcr, "<PCR>")?,
         })
     }
@@ -43,12 +48,12 @@ impl DeviceCommand for PcrRead {
         let pcr_count = pcr_get_count(device)?;
         let pcr_selection_in = self.pcr.to_pcr_selection(pcr_count)?;
         let pcr_read_resp = device.pcr_read(&pcr_selection_in)?;
-        let composite_digest = pcr_composite_digest(&pcr_read_resp);
-        let selection_str = self.pcr.strip_prefix("pcr://").unwrap_or(&self.pcr);
+        let alg_id = tpm_alg_id_from_str(&self.alg).map_err(CliError::Execution)?;
+        let composite_digest = pcr_composite_digest(&pcr_read_resp, alg_id)?;
         writeln!(
             context.writer,
-            "pcr({}, {})",
-            selection_str,
+            "pcr-digest://{}:{}",
+            self.alg,
             hex::encode(composite_digest)
         )?;
         Ok(())

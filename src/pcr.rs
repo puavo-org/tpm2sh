@@ -4,9 +4,9 @@
 
 use crate::{CliError, TpmDevice};
 
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::{
-    data::{TpmCap, TpmuCapabilities},
+    data::{TpmAlgId, TpmCap, TpmuCapabilities},
     message::TpmPcrReadResponse,
 };
 
@@ -34,15 +34,25 @@ pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, CliError> {
     }
 }
 
-/// Computes a composite digest from a PCR read response.
+/// Computes a composite digest from a PCR read response using a specified algorithm.
 ///
 /// # Errors
 ///
 /// Returns a `CliError` on failure.
-pub(crate) fn pcr_composite_digest(pcr_read_resp: &TpmPcrReadResponse) -> Vec<u8> {
+pub(crate) fn pcr_composite_digest(
+    pcr_read_resp: &TpmPcrReadResponse,
+    alg: TpmAlgId,
+) -> Result<Vec<u8>, CliError> {
     let mut composite = Vec::new();
     for digest in pcr_read_resp.pcr_values.iter() {
         composite.extend_from_slice(digest);
     }
-    Sha256::digest(&composite).to_vec()
+    match alg {
+        TpmAlgId::Sha256 => Ok(Sha256::digest(&composite).to_vec()),
+        TpmAlgId::Sha384 => Ok(Sha384::digest(&composite).to_vec()),
+        TpmAlgId::Sha512 => Ok(Sha512::digest(&composite).to_vec()),
+        _ => Err(CliError::Execution(format!(
+            "unsupported hash algorithm for PCR composite digest: '{alg}'"
+        ))),
+    }
 }

@@ -50,6 +50,7 @@ impl Subcommand for Policy {
 struct PolicyExecutor<'a> {
     pcr_count: usize,
     device: &'a mut TpmDevice,
+    session_hash_alg: TpmAlgId,
 }
 
 impl PolicyExecutor<'_> {
@@ -66,7 +67,7 @@ impl PolicyExecutor<'_> {
         } else {
             let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
             let read_resp = self.device.pcr_read(&pcr_selection_in)?;
-            pcr_composite_digest(&read_resp)
+            pcr_composite_digest(&read_resp, self.session_hash_alg)?
         };
 
         let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;
@@ -123,7 +124,7 @@ impl PolicyExecutor<'_> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
-                start_trial_session(self.device, cli, SessionType::Trial, TpmAlgId::Sha256)?;
+                start_trial_session(self.device, cli, SessionType::Trial, self.session_hash_alg)?;
             self.execute_policy_ast(cli, branch_handle, branch_ast)?;
 
             let digest = get_policy_digest(self.device, cli, branch_handle)?;
@@ -228,9 +229,14 @@ impl DeviceCommand for Policy {
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let ast = parse_policy(&self.expression)?;
         let pcr_count = pcr_get_count(device)?;
+        let session_hash_alg = TpmAlgId::Sha256;
         let session_handle =
-            start_trial_session(device, context.cli, SessionType::Trial, TpmAlgId::Sha256)?;
-        let mut executor = PolicyExecutor { pcr_count, device };
+            start_trial_session(device, context.cli, SessionType::Trial, session_hash_alg)?;
+        let mut executor = PolicyExecutor {
+            pcr_count,
+            device,
+            session_hash_alg,
+        };
         executor.execute_policy_ast(context.cli, session_handle, &ast)?;
         let final_digest = get_policy_digest(executor.device, context.cli, session_handle)?;
         flush_session(executor.device, context.cli, session_handle)?;

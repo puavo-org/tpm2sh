@@ -12,7 +12,7 @@ Commands:
   load            Loads a TPM key
   objects         Lists TPM objects
   pcr-event       Extends a PCR with an event
-  pcr-read        Reads PCRs
+  pcr-read        Reads PCRs and computes a composite digest
   policy          Builds authorization policies
   reset-lock      Resets the dictionary attack lockout timer
   save            Saves to non-volatile memory
