@@ -681,20 +681,15 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
         parent_name_alg,
         &seed,
         KDF_LABEL_INTEGRITY,
-        &parent_name,
+        &[],
         &[],
         integrity_key_bits,
     )?;
 
-    let Some(hash_len) = tpm2_protocol::tpm_hash_size(&parent_name_alg) else {
-        return Err(TpmRc::from(TpmRcBase::Hash));
-    };
-
-    if cmd.duplicate.len() < hash_len {
-        return Err(TpmRc::from(TpmRcBase::Size));
-    }
-
-    let (received_hmac, encrypted_sensitive) = cmd.duplicate.split_at(hash_len);
+    let (hmac_struct, encrypted_sensitive) =
+        tpm2_protocol::data::Tpm2bDigest::parse(&cmd.duplicate)
+            .map_err(TpmErrorKindExt::to_tpm_rc)?;
+    let received_hmac = &hmac_struct;
 
     crypto_hmac_verify(
         parent_name_alg,
@@ -733,7 +728,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
         parent_key.public.name_alg,
         &parent_key.seed_value,
         KDF_LABEL_INTEGRITY,
-        &parent_name,
+        &[],
         &[],
         integrity_key_bits,
     )?;
@@ -746,7 +741,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     let final_mac = crypto_hmac(
         parent_key.public.name_alg,
         &hmac_key_rewrap,
-        &[&encrypted_sensitive_rewrap, &parent_name],
+        &[&encrypted_sensitive_rewrap, &object_name],
     )?;
 
     let mut final_private_blob = Vec::new();

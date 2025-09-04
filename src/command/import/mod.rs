@@ -225,7 +225,7 @@ fn create_import_blob(
         parent_name_alg,
         &seed,
         KDF_LABEL_INTEGRITY,
-        parent_name,
+        &[],
         &[],
         integrity_key_bits,
     )

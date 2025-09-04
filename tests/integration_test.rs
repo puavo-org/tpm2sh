@@ -17,12 +17,14 @@ use std::{
 
 use pkcs8::EncodePrivateKey;
 use rstest::{fixture, rstest};
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 
 struct TestFixture {
     _handle: JoinHandle<()>,
     device: Arc<Mutex<TpmDevice>>,
     cli: Cli,
+    // This field keeps the temporary directory alive for the duration of the test.
+    _temp_dir: TempDir,
 }
 
 #[fixture]
@@ -30,7 +32,8 @@ fn test_context() -> TestFixture {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .format_timestamp_micros()
         .try_init();
-    let (handle, transport) = cli::mocktpm::mocktpm_start(None);
+    let temp_dir = tempdir().unwrap();
+    let (handle, transport) = cli::mocktpm::mocktpm_start(Some(temp_dir.path()));
     let mut cli = Cli::default();
     cli.log_format = LogFormat::Pretty;
 
@@ -40,6 +43,7 @@ fn test_context() -> TestFixture {
         _handle: handle,
         device,
         cli,
+        _temp_dir: temp_dir,
     }
 }
 
@@ -110,7 +114,6 @@ fn test_subcommand_objects(test_context: TestFixture) {
 }
 
 #[rstest]
-#[ignore]
 fn test_subcommand_import(test_context: TestFixture) {
     let parent_context_uri = "tpm://0x81000001".to_string();
 
