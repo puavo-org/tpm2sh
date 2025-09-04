@@ -8,6 +8,7 @@ use cli::{
         algorithms::Algorithms, create_primary::CreatePrimary, import::Import, objects::Objects,
     },
     device::TpmDevice,
+    uri::Uri,
     Command, Context,
 };
 use std::{
@@ -18,6 +19,7 @@ use std::{
 use pkcs8::EncodePrivateKey;
 use rstest::{fixture, rstest};
 use tempfile::{tempdir, TempDir};
+use tpm2_protocol::data::TpmaObject;
 
 struct TestFixture {
     _handle: JoinHandle<()>,
@@ -72,10 +74,38 @@ fn test_subcommand_algorithms(test_context: TestFixture) {
         "ecc:nist-p521:sha256",
         "ecc:nist-p521:sha384",
         "ecc:nist-p521:sha512",
+        "keyedhash:sha256",
+        "keyedhash:sha384",
+        "keyedhash:sha512",
     ];
     expected.sort();
 
     assert_eq!(results, expected);
+}
+
+#[rstest]
+fn test_subcommand_create_primary(test_context: TestFixture) {
+    let create_cmd = Commands::CreatePrimary(CreatePrimary {
+        algorithm: "keyedhash:sha256".parse().unwrap(),
+        ..Default::default()
+    });
+
+    let mut context_uri_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut context_uri_buf);
+    create_cmd
+        .run(Some(test_context.device.clone()), &mut context)
+        .unwrap();
+    let context_uri_str = String::from_utf8(context_uri_buf).unwrap();
+    let context_uri: Uri = context_uri_str.trim().parse().unwrap();
+
+    let mut device = test_context.device.lock().unwrap();
+    let (handle, _needs_flush) = device.context_load(&context_uri).unwrap();
+    let (public, _name) = device.read_public(handle).unwrap();
+
+    assert!(
+        public.object_attributes.contains(TpmaObject::SIGN_ENCRYPT),
+        "KeyedHash primary key must have the SIGN_ENCRYPT attribute set"
+    );
 }
 
 #[rstest]

@@ -92,14 +92,17 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
                 TpmuPublicId::Ecc(TpmsEccPoint::default()),
             )
         }
-        AlgInfo::KeyedHash => (
-            TpmuPublicParms::KeyedHash(TpmsKeyedhashParms {
-                scheme: TpmtScheme {
-                    scheme: TpmAlgId::Null,
-                },
-            }),
-            TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
-        ),
+        AlgInfo::KeyedHash => {
+            object_attributes |= TpmaObject::SIGN_ENCRYPT;
+            (
+                TpmuPublicParms::KeyedHash(TpmsKeyedhashParms {
+                    scheme: TpmtScheme {
+                        scheme: TpmAlgId::Null,
+                    },
+                }),
+                TpmuPublicId::KeyedHash(tpm2_protocol::TpmBuffer::default()),
+            )
+        }
     };
     TpmtPublic {
         object_type: alg_desc.object_type,

@@ -363,7 +363,7 @@ fn mocktpm_supported_commands() -> &'static [TpmCc] {
 }
 
 fn mocktpm_supported_algs() -> &'static [TpmsAlgProperty] {
-    const OBJECT_ATTRS: TpmaAlgorithm = TpmaAlgorithm::from_bits_truncate(
+    const ASYMMETRIC_OBJECT_ATTRS: TpmaAlgorithm = TpmaAlgorithm::from_bits_truncate(
         TpmaAlgorithm::OBJECT.bits() | TpmaAlgorithm::ASYMMETRIC.bits(),
     );
     &[
@@ -381,11 +381,15 @@ fn mocktpm_supported_algs() -> &'static [TpmsAlgProperty] {
         },
         TpmsAlgProperty {
             alg: TpmAlgId::Rsa,
-            alg_properties: OBJECT_ATTRS,
+            alg_properties: ASYMMETRIC_OBJECT_ATTRS,
         },
         TpmsAlgProperty {
             alg: TpmAlgId::Ecc,
-            alg_properties: OBJECT_ATTRS,
+            alg_properties: ASYMMETRIC_OBJECT_ATTRS,
+        },
+        TpmsAlgProperty {
+            alg: TpmAlgId::KeyedHash,
+            alg_properties: TpmaAlgorithm::OBJECT,
         },
     ]
 }
