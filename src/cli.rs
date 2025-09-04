@@ -160,23 +160,23 @@ impl FromStr for KeyFormat {
     }
 }
 
-macro_rules! subcommand {
+macro_rules! subcommand_registry {
     (
-        local: [$($local_command:ident),* $(,)?],
-        device: [$($device_command:ident),* $(,)?]
+        local: [$(( $local_command:ident, $local_name:literal )),* $(,)?],
+        device: [$(( $device_command:ident, $device_name:literal )),* $(,)?]
         $(,)?
     ) => {
         #[derive(Debug)]
         pub enum Commands {
-            $($local_command($local_command),)*
-            $($device_command($device_command),)*
+            $( $local_command($local_command), )*
+            $( $device_command($device_command), )*
         }
 
         impl Command for Commands {
             fn is_local(&self) -> bool {
                 match self {
-                    $(Self::$local_command(_) => true,)*
-                    $(Self::$device_command(_) => false,)*
+                    $( Self::$local_command(_) => true, )*
+                    $( Self::$device_command(_) => false, )*
                 }
             }
 
@@ -193,33 +193,52 @@ macro_rules! subcommand {
                             let mut guard = device_arc
                                 .lock()
                                 .map_err(|_| CliError::DeviceLockPoisoned)?;
-
                             args.run(&mut guard, context)
                         }
                     ,)*
                 }
             }
         }
+
+        static SUBCOMMANDS: &[SubcommandObject] = &[
+            $(
+                SubcommandObject {
+                    name: $local_name,
+                    help: $local_command::HELP,
+                    dispatch: |p| dispatch(p, Commands::$local_command),
+                },
+            )*
+            $(
+                SubcommandObject {
+                    name: $device_name,
+                    help: $device_command::HELP,
+                    dispatch: |p| dispatch(p, Commands::$device_command),
+                },
+            )*
+        ];
     };
 }
 
-subcommand!(
-    local: [Convert, PrintError],
+subcommand_registry!(
+    local: [
+        (Convert, "convert"),
+        (PrintError, "print-error"),
+    ],
     device: [
-        Algorithms,
-        CreatePrimary,
-        Delete,
-        Import,
-        Load,
-        Objects,
-        PcrEvent,
-        PcrRead,
-        Policy,
-        ResetLock,
-        Save,
-        Seal,
-        StartSession,
-        Unseal,
+        (Algorithms, "algorithms"),
+        (CreatePrimary, "create-primary"),
+        (Delete, "delete"),
+        (Import, "import"),
+        (Load, "load"),
+        (Objects, "objects"),
+        (PcrEvent, "pcr-event"),
+        (PcrRead, "pcr-read"),
+        (Policy, "policy"),
+        (ResetLock, "reset-lock"),
+        (Save, "save"),
+        (Seal, "seal"),
+        (StartSession, "start-session"),
+        (Unseal, "unseal"),
     ],
 );
 
@@ -272,89 +291,6 @@ struct SubcommandObject {
     help: &'static str,
     dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
-
-static SUBCOMMANDS: &[SubcommandObject] = &[
-    SubcommandObject {
-        name: "algorithms",
-        help: Algorithms::HELP,
-        dispatch: |p| dispatch(p, Commands::Algorithms),
-    },
-    SubcommandObject {
-        name: "convert",
-        help: Convert::HELP,
-        dispatch: |p| dispatch(p, Commands::Convert),
-    },
-    SubcommandObject {
-        name: "create-primary",
-        help: CreatePrimary::HELP,
-        dispatch: |p| dispatch(p, Commands::CreatePrimary),
-    },
-    SubcommandObject {
-        name: "delete",
-        help: Delete::HELP,
-        dispatch: |p| dispatch(p, Commands::Delete),
-    },
-    SubcommandObject {
-        name: "import",
-        help: Import::HELP,
-        dispatch: |p| dispatch(p, Commands::Import),
-    },
-    SubcommandObject {
-        name: "load",
-        help: Load::HELP,
-        dispatch: |p| dispatch(p, Commands::Load),
-    },
-    SubcommandObject {
-        name: "objects",
-        help: Objects::HELP,
-        dispatch: |p| dispatch(p, Commands::Objects),
-    },
-    SubcommandObject {
-        name: "pcr-event",
-        help: PcrEvent::HELP,
-        dispatch: |p| dispatch(p, Commands::PcrEvent),
-    },
-    SubcommandObject {
-        name: "pcr-read",
-        help: PcrRead::HELP,
-        dispatch: |p| dispatch(p, Commands::PcrRead),
-    },
-    SubcommandObject {
-        name: "policy",
-        help: Policy::HELP,
-        dispatch: |p| dispatch(p, Commands::Policy),
-    },
-    SubcommandObject {
-        name: "print-error",
-        help: PrintError::HELP,
-        dispatch: |p| dispatch(p, Commands::PrintError),
-    },
-    SubcommandObject {
-        name: "reset-lock",
-        help: ResetLock::HELP,
-        dispatch: |p| dispatch(p, Commands::ResetLock),
-    },
-    SubcommandObject {
-        name: "save",
-        help: Save::HELP,
-        dispatch: |p| dispatch(p, Commands::Save),
-    },
-    SubcommandObject {
-        name: "seal",
-        help: Seal::HELP,
-        dispatch: |p| dispatch(p, Commands::Seal),
-    },
-    SubcommandObject {
-        name: "start-session",
-        help: StartSession::HELP,
-        dispatch: |p| dispatch(p, Commands::StartSession),
-    },
-    SubcommandObject {
-        name: "unseal",
-        help: Unseal::HELP,
-        dispatch: |p| dispatch(p, Commands::Unseal),
-    },
-];
 
 /// The main entry point for command-line argument parsing.
 #[allow(clippy::too_many_lines, clippy::missing_errors_doc)]
