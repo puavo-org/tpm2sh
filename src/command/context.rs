@@ -180,7 +180,6 @@ impl<'a> Context<'a> {
         transient_handle: TpmTransient,
         persistent_handle: TpmPersistent,
     ) -> Result<(), CliError> {
-        self.existence_invariant(transient_handle)?;
         let auth_handle = TpmRh::Owner;
         let cmd = TpmEvictControlCommand {
             auth: (auth_handle as u32).into(),
@@ -192,6 +191,13 @@ impl<'a> Context<'a> {
         let (resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        if let Some(slot) = self
+            .handles
+            .iter_mut()
+            .find(|slot| **slot == Some(transient_handle))
+        {
+            *slot = None;
+        }
         Ok(())
     }
 

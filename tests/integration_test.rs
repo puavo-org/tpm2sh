@@ -5,8 +5,8 @@
 use cli::{
     cli::{Cli, Commands, LogFormat},
     command::{
-        algorithms::Algorithms, create_primary::CreatePrimary, import::Import, objects::Objects,
-        Context,
+        algorithms::Algorithms, context::Context, create_primary::CreatePrimary, import::Import,
+        objects::Objects,
     },
     device::TpmDevice,
     uri::Uri,
@@ -100,7 +100,11 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
     let context_uri: Uri = context_uri_str.trim().parse().unwrap();
 
     let mut device = test_context.device.lock().unwrap();
-    let (handle, _needs_flush) = device.context_load(&context_uri).unwrap();
+    let mut dummy_writer = Vec::new();
+    let mut verification_context = Context::new(&test_context.cli, &mut dummy_writer);
+    let handle = verification_context
+        .load(&mut device, &context_uri)
+        .unwrap();
     let (public, _name) = device.read_public(handle).unwrap();
 
     assert!(
