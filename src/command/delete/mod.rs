@@ -3,7 +3,6 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
-    error::ParseError,
     parser::PolicyExpr,
     uri::Uri,
     CliError, Context, TpmDevice,
@@ -64,16 +63,12 @@ impl DeviceCommand for Delete {
                         "Deleted transient handle tpm://{flush_handle:#010x}"
                     )?;
                 } else {
-                    return Err(CliError::InvalidHandle(format!(
-                        "'{handle:#010x}' is not a transient or persistent handle"
-                    )));
+                    return Err(CliError::InvalidHandleType { handle });
                 }
             }
             PolicyExpr::FilePath(_) | PolicyExpr::Data { .. } => {
-                // Load the context from file/data URI, which creates a transient object
                 let (transient_handle, _needs_flush) = device.context_load(&self.handle)?;
 
-                // Now flush (delete) the newly loaded transient object
                 let flush_cmd = TpmFlushContextCommand {
                     flush_handle: transient_handle.into(),
                 };
@@ -87,10 +82,7 @@ impl DeviceCommand for Delete {
                 )?;
             }
             _ => {
-                return Err(ParseError::Custom(
-                    "delete command requires a tpm://, file://, or data:// URI".to_string(),
-                )
-                .into());
+                return Err(CliError::UnsupportedUriForDelete(self.handle.to_string()));
             }
         }
         Ok(())

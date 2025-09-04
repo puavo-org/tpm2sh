@@ -189,12 +189,10 @@ macro_rules! subcommand {
                     ,)*
                     $(
                         Self::$device_command(args) => {
-                            let device_arc = device.ok_or_else(|| {
-                                CliError::Execution("TPM device not provided".to_string())
-                            })?;
+                            let device_arc = device.ok_or(CliError::DeviceNotProvided)?;
                             let mut guard = device_arc
                                 .lock()
-                                .map_err(|_| CliError::Execution("TPM device lock poisoned".to_string()))?;
+                                .map_err(|_| CliError::DeviceLockPoisoned)?;
 
                             args.run(&mut guard, context)
                         }
@@ -225,16 +223,14 @@ subcommand!(
     ],
 );
 
-const HELP_ERROR: &str = "help-error";
-
-/// Emit `HELP_ERROR` on `-h` or `--help`.
+/// Returns a specific error on `-h` or `--help`.
 ///
 /// # Errors
 ///
 /// Returns a `lexopt::Error` if parsing fails.
 pub fn handle_help<T>(arg: Arg) -> Result<T, lexopt::Error> {
     if arg == Arg::Short('h') || arg == Arg::Long("help") {
-        return Err(HELP_ERROR.into());
+        return Err(lexopt::Error::Custom("help requested".into()));
     }
     Err(arg.unexpected())
 }
@@ -254,28 +250,27 @@ pub fn required<T>(arg: Option<T>, name: &'static str) -> Result<T, lexopt::Erro
 ///
 /// Returns a `Result<ParseResult, lexopt::Error` if dispatching fails.
 #[allow(clippy::result_large_err)]
-fn dispatch<S, W>(
-    parser: &mut Parser,
-    wrapper: W,
-) -> Result<Commands, Result<ParseResult, lexopt::Error>>
+fn dispatch<S, W>(parser: &mut Parser, wrapper: W) -> Result<Commands, ParseResult>
 where
     S: Subcommand,
     W: Fn(S) -> Commands,
 {
     match S::parse(parser) {
         Ok(args) => Ok(wrapper(args)),
-        Err(e) if e.to_string() == HELP_ERROR => Err(Ok(ParseResult::Help(S::HELP))),
-        Err(e) => Err(Ok(ParseResult::ErrorAndUsage {
+        Err(lexopt::Error::Custom(err)) if err.to_string() == "help requested" => {
+            Err(ParseResult::Help(S::HELP))
+        }
+        Err(e) => Err(ParseResult::ErrorAndUsage {
             error: e.to_string(),
             usage: S::USAGE,
-        })),
+        }),
     }
 }
 
 struct SubcommandObject {
     name: &'static str,
     help: &'static str,
-    dispatch: fn(&mut Parser) -> Result<Commands, Result<ParseResult, lexopt::Error>>,
+    dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
 
 static SUBCOMMANDS: &[SubcommandObject] = &[
@@ -426,13 +421,11 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
         return Err(format!("unknown command '{cmd_name}'").into());
     };
 
-    let result = (subcommand.dispatch)(&mut parser);
-
-    match result {
+    match (subcommand.dispatch)(&mut parser) {
         Ok(command) => {
             cli.command = Some(command);
             Ok(ParseResult::Command(cli))
         }
-        Err(parse_result) => parse_result,
+        Err(parse_result) => Ok(parse_result),
     }
 }

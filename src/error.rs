@@ -21,8 +21,16 @@ pub enum ParseError {
     Pem(#[from] pem::PemError),
     #[error("PKCS#8 parsing failed: {0}")]
     Pkcs8(#[from] pkcs8::Error),
+    #[error("TPM protocol: {0}")]
+    TpmProtocol(TpmErrorKind),
     #[error("UTF-8 decoding failed: {0}")]
     Utf8(#[from] Utf8Error),
+}
+
+impl From<TpmErrorKind> for ParseError {
+    fn from(err: TpmErrorKind) -> Self {
+        ParseError::TpmProtocol(err)
+    }
 }
 
 #[derive(Debug, Error)]
@@ -36,8 +44,14 @@ pub enum CliError {
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("Handle: {0}")]
-    InvalidHandle(String),
+    #[error("'{handle:#010x}' is not a transient or persistent handle")]
+    InvalidHandleType { handle: u32 },
+
+    #[error("The arguments '--{0}' and '--{1}' are mutually exclusive")]
+    MutualExclusionArgs(&'static str, &'static str),
+
+    #[error("'{0}' is not a valid URI for this operation; expected tpm://, file://, or data://")]
+    UnsupportedUriForDelete(String),
 
     #[error("I/O: {0}")]
     Io(#[from] IoError),
@@ -50,6 +64,12 @@ pub enum CliError {
 
     #[error("{0}")]
     TpmRc(TpmRc),
+
+    #[error("TPM device lock poisoned")]
+    DeviceLockPoisoned,
+
+    #[error("TPM device not provided for a device command")]
+    DeviceNotProvided,
 
     #[error("TPM unexpected: {0}")]
     UnexpectedResponse(String),

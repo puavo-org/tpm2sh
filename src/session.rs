@@ -97,9 +97,7 @@ pub fn session_from_args<C: TpmHeader>(
     cli: &Cli,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
     match (&cli.session, &cli.password) {
-        (Some(_), Some(_)) => Err(CliError::Execution(
-            "'--session' and '--password' are mutually exclusive".to_string(),
-        )),
+        (Some(_), Some(_)) => Err(CliError::MutualExclusionArgs("session", "password")),
         (Some(uri), None) => {
             let session = match uri.ast() {
                 PolicyExpr::Session { .. } => AuthSession::from_ast(uri.ast())?,

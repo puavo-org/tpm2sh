@@ -23,7 +23,6 @@ struct TestFixture {
     _handle: JoinHandle<()>,
     device: Arc<Mutex<TpmDevice>>,
     cli: Cli,
-    // This field keeps the temporary directory alive for the duration of the test.
     _temp_dir: TempDir,
 }
 
