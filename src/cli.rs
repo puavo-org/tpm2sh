@@ -263,6 +263,18 @@ pub fn required<T>(arg: Option<T>, name: &'static str) -> Result<T, lexopt::Erro
     arg.ok_or_else(|| format!("missing required argument {name}").into())
 }
 
+/// Helper for parsing subcommands that take no arguments.
+///
+/// # Errors
+///
+/// Returns a `lexopt::Error` if any arguments other than `--help` are provided.
+pub fn parse_no_args<T: Default>(parser: &mut Parser) -> Result<T, lexopt::Error> {
+    while let Some(arg) = parser.next()? {
+        handle_help(arg)?;
+    }
+    Ok(T::default())
+}
+
 /// Helper to dispatch parsing to the correct `Subcommand` impl.
 ///
 /// # Errors

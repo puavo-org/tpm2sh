@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, DeviceCommand, Subcommand},
+    cli::{parse_no_args, DeviceCommand, Subcommand},
     command::context::Context,
     device::TpmDevice,
     error::CliError,
@@ -20,10 +20,7 @@ impl Subcommand for ResetLock {
     const HELP: &'static str = include_str!("help.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
-        while let Some(arg) = parser.next()? {
-            handle_help(arg)?;
-        }
-        Ok(ResetLock)
+        parse_no_args(parser)
     }
 }
 
