@@ -91,7 +91,7 @@ impl<'a> Context<'a> {
                 let resp = resp
                     .ContextLoad()
                     .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
-                self.track(device, resp.loaded_handle)?;
+                self.track(resp.loaded_handle)?;
                 Ok(resp.loaded_handle)
             }
             _ => Err(ParseError::Custom(format!("{uri}")).into()),
@@ -200,13 +200,12 @@ impl<'a> Context<'a> {
     /// # Errors
     ///
     /// Returns a `CliError` if the handle is invalid or does not exist.
-    pub fn track(&mut self, device: &mut TpmDevice, handle: TpmTransient) -> Result<(), CliError> {
+    pub fn track(&mut self, handle: TpmTransient) -> Result<(), CliError> {
         self.non_existence_invariant(handle)?;
         self.capacity_invariant()?;
         if handle.0 < TpmRh::TransientFirst as u32 {
             return Err(CliError::InvalidHandleType { handle: handle.0 });
         }
-        device.read_public(handle)?;
         if let Some(h) = self.handles.iter_mut().find(|h| h.is_none()) {
             *h = Some(handle);
         }

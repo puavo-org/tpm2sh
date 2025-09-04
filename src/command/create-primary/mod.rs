@@ -151,7 +151,7 @@ impl DeviceCommand for CreatePrimary {
             writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
             Ok(())
         } else {
-            context.track(device, object_handle)?;
+            context.track(object_handle)?;
             context.save(device, object_handle)
         }
     }
