@@ -96,7 +96,7 @@ impl DeviceCommand for Seal {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&cmd, &handles, context.cli)?;
-        let (resp, _) = device.execute(&cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
 
         let create_resp = resp.Create().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Create: {e:?}"))

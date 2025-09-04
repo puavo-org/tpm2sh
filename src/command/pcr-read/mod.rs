@@ -49,7 +49,7 @@ impl DeviceCommand for PcrRead {
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let pcr_count = pcr_get_count(device)?;
         let pcr_selection_in = self.pcr.to_pcr_selection(pcr_count)?;
-        let pcr_read_resp = device.pcr_read(&pcr_selection_in)?;
+        let (_rc, pcr_read_resp) = device.pcr_read(&pcr_selection_in)?;
         let alg_id = tpm_alg_id_from_str(&self.alg).map_err(CliError::Execution)?;
         let composite_digest = pcr_composite_digest(&pcr_read_resp, alg_id)?;
         writeln!(

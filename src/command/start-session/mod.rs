@@ -69,7 +69,7 @@ impl DeviceCommand for StartSession {
             },
             auth_hash,
         };
-        let (response, _) = device.execute(&cmd, &[])?;
+        let (_rc, response, _) = device.execute(&cmd, &[])?;
         let start_auth_session_resp = response
             .StartAuthSession()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;

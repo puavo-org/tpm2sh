@@ -87,7 +87,7 @@ impl<'a> Context<'a> {
                     return Err(ParseError::Custom("trailing data".to_string()).into());
                 }
                 let cmd = TpmContextLoadCommand { context };
-                let (resp, _) = device.execute(&cmd, &[])?;
+                let (_rc, resp, _) = device.execute(&cmd, &[])?;
                 let resp = resp
                     .ContextLoad()
                     .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
@@ -110,7 +110,7 @@ impl<'a> Context<'a> {
     ) -> Result<(), CliError> {
         self.existence_invariant(save_handle)?;
         let save_cmd = TpmContextSaveCommand { save_handle };
-        let (resp, _) = device.execute(&save_cmd, &[])?;
+        let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
@@ -141,7 +141,7 @@ impl<'a> Context<'a> {
         };
         let handles = [auth_handle as u32, handle.0];
         let sessions = session_from_args(&cmd, &handles, self.cli)?;
-        let (resp, _) = device.execute(&cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok(())
@@ -161,7 +161,7 @@ impl<'a> Context<'a> {
         let cmd = TpmFlushContextCommand {
             flush_handle: handle.into(),
         };
-        device.execute(&cmd, &[])?;
+        let (_rc, _, _) = device.execute(&cmd, &[])?;
         if let Some(slot) = self.handles.iter_mut().find(|slot| **slot == Some(handle)) {
             *slot = None;
         }
@@ -169,6 +169,9 @@ impl<'a> Context<'a> {
     }
 
     /// Convert a transient object as persistent.
+    ///
+    /// After making the handle persistent, drop it from the tracking list so
+    /// that unintended flush for invalidated handle won't happen.
     ///
     /// # Errors
     ///
@@ -188,7 +191,7 @@ impl<'a> Context<'a> {
         };
         let handles = [auth_handle as u32, transient_handle.0];
         let sessions = session_from_args(&cmd, &handles, self.cli)?;
-        let (resp, _) = device.execute(&cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         if let Some(slot) = self

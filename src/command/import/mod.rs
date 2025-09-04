@@ -290,7 +290,7 @@ impl DeviceCommand for Import {
     /// Returns a `CliError`.
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let parent_handle = context.load(device, &self.parent)?;
-        let (parent_public, parent_name) = device.read_public(parent_handle)?;
+        let (_rc, parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
         let (_, public, sensitive_blob) = prepare_key_for_import(&self.key, parent_name_alg)?;
         let public_bytes_struct = Tpm2bPublic {
@@ -317,7 +317,7 @@ impl DeviceCommand for Import {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&import_cmd, &handles, context.cli)?;
-        let (resp, _) = device.execute(&import_cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
             CliError::Execution(format!("unexpected response type for Import: {e:?}"))
         })?;

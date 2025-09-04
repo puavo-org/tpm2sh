@@ -67,7 +67,7 @@ impl DeviceCommand for Load {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&load_cmd, &handles, context.cli)?;
-        let (resp, _) = device.execute(&load_cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&load_cmd, &sessions)?;
         let resp = resp
             .Load()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;

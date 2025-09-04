@@ -49,7 +49,7 @@ impl DeviceCommand for Unseal {
         };
         let unseal_handles = [object_handle.into()];
         let unseal_sessions = session_from_args(&unseal_cmd, &unseal_handles, context.cli)?;
-        let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
+        let (_rc, unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp
             .Unseal()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;

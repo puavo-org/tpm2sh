@@ -36,7 +36,7 @@ impl DeviceCommand for ResetLock {
         };
         let handles = [TpmRh::Lockout as u32];
         let sessions = session_from_args(&command, &handles, context.cli)?;
-        let (resp, _) = device.execute(&command, &sessions)?;
+        let (_rc, resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok(())

@@ -89,7 +89,7 @@ impl DeviceCommand for PcrEvent {
             event_data,
         };
         let sessions = session_from_args(&command, &handles, context.cli)?;
-        let (resp, _) = device.execute(&command, &sessions)?;
+        let (_rc, resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok(())

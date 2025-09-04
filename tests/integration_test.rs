@@ -102,10 +102,11 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
     let mut device = test_context.device.lock().unwrap();
     let mut dummy_writer = Vec::new();
     let mut verification_context = Context::new(&test_context.cli, &mut dummy_writer);
+
     let handle = verification_context
         .load(&mut device, &context_uri)
         .unwrap();
-    let (public, _name) = device.read_public(handle).unwrap();
+    let (_rc, public, _name) = device.read_public(handle).unwrap();
 
     assert!(
         public.object_attributes.contains(TpmaObject::SIGN_ENCRYPT),

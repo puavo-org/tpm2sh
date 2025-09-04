@@ -140,7 +140,7 @@ impl DeviceCommand for CreatePrimary {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let sessions = session_from_args(&cmd, &handles, context.cli)?;
-        let (resp, _) = device.execute(&cmd, &sessions)?;
+        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;

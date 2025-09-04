@@ -23,9 +23,9 @@ use std::{
 use log::{trace, warn};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh, TpmSt, TpmaCc, TpmlPcrSelection,
-        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
-        TpmuCapabilities, TpmuPublicParms,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRh, TpmSt, TpmaCc,
+        TpmlPcrSelection, TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic,
+        TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
@@ -56,7 +56,7 @@ pub struct TpmDevice {
 }
 
 /// Checks if the TPM supports a given set of RSA parameters.
-fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<(), CliError> {
+fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<TpmRc, CliError> {
     let cmd = TpmTestParmsCommand {
         parameters: TpmtPublicParms {
             object_type: TpmAlgId::Rsa,
@@ -66,7 +66,7 @@ fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<(), CliError>
             }),
         },
     };
-    device.execute(&cmd, &[]).map(|_| ())
+    device.execute(&cmd, &[]).map(|(rc, _, _)| rc)
 }
 
 impl TpmDevice {
@@ -90,7 +90,7 @@ impl TpmDevice {
         &mut self,
         command: &C,
         sessions: &[TpmsAuthCommand],
-    ) -> Result<(TpmResponseBody, TpmAuthResponses), CliError>
+    ) -> Result<(TpmRc, TpmResponseBody, TpmAuthResponses), CliError>
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
@@ -198,7 +198,7 @@ impl TpmDevice {
                 if rc.is_warning() {
                     warn!(target: "cli::device", "TPM command completed with a warning: rc = {rc}");
                 }
-                Ok((response, auth))
+                Ok((rc, response, auth))
             }
             Err((rc, _)) => Err(CliError::TpmRc(rc)),
         }
@@ -232,12 +232,14 @@ impl TpmDevice {
         if all_algs.contains(&TpmAlgId::Rsa) {
             let rsa_key_sizes = [2048, 3072, 4096];
             for key_bits in rsa_key_sizes {
-                if test_rsa_parms(self, key_bits).is_ok() {
-                    for &name_alg in &name_algs {
-                        supported_algs.push((
-                            TpmAlgId::Rsa,
-                            format!("rsa:{}:{}", key_bits, tpm_alg_id_to_str(name_alg)),
-                        ));
+                if let Ok(rc) = test_rsa_parms(self, key_bits) {
+                    if !rc.is_error() {
+                        for &name_alg in &name_algs {
+                            supported_algs.push((
+                                TpmAlgId::Rsa,
+                                format!("rsa:{}:{}", key_bits, tpm_alg_id_to_str(name_alg)),
+                            ));
+                        }
                     }
                 }
             }
@@ -323,7 +325,7 @@ impl TpmDevice {
                 property_count: count,
             };
 
-            let (resp, _) = self.execute(&cmd, &[])?;
+            let (_rc, resp, _) = self.execute(&cmd, &[])?;
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
@@ -367,13 +369,15 @@ impl TpmDevice {
     pub fn pcr_read(
         &mut self,
         pcr_selection_in: &TpmlPcrSelection,
-    ) -> Result<TpmPcrReadResponse, CliError> {
+    ) -> Result<(TpmRc, TpmPcrReadResponse), CliError> {
         let cmd = TpmPcrReadCommand {
             pcr_selection_in: *pcr_selection_in,
         };
-        let (resp, _) = self.execute(&cmd, &[])?;
-        resp.PcrRead()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))
+        let (rc, resp, _) = self.execute(&cmd, &[])?;
+        let pcr_resp = resp
+            .PcrRead()
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        Ok((rc, pcr_resp))
     }
 
     /// Reads the public area and name of a TPM object.
@@ -384,14 +388,14 @@ impl TpmDevice {
     pub fn read_public(
         &mut self,
         handle: TpmTransient,
-    ) -> Result<(TpmtPublic, Tpm2bName), CliError> {
+    ) -> Result<(TpmRc, TpmtPublic, Tpm2bName), CliError> {
         let cmd = TpmReadPublicCommand {
             object_handle: handle.0.into(),
         };
-        let (resp, _) = self.execute(&cmd, &[])?;
+        let (rc, resp, _) = self.execute(&cmd, &[])?;
         let read_public_resp = resp
             .ReadPublic()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
-        Ok((read_public_resp.out_public.inner, read_public_resp.name))
+        Ok((rc, read_public_resp.out_public.inner, read_public_resp.name))
     }
 }

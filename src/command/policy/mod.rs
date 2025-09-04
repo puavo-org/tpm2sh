@@ -67,7 +67,7 @@ impl PolicyExecutor<'_> {
             hex::decode(digest_hex).map_err(ParseError::from)?
         } else {
             let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
-            let read_resp = self.device.pcr_read(&pcr_selection_in)?;
+            let (_rc, read_resp) = self.device.pcr_read(&pcr_selection_in)?;
             pcr_composite_digest(&read_resp, self.session_hash_alg)?
         };
 
@@ -81,7 +81,7 @@ impl PolicyExecutor<'_> {
         };
         let handles = [session_handle.into()];
         let sessions = session_from_args(&cmd, &handles, &Cli::default())?;
-        self.device.execute(&cmd, &sessions)?;
+        let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -112,7 +112,7 @@ impl PolicyExecutor<'_> {
             ..Default::default()
         };
         let sessions = session_from_args(&cmd, &handles, &temp_cli)?;
-        self.device.execute(&cmd, &sessions)?;
+        let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -140,7 +140,7 @@ impl PolicyExecutor<'_> {
         };
         let handles = [session_handle.into()];
         let sessions = session_from_args(&cmd, &handles, &Cli::default())?;
-        self.device.execute(&cmd, &sessions)?;
+        let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
@@ -191,7 +191,7 @@ fn start_trial_session(
         symmetric: TpmtSymDefObject::default(),
         auth_hash: hash_alg,
     };
-    let (resp, _) = device.execute(&cmd, &[])?;
+    let (_rc, resp, _) = device.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
         .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
@@ -202,7 +202,7 @@ fn flush_session(device: &mut TpmDevice, _cli: &Cli, handle: TpmSession) -> Resu
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
-    device.execute(&cmd, &[])?;
+    let (_rc, _, _) = device.execute(&cmd, &[])?;
     Ok(())
 }
 
@@ -214,7 +214,7 @@ fn get_policy_digest(
     let cmd = TpmPolicyGetDigestCommand {
         policy_session: session_handle.0.into(),
     };
-    let (resp, _) = device.execute(&cmd, &[])?;
+    let (_rc, resp, _) = device.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
         .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
