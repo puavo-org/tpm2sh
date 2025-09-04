@@ -4,8 +4,10 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     uri::Uri,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 
@@ -45,9 +47,9 @@ impl DeviceCommand for Save {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let (object_handle, _) = device.context_load(&self.in_uri)?;
+        let object_handle = context.load(device, &self.in_uri)?;
         let persistent_handle = TpmPersistent(self.to_uri.to_tpm_handle()?);
-        device.evict_control(context.cli, object_handle.0, persistent_handle)?;
+        context.evict(device, object_handle, persistent_handle)?;
         writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
         Ok(())
     }

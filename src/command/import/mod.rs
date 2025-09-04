@@ -4,16 +4,18 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
     crypto::{
         crypto_ecdh_p256, crypto_ecdh_p384, crypto_ecdh_p521, crypto_hmac, crypto_kdfa,
         crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
         UNCOMPRESSED_POINT_TAG,
     },
+    device::TpmDevice,
+    error::CliError,
     key::private_key_from_pem_bytes,
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
-    CliError, Context, TpmDevice,
 };
 use aes::Aes128;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -287,10 +289,7 @@ impl DeviceCommand for Import {
     ///
     /// Returns a `CliError`.
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let (parent_handle, needs_flush) = device.context_load(&self.parent)?;
-        if needs_flush {
-            context.handles.push((parent_handle, true));
-        }
+        let parent_handle = context.load(device, &self.parent)?;
         let (parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
         let (_, public, sensitive_blob) = prepare_key_for_import(&self.key, parent_name_alg)?;

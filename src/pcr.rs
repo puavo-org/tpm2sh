@@ -2,8 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{CliError, TpmDevice};
-
+use crate::{device::TpmDevice, error::CliError};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::{
     data::{TpmAlgId, TpmCap, TpmuCapabilities},

@@ -4,11 +4,10 @@
 
 use crate::{
     cli::Cli,
-    error::ParseError,
+    error::{CliError, ParseError},
     key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
     parser::PolicyExpr,
     util::build_to_vec,
-    CliError,
 };
 use log::debug;
 use rand::RngCore;

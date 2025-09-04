@@ -4,10 +4,12 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     key::tpm_alg_id_from_str,
     pcr::{pcr_composite_digest, pcr_get_count},
     uri::Uri,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 

@@ -4,12 +4,13 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     session::session_from_args,
     uri::Uri,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
-
 use tpm2_protocol::message::TpmUnsealCommand;
 
 #[derive(Debug, Default)]
@@ -42,10 +43,7 @@ impl DeviceCommand for Unseal {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let (object_handle, needs_flush) = device.context_load(&self.handle)?;
-        if needs_flush {
-            context.handles.push((object_handle, true));
-        }
+        let object_handle = context.load(device, &self.handle)?;
         let unseal_cmd = TpmUnsealCommand {
             item_handle: object_handle.0.into(),
         };
@@ -54,7 +52,7 @@ impl DeviceCommand for Unseal {
         let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp
             .Unseal()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         context.writer.write_all(&unseal_resp.out_data)?;
         Ok(())
     }

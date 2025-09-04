@@ -4,8 +4,10 @@
 
 use crate::{
     cli::{handle_help, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     session::session_from_args,
-    CliError, Context, TpmDevice,
 };
 use lexopt::Parser;
 use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
@@ -39,7 +41,7 @@ impl DeviceCommand for ResetLock {
         let sessions = session_from_args(&command, &handles, context.cli)?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok(())
     }
 }

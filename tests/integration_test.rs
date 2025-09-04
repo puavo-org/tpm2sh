@@ -6,10 +6,11 @@ use cli::{
     cli::{Cli, Commands, LogFormat},
     command::{
         algorithms::Algorithms, create_primary::CreatePrimary, import::Import, objects::Objects,
+        Context,
     },
     device::TpmDevice,
     uri::Uri,
-    Command, Context,
+    Command,
 };
 use std::{
     sync::{Arc, Mutex},

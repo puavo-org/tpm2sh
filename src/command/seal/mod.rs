@@ -4,10 +4,12 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
-    CliError, Context, TpmDevice,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use lexopt::{Arg, Parser, ValueExt};
@@ -59,10 +61,7 @@ impl DeviceCommand for Seal {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let (parent_handle, needs_flush) = device.context_load(&self.parent)?;
-        if needs_flush {
-            context.handles.push((parent_handle, true));
-        }
+        let parent_handle = context.load(device, &self.parent)?;
         let data_to_seal = self.data.to_bytes()?;
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
         if self.object_password.is_some() {

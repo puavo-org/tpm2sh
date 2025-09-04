@@ -35,22 +35,22 @@ impl From<TpmErrorKind> for ParseError {
 
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("TPM protocol: {0}")]
+    #[error("{0}")]
     Build(TpmErrorKind),
 
-    #[error("Execution: {0}")]
+    #[error("{0}")]
     Execution(String),
 
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("'{handle:#010x}' is not a transient or persistent handle")]
+    #[error("{handle:#010x}")]
     InvalidHandleType { handle: u32 },
 
     #[error("The arguments '--{0}' and '--{1}' are mutually exclusive")]
     MutualExclusionArgs(&'static str, &'static str),
 
-    #[error("'{0}' is not a valid URI for this operation; expected tpm://, file://, or data://")]
+    #[error("{0}")]
     UnsupportedUriForDelete(String),
 
     #[error("I/O: {0}")]
@@ -71,8 +71,8 @@ pub enum CliError {
     #[error("TPM device not provided for a device command")]
     DeviceNotProvided,
 
-    #[error("TPM unexpected: {0}")]
-    UnexpectedResponse(String),
+    #[error("unexpected TPM response: {0}")]
+    Unexpected(String),
 }
 
 impl From<TpmErrorKind> for CliError {

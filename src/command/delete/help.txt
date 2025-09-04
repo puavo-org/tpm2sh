@@ -3,11 +3,11 @@ Deletes a transient or persistent object
 Usage: tpm2sh delete [OPTIONS] <URI>
 
 Arguments:
-  <URI>  URI of the object to delete (e.g. 'tpm://0x81000001', 'file:///context.bin')
+  <URI>  URI of the handle to delete (e.g., 'tpm://0x81000001')
 
 Options:
-  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
-      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
-  -p, --password <PASSWORD>      Default authorization password for objects and sessions
-  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
-  -h, --help                     Print help
+  -d, --device <DEVICE>         TPM device path [default: /dev/tpmrm0]
+      --log-format <LOG_FORMAT> Logging format [default: plain] [possible values: plain, pretty]
+  -p, --password <PASSWORD>     Default authorization password for objects and sessions
+  -S, --session <URI>           Session object URI (e.g., 'tpm://0x03000000')
+  -h, --help                    Print help

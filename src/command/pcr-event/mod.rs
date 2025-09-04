@@ -4,10 +4,12 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     pcr::pcr_get_count,
     session::session_from_args,
     uri::Uri,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{data::Tpm2bEvent, message::TpmPcrEventCommand};
@@ -89,7 +91,7 @@ impl DeviceCommand for PcrEvent {
         let sessions = session_from_args(&command, &handles, context.cli)?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok(())
     }
 }

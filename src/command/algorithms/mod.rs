@@ -4,7 +4,9 @@
 
 use crate::{
     cli::{handle_help, DeviceCommand, Subcommand},
-    CliError, Context, TpmDevice,
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
 };
 use lexopt::Parser;
 

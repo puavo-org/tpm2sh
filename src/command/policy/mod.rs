@@ -3,12 +3,13 @@
 
 use crate::{
     cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
-    error::ParseError,
+    command::context::Context,
+    device::TpmDevice,
+    error::{CliError, ParseError},
     parser::{parse_policy, PolicyExpr},
     pcr::{pcr_composite_digest, pcr_get_count},
     session::session_from_args,
     uri::pcr_selection_to_list,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 
@@ -193,7 +194,7 @@ fn start_trial_session(
     let (resp, _) = device.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
-        .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
     Ok(start_resp.session_handle)
 }
 
@@ -216,7 +217,7 @@ fn get_policy_digest(
     let (resp, _) = device.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
-        .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
     Ok(digest_resp.policy_digest)
 }
 

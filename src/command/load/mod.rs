@@ -4,9 +4,11 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     session::session_from_args,
     uri::Uri,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
@@ -53,10 +55,7 @@ impl DeviceCommand for Load {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let (parent_handle, parent_needs_flush) = device.context_load(&self.parent)?;
-        if parent_needs_flush {
-            context.handles.push((parent_handle, true));
-        }
+        let parent_handle = context.load(device, &self.parent)?;
         let pub_bytes = self.public.to_bytes()?;
         let priv_bytes = self.private.to_bytes()?;
         let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
@@ -69,12 +68,10 @@ impl DeviceCommand for Load {
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&load_cmd, &handles, context.cli)?;
         let (resp, _) = device.execute(&load_cmd, &sessions)?;
-        let load_resp = resp
+        let resp = resp
             .Load()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let save_handle = load_resp.object_handle;
-        context.handles.push((save_handle, true));
-        device.context_save(save_handle, &mut context.writer)?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        context.save(device, resp.object_handle)?;
         Ok(())
     }
 }

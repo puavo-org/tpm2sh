@@ -3,9 +3,8 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    error::ParseError,
+    error::{CliError, ParseError},
     parser::{parse_policy, PolicyExpr},
-    CliError,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::{fmt, ops::Deref, path::Path, str::FromStr};

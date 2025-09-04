@@ -3,6 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 pub mod algorithms;
+pub mod context;
 pub mod convert;
 #[path = "create-primary/mod.rs"]
 pub mod create_primary;

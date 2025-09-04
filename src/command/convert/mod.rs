@@ -4,9 +4,10 @@
 
 use crate::{
     cli::{handle_help, required, KeyFormat, LocalCommand, Subcommand},
+    command::context::Context,
+    error::CliError,
     key::TpmKey,
     uri::Uri,
-    CliError, Context,
 };
 use lexopt::{Arg, Parser, ValueExt};
 

@@ -4,11 +4,12 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Hierarchy, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
     uri::Uri,
-    Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 
@@ -142,17 +143,16 @@ impl DeviceCommand for CreatePrimary {
         let (resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         let object_handle = resp.object_handle;
         if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
-            device.evict_control(context.cli, object_handle.into(), persistent_handle)?;
+            context.evict(device, object_handle, persistent_handle)?;
             writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
+            Ok(())
         } else {
-            context.handles.push((object_handle, true));
-            device.context_save(object_handle, &mut context.writer)?;
+            context.track(device, object_handle)?;
+            context.save(device, object_handle)
         }
-        Ok(())
     }
 }

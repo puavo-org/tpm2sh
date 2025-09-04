@@ -3,10 +3,11 @@
 
 use crate::{
     cli::{handle_help, DeviceCommand, Subcommand},
-    CliError, Context, TpmDevice,
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
 };
 use lexopt::Parser;
-
 use tpm2_protocol::data::TpmRh;
 
 #[derive(Debug, Default)]

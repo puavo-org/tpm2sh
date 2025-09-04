@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{error::ParseError, CliError};
+use crate::error::{CliError, ParseError};
 use tpm2_protocol::{data::TpmRc, TpmBuild, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE};
 
 /// Parses a hex string (with or without a "0x" prefix) into a u32.

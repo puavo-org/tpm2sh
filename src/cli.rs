@@ -4,15 +4,15 @@
 
 use crate::{
     command::{
-        algorithms::Algorithms, convert::Convert, create_primary::CreatePrimary, delete::Delete,
-        import::Import, load::Load, objects::Objects, pcr_event::PcrEvent, pcr_read::PcrRead,
-        policy::Policy, print_error::PrintError, reset_lock::ResetLock, save::Save, seal::Seal,
-        start_session::StartSession, unseal::Unseal,
+        algorithms::Algorithms, context::Context, convert::Convert, create_primary::CreatePrimary,
+        delete::Delete, import::Import, load::Load, objects::Objects, pcr_event::PcrEvent,
+        pcr_read::PcrRead, policy::Policy, print_error::PrintError, reset_lock::ResetLock,
+        save::Save, seal::Seal, start_session::StartSession, unseal::Unseal,
     },
     device::TpmDevice,
     error::CliError,
     uri::Uri,
-    Command, Context, ParseResult,
+    Command, ParseResult,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use std::{

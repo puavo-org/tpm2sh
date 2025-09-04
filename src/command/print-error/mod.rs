@@ -4,11 +4,11 @@
 
 use crate::{
     cli::{handle_help, required, LocalCommand, Subcommand},
+    command::context::Context,
+    error::CliError,
     util::parse_tpm_rc,
-    CliError, Context,
 };
 use lexopt::{Arg, Parser};
-
 use tpm2_protocol::data::TpmRc;
 
 #[derive(Debug)]

@@ -4,8 +4,10 @@
 
 use crate::{
     cli::{handle_help, DeviceCommand, SessionType, Subcommand},
+    command::context::Context,
+    device::TpmDevice,
+    error::CliError,
     session::AuthSession,
-    CliError, Context, TpmDevice,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
@@ -70,7 +72,7 @@ impl DeviceCommand for StartSession {
         let (response, _) = device.execute(&cmd, &[])?;
         let start_auth_session_resp = response
             .StartAuthSession()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         let session = AuthSession {
             handle: start_auth_session_resp.session_handle,
             nonce_tpm: start_auth_session_resp.nonce_tpm,

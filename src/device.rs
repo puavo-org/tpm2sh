@@ -3,17 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{Cli, LogFormat},
-    error::ParseError,
+    cli::LogFormat,
+    error::{CliError, ParseError},
     key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
-    parser::PolicyExpr,
     print::TpmPrint,
-    session::session_from_args,
-    uri::Uri,
-    util::build_to_vec,
-    CliError,
 };
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::{
     collections::HashSet,
     fmt::Debug,
@@ -30,16 +24,15 @@ use log::{trace, warn};
 use tpm2_protocol::{
     data::{
         Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRh, TpmSt, TpmaCc, TpmlPcrSelection,
-        TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsRsaParms, TpmtPublic,
-        TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
+        TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
         TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand,
         TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody, TpmTestParmsCommand,
     },
-    TpmParse, TpmPersistent, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
@@ -211,87 +204,6 @@ impl TpmDevice {
         }
     }
 
-    /// Loads a TPM context from URI, and return a pair, where the boolean flag
-    /// tells whether the context needs to be cleaned up or not.
-    ///
-    /// `tpm://` URIs are considered to be managed by the caller, and thus they are
-    /// paired with `false`. Other types of URIs are paired with `true`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` on parsing or TPM command failure.
-    pub fn context_load(&mut self, uri: &Uri) -> Result<(TpmTransient, bool), CliError> {
-        match uri.ast() {
-            PolicyExpr::TpmHandle(handle) => Ok((TpmTransient(*handle), false)),
-            PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
-                let context_blob = uri.to_bytes()?;
-                let (context, remainder) = TpmsContext::parse(&context_blob)?;
-                if !remainder.is_empty() {
-                    return Err(ParseError::Custom("trailing data".to_string()).into());
-                }
-                let cmd = TpmContextLoadCommand { context };
-                let (resp, _) = self.execute(&cmd, &[])?;
-                let resp = resp
-                    .ContextLoad()
-                    .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-                Ok((resp.loaded_handle, true))
-            }
-            _ => Err(ParseError::Custom(format!("invalid URI: '{uri}'")).into()),
-        }
-    }
-
-    /// Saves a transient object context and writes it to a writer as a data URI.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the TPM command or I/O fails.
-    pub fn context_save<W: Write>(
-        &mut self,
-        handle: TpmTransient,
-        writer: &mut W,
-    ) -> Result<(), CliError> {
-        let save_cmd = TpmContextSaveCommand {
-            save_handle: handle,
-        };
-        let (resp, _) = self.execute(&save_cmd, &[])?;
-        let save_resp = resp
-            .ContextSave()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        let context_bytes = build_to_vec(&save_resp.context)?;
-
-        writeln!(
-            writer,
-            "data://base64,{}",
-            base64_engine.encode(context_bytes)
-        )?;
-        Ok(())
-    }
-
-    /// Makes a transient object persistent.
-    ///
-    /// # Errors
-    ///
-    /// Returns `CliError` if the `EvictControl` command fails.
-    pub fn evict_control(
-        &mut self,
-        cli: &Cli,
-        object_handle: u32,
-        persistent_handle: TpmPersistent,
-    ) -> Result<(), CliError> {
-        let auth_handle = TpmRh::Owner;
-        let cmd = TpmEvictControlCommand {
-            auth: (auth_handle as u32).into(),
-            object_handle: object_handle.into(),
-            persistent_handle,
-        };
-        let handles = [auth_handle as u32, object_handle];
-        let sessions = session_from_args(&cmd, &handles, cli)?;
-        let (resp, _) = self.execute(&cmd, &sessions)?;
-        resp.EvictControl()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
-        Ok(())
-    }
-
     /// Retrieves all supported algorithms from the TPM by probing its capabilities.
     ///
     /// # Errors
@@ -417,7 +329,7 @@ impl TpmDevice {
                 capability_data,
             } = resp
                 .GetCapability()
-                .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+                .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
 
             let next_prop = if more_data.into() {
                 match &capability_data.data {
@@ -461,7 +373,7 @@ impl TpmDevice {
         };
         let (resp, _) = self.execute(&cmd, &[])?;
         resp.PcrRead()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))
     }
 
     /// Reads the public area and name of a TPM object.
@@ -479,7 +391,7 @@ impl TpmDevice {
         let (resp, _) = self.execute(&cmd, &[])?;
         let read_public_resp = resp
             .ReadPublic()
-            .map_err(|e| CliError::UnexpectedResponse(format!("{e:?}")))?;
+            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
         Ok((read_public_resp.out_public.inner, read_public_resp.name))
     }
 }
