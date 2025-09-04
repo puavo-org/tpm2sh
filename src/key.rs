@@ -302,9 +302,9 @@ pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliErr
     let oid = private_key_info.algorithm.oid;
 
     let key = match oid {
-        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
-            PrivateKey::Rsa(RsaPrivateKey::from_pkcs8_der(contents).map_err(ParseError::from)?)
-        }
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => PrivateKey::Rsa(
+            Box::new(RsaPrivateKey::from_pkcs8_der(contents).map_err(ParseError::from)?),
+        ),
         oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
             PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents).map_err(ParseError::from)?)
         }

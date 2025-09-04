@@ -239,9 +239,8 @@ pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmRc> {
 }
 
 /// RSA or ECC private key
-#[allow(clippy::large_enum_variant)]
 pub enum PrivateKey {
-    Rsa(RsaPrivateKey),
+    Rsa(Box<RsaPrivateKey>),
     Ecc(SecretKey),
 }
 

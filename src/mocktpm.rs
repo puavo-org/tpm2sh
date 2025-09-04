@@ -169,10 +169,10 @@ impl MockTpmKey {
             let (priv_bytes, _) = priv_remainder.split_at(priv_len);
 
             let private_key = match public.object_type {
-                TpmAlgId::Rsa => PrivateKey::Rsa(
+                TpmAlgId::Rsa => PrivateKey::Rsa(Box::new(
                     RsaPrivateKey::from_pkcs8_der(priv_bytes)
                         .map_err(|_| TpmRc::from(TpmRcBase::Value))?,
-                ),
+                )),
                 TpmAlgId::Ecc => PrivateKey::Ecc(
                     p256::SecretKey::from_pkcs8_der(priv_bytes)
                         .map_err(|_| TpmRc::from(TpmRcBase::Value))?,
@@ -433,7 +433,7 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
         let Ok(rsa_key) = RsaPrivateKey::new(&mut rand::thread_rng(), key_bits.into()) else {
             return Err(TpmRc::from(TpmRcBase::Failure));
         };
-        private = Some(PrivateKey::Rsa(rsa_key.clone()));
+        private = Some(PrivateKey::Rsa(Box::new(rsa_key.clone())));
         let modulus = rsa_key.n().to_bytes_be();
         let Ok(unique_rsa) = Tpm2bPublicKeyRsa::try_from(modulus.as_slice()) else {
             return Err(TpmRc::from(TpmRcBase::Value));
