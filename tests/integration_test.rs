@@ -3,7 +3,10 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use cli::{
-    cli::{Algorithms, Cli, Commands, CreatePrimary, Import, LogFormat, Objects, ParentArgs},
+    cli::{Cli, Commands, LogFormat},
+    command::{
+        algorithms::Algorithms, create_primary::CreatePrimary, import::Import, objects::Objects,
+    },
     device::TpmDevice,
     Command, Context,
 };
@@ -135,9 +138,7 @@ fn test_subcommand_import(test_context: TestFixture) {
     std::fs::write(&key_path, pem_doc.as_bytes()).unwrap();
 
     let import_cmd = Commands::Import(Import {
-        parent: ParentArgs {
-            parent: parent_context_uri.parse().unwrap(),
-        },
+        parent: parent_context_uri.parse().unwrap(),
         key: format!("file://{}", key_path.to_str().unwrap())
             .parse()
             .unwrap(),
