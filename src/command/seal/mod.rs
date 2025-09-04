@@ -6,7 +6,7 @@ use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::context::Context,
     device::TpmDevice,
-    error::CliError,
+    error::{CliError, ParseError},
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
@@ -28,6 +28,7 @@ pub struct Seal {
     pub parent: Uri,
     pub data: Uri,
     pub object_password: Option<String>,
+    pub policy: Option<String>,
 }
 
 impl Subcommand for Seal {
@@ -38,11 +39,13 @@ impl Subcommand for Seal {
         let mut parent = None;
         let mut data = None;
         let mut object_password = None;
+        let mut policy = None;
         while let Some(arg) = parser.next()? {
             match arg {
                 Arg::Long("parent") | Arg::Short('P') => parent = Some(parser.value()?.parse()?),
                 Arg::Long("data") => data = Some(parser.value()?.parse()?),
                 Arg::Long("object-password") => object_password = Some(parser.value()?.string()?),
+                Arg::Long("policy") => policy = Some(parser.value()?.string()?),
                 _ => return handle_help(arg),
             }
         }
@@ -50,6 +53,7 @@ impl Subcommand for Seal {
             parent: required(parent, "--parent")?,
             data: required(data, "--data")?,
             object_password,
+            policy,
         })
     }
 }
@@ -67,11 +71,18 @@ impl DeviceCommand for Seal {
         if self.object_password.is_some() {
             object_attributes |= TpmaObject::USER_WITH_AUTH;
         }
+        let auth_policy = if let Some(policy_hex) = &self.policy {
+            object_attributes |= TpmaObject::USER_WITH_AUTH;
+            let digest_bytes = hex::decode(policy_hex).map_err(ParseError::from)?;
+            Tpm2bDigest::try_from(digest_bytes.as_slice())?
+        } else {
+            Tpm2bDigest::default()
+        };
         let public_template = TpmtPublic {
             object_type: TpmAlgId::KeyedHash,
             name_alg: TpmAlgId::Sha256,
             object_attributes,
-            auth_policy: Tpm2bDigest::default(),
+            auth_policy,
             parameters: TpmuPublicParms::KeyedHash(TpmsKeyedhashParms {
                 scheme: TpmtScheme {
                     scheme: TpmAlgId::Null,

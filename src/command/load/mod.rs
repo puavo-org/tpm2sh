@@ -71,6 +71,7 @@ impl DeviceCommand for Load {
         let resp = resp
             .Load()
             .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        context.track(resp.object_handle)?;
         context.save(device, resp.object_handle)?;
         Ok(())
     }

@@ -31,23 +31,28 @@ use std::{
 use tpm2_protocol::{
     self,
     data::{
-        Tpm2bCreationData, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa, TpmAlgId,
-        TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh, TpmaAlgorithm, TpmaCc,
-        TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle, TpmlTaggedTpmProperty, TpmsAlgProperty,
-        TpmsAlgorithmDetailEcc, TpmtPublic, TpmtSensitive, TpmtTkCreation, TpmuCapabilities,
-        TpmuPublicId, TpmuPublicParms,
+        Tpm2bCreationData, Tpm2bDigest, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa,
+        Tpm2bSensitiveData, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh,
+        TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle,
+        TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmsAuthCommand,
+        TpmsCapabilityData, TpmsContext, TpmtPublic, TpmtPublicParms, TpmtSensitive,
+        TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,
         TpmContextLoadCommand, TpmContextLoadResponse, TpmContextSaveCommand,
-        TpmContextSaveResponse, TpmCreatePrimaryCommand, TpmCreatePrimaryResponse,
-        TpmEccParametersCommand, TpmEccParametersResponse, TpmEvictControlCommand,
-        TpmEvictControlResponse, TpmFlushContextCommand, TpmFlushContextResponse,
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse,
-        TpmLoadCommand, TpmLoadResponse, TpmReadPublicCommand, TpmReadPublicResponse,
-        TpmResponseBody, TpmTestParmsCommand, TpmTestParmsResponse,
+        TpmContextSaveResponse, TpmCreateCommand, TpmCreatePrimaryCommand,
+        TpmCreatePrimaryResponse, TpmCreateResponse, TpmEccParametersCommand,
+        TpmEccParametersResponse, TpmEvictControlCommand, TpmEvictControlResponse,
+        TpmFlushContextCommand, TpmFlushContextResponse, TpmGetCapabilityCommand,
+        TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
+        TpmLoadResponse, TpmPolicyGetDigestCommand, TpmPolicyGetDigestResponse,
+        TpmPolicyPcrCommand, TpmPolicyPcrResponse, TpmReadPublicCommand, TpmReadPublicResponse,
+        TpmResponseBody, TpmStartAuthSessionCommand, TpmStartAuthSessionResponse,
+        TpmTestParmsCommand, TpmTestParmsResponse, TpmUnsealCommand, TpmUnsealResponse,
     },
-    TpmBuffer, TpmBuild, TpmErrorKind, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuffer, TpmBuild, TpmErrorKind, TpmParse, TpmSession, TpmTransient, TpmWriter,
+    TPM_MAX_COMMAND_SIZE,
 };
 
 const TPM_HEADER_SIZE: usize = 10;
@@ -96,11 +101,17 @@ fn build_to_vec<T: TpmBuild>(obj: &T) -> Result<Vec<u8>, TpmRc> {
     Ok(buf[..len].to_vec())
 }
 
+#[derive(Debug, Clone, Default)]
+struct MockSession {
+    policy_digest: Tpm2bDigest,
+}
+
 #[derive(Debug, Clone)]
 struct MockTpmKey {
     public: TpmtPublic,
     private: Option<PrivateKey>,
     seed_value: Vec<u8>,
+    sensitive_data: Tpm2bSensitiveData,
 }
 
 impl MockTpmKey {
@@ -188,6 +199,7 @@ impl MockTpmKey {
             public,
             private,
             seed_value,
+            sensitive_data: Tpm2bSensitiveData::default(),
         })
     }
 }
@@ -226,6 +238,7 @@ macro_rules! mocktpm_response {
 mocktpm_response!(
     ContextLoad,
     ContextSave,
+    Create,
     CreatePrimary,
     EccParameters,
     EvictControl,
@@ -233,22 +246,28 @@ mocktpm_response!(
     GetCapability,
     Import,
     Load,
+    PolicyGetDigest,
+    PolicyPcr,
     ReadPublic,
+    StartAuthSession,
     TestParms,
+    Unseal,
 );
 
 #[derive(Debug, Default)]
 struct MockTpm {
     objects: HashMap<u32, MockTpmKey>,
-    next_handle: u32,
+    sessions: HashMap<u32, MockSession>,
+    next_transient_handle: u32,
+    next_session_handle: u32,
     nvram_path: Option<PathBuf>,
 }
 
 macro_rules! mocktpm_command {
-    ($state:ident, $cmd_body:ident, $($variant:ident => $handler:path),* $(,)?) => {
+    ($state:ident, $cmd_body:ident, $sessions:ident, $($variant:ident => $handler:path),* $(,)?) => {
         match $cmd_body {
             $(
-                TpmCommandBody::$variant(cmd) => $handler($state, &cmd),
+                TpmCommandBody::$variant(cmd) => $handler($state, &cmd, &$sessions),
             )*
             _ => Err(
                 TpmRc::from(TpmRcBase::CommandCode),
@@ -264,7 +283,8 @@ impl MockTpm {
             p.to_path_buf()
         });
         Self {
-            next_handle: 0x8000_0000,
+            next_transient_handle: 0x8000_0000,
+            next_session_handle: 0x0300_0000,
             nvram_path: path,
             ..Default::default()
         }
@@ -291,7 +311,7 @@ impl MockTpm {
     }
 
     fn parse(&mut self, request_buf: &[u8]) -> MockTpmResult {
-        let (handles, cmd_body, _sessions) =
+        let (handles, cmd_body, sessions) =
             tpm_parse_command(request_buf).map_err(TpmErrorKindExt::to_tpm_rc)?;
 
         for handle in handles.iter().copied() {
@@ -299,9 +319,10 @@ impl MockTpm {
         }
 
         mocktpm_command! {
-            self, cmd_body,
+            self, cmd_body, sessions,
             ContextLoad => mocktpm_context_load,
             ContextSave => mocktpm_context_save,
+            Create => mocktpm_create,
             CreatePrimary => mocktpm_create_primary,
             EccParameters => mocktpm_ecc_parameters,
             EvictControl => mocktpm_evict_control,
@@ -309,8 +330,12 @@ impl MockTpm {
             GetCapability => mocktpm_get_capability,
             Import => mocktpm_import,
             Load => mocktpm_load,
+            PolicyGetDigest => mocktpm_policy_get_digest,
+            PolicyPcr => mocktpm_policy_pcr,
             ReadPublic => mocktpm_read_public,
+            StartAuthSession => mocktpm_start_auth_session,
             TestParms => mocktpm_test_parms,
+            Unseal => mocktpm_unseal,
         }
     }
 }
@@ -350,6 +375,7 @@ fn mocktpm_supported_commands() -> &'static [TpmCc] {
     &[
         TpmCc::ContextLoad,
         TpmCc::ContextSave,
+        TpmCc::Create,
         TpmCc::CreatePrimary,
         TpmCc::EccParameters,
         TpmCc::EvictControl,
@@ -357,8 +383,12 @@ fn mocktpm_supported_commands() -> &'static [TpmCc] {
         TpmCc::GetCapability,
         TpmCc::Import,
         TpmCc::Load,
+        TpmCc::PolicyGetDigest,
+        TpmCc::PolicyPcr,
         TpmCc::ReadPublic,
+        TpmCc::StartAuthSession,
         TpmCc::TestParms,
+        TpmCc::Unseal,
     ]
 }
 
@@ -395,7 +425,11 @@ fn mocktpm_supported_algs() -> &'static [TpmsAlgProperty] {
 }
 
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_context_load(_tpm: &mut MockTpm, cmd: &TpmContextLoadCommand) -> MockTpmResult {
+fn mocktpm_context_load(
+    _tpm: &mut MockTpm,
+    cmd: &TpmContextLoadCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let resp = TpmContextLoadResponse {
         loaded_handle: cmd.context.saved_handle,
     };
@@ -407,9 +441,13 @@ fn mocktpm_context_load(_tpm: &mut MockTpm, cmd: &TpmContextLoadCommand) -> Mock
 }
 
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_context_save(_tpm: &mut MockTpm, cmd: &TpmContextSaveCommand) -> MockTpmResult {
+fn mocktpm_context_save(
+    _tpm: &mut MockTpm,
+    cmd: &TpmContextSaveCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let resp = TpmContextSaveResponse {
-        context: tpm2_protocol::data::TpmsContext {
+        context: TpmsContext {
             sequence: 1,
             saved_handle: cmd.save_handle,
             hierarchy: TpmRh::Owner,
@@ -423,7 +461,54 @@ fn mocktpm_context_save(_tpm: &mut MockTpm, cmd: &TpmContextSaveCommand) -> Mock
     ))
 }
 
-fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> MockTpmResult {
+fn mocktpm_create(
+    tpm: &mut MockTpm,
+    cmd: &TpmCreateCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    if !tpm.objects.contains_key(&cmd.parent_handle.0) {
+        return Err(TpmRc::from(TpmRcBase::Handle));
+    }
+
+    let public = cmd.in_public.inner.clone();
+    let handle = tpm.next_transient_handle;
+    tpm.next_transient_handle += 1;
+
+    tpm.objects.insert(
+        handle,
+        MockTpmKey {
+            public: public.clone(),
+            private: None,
+            seed_value: Vec::new(),
+            sensitive_data: cmd.in_sensitive.inner.data,
+        },
+    );
+
+    let name_bytes = crypto_make_name(&public)?;
+    let Ok(_name) = Tpm2bName::try_from(name_bytes.as_slice()) else {
+        return Err(TpmRc::from(TpmRcBase::Value));
+    };
+
+    let resp = TpmCreateResponse {
+        out_private: Tpm2bPrivate::default(),
+        out_public: Tpm2bPublic { inner: public },
+        creation_data: Tpm2bCreationData::default(),
+        creation_hash: TpmBuffer::default(),
+        creation_ticket: TpmtTkCreation::default(),
+    };
+
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::Create(resp),
+        TpmAuthResponses::default(),
+    ))
+}
+
+fn mocktpm_create_primary(
+    tpm: &mut MockTpm,
+    cmd: &TpmCreatePrimaryCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let mut public = cmd.in_public.inner.clone();
     let mut private = None;
 
@@ -445,8 +530,8 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
         public.unique = TpmuPublicId::Rsa(unique_rsa);
     }
 
-    let handle = tpm.next_handle;
-    tpm.next_handle += 1;
+    let handle = tpm.next_transient_handle;
+    tpm.next_transient_handle += 1;
 
     let public_bytes = build_to_vec(&public)?;
     let seed_value = Sha256::digest(&public_bytes).to_vec();
@@ -457,6 +542,7 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
             public: public.clone(),
             private,
             seed_value,
+            sensitive_data: Tpm2bSensitiveData::default(),
         },
     );
 
@@ -480,7 +566,11 @@ fn mocktpm_create_primary(tpm: &mut MockTpm, cmd: &TpmCreatePrimaryCommand) -> M
 }
 
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_ecc_parameters(_tpm: &mut MockTpm, cmd: &TpmEccParametersCommand) -> MockTpmResult {
+fn mocktpm_ecc_parameters(
+    _tpm: &mut MockTpm,
+    cmd: &TpmEccParametersCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let supported_curves = [
         TpmEccCurve::NistP256,
         TpmEccCurve::NistP384,
@@ -500,7 +590,11 @@ fn mocktpm_ecc_parameters(_tpm: &mut MockTpm, cmd: &TpmEccParametersCommand) -> 
 }
 
 #[allow(clippy::unnecessary_wraps)]
-fn mocktpm_evict_control(tpm: &mut MockTpm, cmd: &TpmEvictControlCommand) -> MockTpmResult {
+fn mocktpm_evict_control(
+    tpm: &mut MockTpm,
+    cmd: &TpmEvictControlCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let Some(nvram_path) = tpm.nvram_path.as_ref() else {
         return Err(TpmRc::from(TpmRcBase::NvUnavailable));
     };
@@ -538,7 +632,11 @@ fn mocktpm_evict_control(tpm: &mut MockTpm, cmd: &TpmEvictControlCommand) -> Moc
 }
 
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_flush_context(_tpm: &mut MockTpm, _cmd: &TpmFlushContextCommand) -> MockTpmResult {
+fn mocktpm_flush_context(
+    _tpm: &mut MockTpm,
+    _cmd: &TpmFlushContextCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let resp = TpmFlushContextResponse {};
     Ok((
         TpmRc::from(TpmRcBase::Success),
@@ -547,7 +645,11 @@ fn mocktpm_flush_context(_tpm: &mut MockTpm, _cmd: &TpmFlushContextCommand) -> M
     ))
 }
 
-fn mocktpm_get_capability(tpm: &mut MockTpm, cmd: &TpmGetCapabilityCommand) -> MockTpmResult {
+fn mocktpm_get_capability(
+    tpm: &mut MockTpm,
+    cmd: &TpmGetCapabilityCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let capability_data = match cmd.cap {
         TpmCap::Commands => {
             let all_cmds = mocktpm_supported_commands();
@@ -614,7 +716,7 @@ fn mocktpm_get_capability(tpm: &mut MockTpm, cmd: &TpmGetCapabilityCommand) -> M
 
     let resp = TpmGetCapabilityResponse {
         more_data: false.into(),
-        capability_data: tpm2_protocol::data::TpmsCapabilityData {
+        capability_data: TpmsCapabilityData {
             capability: cmd.cap,
             data: capability_data,
         },
@@ -627,7 +729,11 @@ fn mocktpm_get_capability(tpm: &mut MockTpm, cmd: &TpmGetCapabilityCommand) -> M
 }
 
 #[allow(clippy::too_many_lines)]
-fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
+fn mocktpm_import(
+    tpm: &mut MockTpm,
+    cmd: &TpmImportCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let Some(parent_key) = tpm.objects.get(&cmd.parent_handle.0) else {
         return Err(TpmRc::from(TpmRcBase::Handle));
     };
@@ -691,8 +797,7 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     )?;
 
     let (hmac_struct, encrypted_sensitive) =
-        tpm2_protocol::data::Tpm2bDigest::parse(&cmd.duplicate)
-            .map_err(TpmErrorKindExt::to_tpm_rc)?;
+        Tpm2bDigest::parse(&cmd.duplicate).map_err(TpmErrorKindExt::to_tpm_rc)?;
     let received_hmac = &hmac_struct;
 
     crypto_hmac_verify(
@@ -763,20 +868,25 @@ fn mocktpm_import(tpm: &mut MockTpm, cmd: &TpmImportCommand) -> MockTpmResult {
     ))
 }
 
-fn mocktpm_load(tpm: &mut MockTpm, cmd: &TpmLoadCommand) -> MockTpmResult {
+fn mocktpm_load(
+    tpm: &mut MockTpm,
+    cmd: &TpmLoadCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     if !tpm.objects.contains_key(&cmd.parent_handle.0) {
         return Err(TpmRc::from(TpmRcBase::Handle));
     }
 
     let public = cmd.in_public.inner.clone();
-    let handle = tpm.next_handle;
-    tpm.next_handle += 1;
+    let handle = tpm.next_transient_handle;
+    tpm.next_transient_handle += 1;
     tpm.objects.insert(
         handle,
         MockTpmKey {
             public: public.clone(),
             private: None,
             seed_value: Vec::new(),
+            sensitive_data: Tpm2bSensitiveData::default(),
         },
     );
 
@@ -797,8 +907,50 @@ fn mocktpm_load(tpm: &mut MockTpm, cmd: &TpmLoadCommand) -> MockTpmResult {
     ))
 }
 
+#[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
+fn mocktpm_policy_get_digest(
+    tpm: &mut MockTpm,
+    cmd: &TpmPolicyGetDigestCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    let session = tpm
+        .sessions
+        .get(&cmd.policy_session.0)
+        .ok_or(TpmRc::from(TpmRcBase::Handle))?;
+    let resp = TpmPolicyGetDigestResponse {
+        policy_digest: session.policy_digest,
+    };
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::PolicyGetDigest(resp),
+        TpmAuthResponses::default(),
+    ))
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn mocktpm_policy_pcr(
+    tpm: &mut MockTpm,
+    cmd: &TpmPolicyPcrCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    let session = tpm
+        .sessions
+        .get_mut(&cmd.policy_session.0)
+        .ok_or(TpmRc::from(TpmRcBase::Handle))?;
+    session.policy_digest = cmd.pcr_digest;
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::PolicyPcr(TpmPolicyPcrResponse {}),
+        TpmAuthResponses::default(),
+    ))
+}
+
 #[allow(clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_read_public(tpm: &mut MockTpm, cmd: &TpmReadPublicCommand) -> MockTpmResult {
+fn mocktpm_read_public(
+    tpm: &mut MockTpm,
+    cmd: &TpmReadPublicCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
     let Some(key) = tpm.objects.get(&cmd.object_handle.0) else {
         return Err(TpmRc::from(TpmRcBase::Handle));
     };
@@ -818,9 +970,34 @@ fn mocktpm_read_public(tpm: &mut MockTpm, cmd: &TpmReadPublicCommand) -> MockTpm
     ))
 }
 
+#[allow(clippy::unnecessary_wraps)]
+fn mocktpm_start_auth_session(
+    tpm: &mut MockTpm,
+    _cmd: &TpmStartAuthSessionCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    let handle = tpm.next_session_handle;
+    tpm.next_session_handle += 1;
+    tpm.sessions.insert(handle, MockSession::default());
+
+    let resp = TpmStartAuthSessionResponse {
+        session_handle: TpmSession(handle),
+        nonce_tpm: TpmBuffer::default(),
+    };
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::StartAuthSession(resp),
+        TpmAuthResponses::default(),
+    ))
+}
+
 #[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
-fn mocktpm_test_parms(_tpm: &mut MockTpm, cmd: &TpmTestParmsCommand) -> MockTpmResult {
-    if let tpm2_protocol::data::TpmtPublicParms {
+fn mocktpm_test_parms(
+    _tpm: &mut MockTpm,
+    cmd: &TpmTestParmsCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    if let TpmtPublicParms {
         object_type: TpmAlgId::Rsa,
         parameters: TpmuPublicParms::Rsa(params),
     } = cmd.parameters
@@ -835,6 +1012,40 @@ fn mocktpm_test_parms(_tpm: &mut MockTpm, cmd: &TpmTestParmsCommand) -> MockTpmR
         }
     }
     Err(TpmRc::from(TpmRcBase::Value))
+}
+
+#[allow(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
+fn mocktpm_unseal(
+    tpm: &mut MockTpm,
+    cmd: &TpmUnsealCommand,
+    sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    let object = tpm
+        .objects
+        .get(&cmd.item_handle.0)
+        .ok_or(TpmRc::from(TpmRcBase::Handle))?;
+
+    if !object.public.auth_policy.is_empty() {
+        let auth_session = sessions
+            .first()
+            .ok_or(TpmRc::from(TpmRcBase::AuthMissing))?;
+        let session_state = tpm
+            .sessions
+            .get(&auth_session.session_handle.0)
+            .ok_or(TpmRc::from(TpmRcBase::Handle))?;
+        if session_state.policy_digest != object.public.auth_policy {
+            return Err(TpmRc::from(TpmRcBase::AuthFail));
+        }
+    }
+
+    let resp = TpmUnsealResponse {
+        out_data: object.sensitive_data,
+    };
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::Unseal(resp),
+        TpmAuthResponses::default(),
+    ))
 }
 
 fn mocktpm_build_response(response: MockTpmResult) -> Result<Vec<u8>, TpmRc> {
