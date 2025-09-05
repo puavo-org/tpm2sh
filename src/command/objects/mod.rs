@@ -6,9 +6,9 @@ use crate::{
     command::context::Context,
     device::TpmDevice,
     error::CliError,
-    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
 };
 use lexopt::Parser;
+use tpm2_protocol::data::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST};
 
 #[derive(Debug, Default)]
 pub struct Objects;

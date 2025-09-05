@@ -8,14 +8,13 @@ use crate::{
     error::{CliError, ParseError},
     parser::PolicyExpr,
     session::session_from_args,
-    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     uri::Uri,
     util::build_to_vec,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
-    data::{TpmRh, TpmsContext},
+    data::{TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     message::{
         TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
         TpmFlushContextCommand, MAX_HANDLES,

@@ -11,7 +11,6 @@ use crate::{
         KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
     },
     device::TpmTransport,
-    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
 };
 use aes::Aes128;
@@ -38,6 +37,7 @@ use tpm2_protocol::{
         TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmsAuthCommand,
         TpmsCapabilityData, TpmsContext, TpmtPublic, TpmtPublicParms, TpmtSensitive,
         TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms,
+        TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,

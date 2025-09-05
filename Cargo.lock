@@ -1140,9 +1140,9 @@ dependencies = [
 
 [[package]]
 name = "tpm2-protocol"
-version = "0.10.27"
+version = "0.10.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b850e8e453e2383fd55efef3f815766480dcd4274646a1d428d0f844e6b8059"
+checksum = "95e644a956b77207e38ed31e138e417fb0aef7942b8af85461120635ef3c51e0"
 
 [[package]]
 name = "tpm2sh"
@@ -1395,9 +1395,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.45.0"
+version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "052283831dbae3d879dc7f51f3d92703a316ca49f91540417d38591826127814"
+checksum = "5c573471f125075647d03df72e026074b7203790d41351cd6edc96f46bcccd36"
 
 [[package]]
 name = "zerocopy"
