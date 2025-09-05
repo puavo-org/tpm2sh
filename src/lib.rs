@@ -20,6 +20,9 @@ pub mod transport;
 pub mod uri;
 pub mod util;
 
+pub use command::CommandError;
+pub use device::TpmDeviceError;
+
 /// A trait for executing the top-level Commands enum.
 pub trait Command {
     /// Returns `true` if the command does not require TPM device access.

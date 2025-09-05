@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::error::{CliError, ParseError};
+use crate::{command::CommandError, error::CliError, error::ParseError};
 use tpm2_protocol::{data::TpmRc, TpmBuild, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE};
 
 /// Parses a hex string (with or without a "0x" prefix) into a u32.
@@ -52,12 +52,12 @@ pub fn parse_tpm_rc(s: &str) -> Result<TpmRc, ParseError> {
 ///
 /// # Errors
 ///
-/// Returns a `CliError::Build` if the object cannot be serialized into the buffer.
+/// Returns a `CliError::Command` if the object cannot be serialized into the buffer.
 pub fn build_to_vec<T: TpmBuild>(obj: &T) -> Result<Vec<u8>, CliError> {
     let mut buf = [0u8; TPM_MAX_COMMAND_SIZE];
     let len = {
         let mut writer = TpmWriter::new(&mut buf);
-        obj.build(&mut writer)?;
+        obj.build(&mut writer).map_err(CommandError::from)?;
         writer.len()
     };
     Ok(buf[..len].to_vec())

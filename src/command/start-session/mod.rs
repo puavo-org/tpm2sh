@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, DeviceCommand, SessionType, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     device::TpmDevice,
     error::CliError,
     session::AuthSession,
@@ -52,14 +52,16 @@ impl DeviceCommand for StartSession {
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let auth_hash = TpmAlgId::Sha256;
-        let digest_len = tpm_hash_size(&auth_hash)
-            .ok_or_else(|| CliError::Execution("Unsupported hash algorithm".to_string()))?;
+        let digest_len = tpm_hash_size(&auth_hash).ok_or_else(|| {
+            CommandError::UnsupportedAlgorithm("Unsupported hash algorithm".to_string())
+        })?;
         let mut nonce_bytes = vec![0; digest_len];
         thread_rng().fill_bytes(&mut nonce_bytes);
         let cmd = TpmStartAuthSessionCommand {
             tpm_key: (TpmRh::Null as u32).into(),
             bind: (TpmRh::Null as u32).into(),
-            nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice())?,
+            nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice())
+                .map_err(CommandError::from)?,
             encrypted_salt: Tpm2bEncryptedSecret::default(),
             session_type: self.session_type.into(),
             symmetric: TpmtSymDefObject {

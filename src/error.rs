@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use std::{io::Error as IoError, num::ParseIntError, str::Utf8Error};
+use crate::{command::CommandError, device::TpmDeviceError};
+use std::io::Error as IoError;
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
 
@@ -16,7 +17,7 @@ pub enum ParseError {
     #[error("hex decoding failed: {0}")]
     Hex(#[from] hex::FromHexError),
     #[error("integer parsing failed: {0}")]
-    Int(#[from] ParseIntError),
+    Int(#[from] std::num::ParseIntError),
     #[error("invalid PEM data: {0}")]
     Pem(#[from] pem::PemError),
     #[error("PKCS#8 parsing failed: {0}")]
@@ -24,7 +25,7 @@ pub enum ParseError {
     #[error("TPM protocol: {0}")]
     TpmProtocol(TpmErrorKind),
     #[error("UTF-8 decoding failed: {0}")]
-    Utf8(#[from] Utf8Error),
+    Utf8(#[from] std::str::Utf8Error),
 }
 
 impl From<TpmErrorKind> for ParseError {
@@ -35,48 +36,30 @@ impl From<TpmErrorKind> for ParseError {
 
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("{0}")]
-    Build(TpmErrorKind),
+    #[error("Command error: {0}")]
+    Command(#[from] CommandError),
 
-    #[error("{0}")]
-    Execution(String),
+    #[error("Device error: {0}")]
+    Device(#[from] TpmDeviceError),
 
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("{handle:#010x}")]
-    InvalidHandleType { handle: u32 },
-
-    #[error("The arguments '--{0}' and '--{1}' are mutually exclusive")]
-    MutualExclusionArgs(&'static str, &'static str),
-
-    #[error("{0}")]
-    UnsupportedUriForDelete(String),
-
-    #[error("I/O: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] IoError),
 
-    #[error("Parser: {0}")]
+    #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),
 
-    #[error("PCR: {0}")]
-    PcrSelection(String),
-
-    #[error("{0}")]
-    TpmRc(TpmRc),
-
-    #[error("TPM device lock poisoned")]
-    DeviceLockPoisoned,
-
-    #[error("TPM device not provided for a device command")]
-    DeviceNotProvided,
+    #[error("TPM returned an error code: {0}")]
+    Tpm(TpmRc),
 
     #[error("unexpected TPM response: {0}")]
     Unexpected(String),
 }
 
-impl From<TpmErrorKind> for CliError {
-    fn from(err: TpmErrorKind) -> Self {
-        CliError::Build(err)
+impl From<TpmRc> for CliError {
+    fn from(rc: TpmRc) -> Self {
+        Self::Tpm(rc)
     }
 }

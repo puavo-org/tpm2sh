@@ -3,7 +3,7 @@
 
 use crate::{
     cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     device::TpmDevice,
     error::{CliError, ParseError},
     parser::{parse_policy, PolicyExpr},
@@ -72,7 +72,8 @@ impl PolicyExecutor<'_> {
         };
 
         let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;
-        let pcr_digest = Tpm2bDigest::try_from(pcr_digest_bytes.as_slice())?;
+        let pcr_digest =
+            Tpm2bDigest::try_from(pcr_digest_bytes.as_slice()).map_err(CommandError::from)?;
 
         let cmd = TpmPolicyPcrCommand {
             policy_session: session_handle.0.into(),
@@ -129,7 +130,9 @@ impl PolicyExecutor<'_> {
             self.execute_policy_ast(cli, branch_handle, branch_ast)?;
 
             let digest = get_policy_digest(self.device, cli, branch_handle)?;
-            branch_digests.try_push(digest)?;
+            branch_digests
+                .try_push(digest)
+                .map_err(CommandError::from)?;
 
             flush_session(self.device, cli, branch_handle)?;
         }

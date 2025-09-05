@@ -4,7 +4,7 @@
 
 use crate::{
     cli::LogFormat,
-    error::{CliError, ParseError},
+    error::ParseError,
     key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
     print::TpmPrint,
 };
@@ -19,6 +19,7 @@ use std::{
     },
     time::Duration,
 };
+use thiserror::Error;
 
 use log::{trace, warn};
 use tpm2_protocol::{
@@ -32,15 +33,45 @@ use tpm2_protocol::{
         TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmReadPublicCommand,
         TpmResponseBody, TpmTestParmsCommand,
     },
-    TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
-#[derive(Debug)]
-pub enum TpmDeviceErrorKind {
-    NotProvided,
+#[derive(Debug, Error)]
+pub enum TpmDeviceError {
+    #[error("TPM device lock poisoned")]
     LockPoisoned,
+
+    #[error("TPM device not provided for a device command")]
+    NotProvided,
+
+    #[error("I/O error with TPM device")]
+    Io(#[from] io::Error),
+
+    #[error("TPM protocol error")]
+    Protocol(TpmErrorKind),
+
+    #[error("TPM returned an error code: {0}")]
+    Tpm(TpmRc),
+
+    #[error("Invalid response from TPM: {0}")]
+    InvalidResponse(String),
+
+    #[error("Failed to parse TPM response")]
+    Parse(#[from] ParseError),
+}
+
+impl From<TpmErrorKind> for TpmDeviceError {
+    fn from(err: TpmErrorKind) -> Self {
+        Self::Protocol(err)
+    }
+}
+
+impl From<TpmRc> for TpmDeviceError {
+    fn from(rc: TpmRc) -> Self {
+        Self::Tpm(rc)
+    }
 }
 
 /// A trait combining the I/O and safety traits required for a TPM transport.
@@ -56,7 +87,7 @@ pub struct TpmDevice {
 }
 
 /// Checks if the TPM supports a given set of RSA parameters.
-fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<TpmRc, CliError> {
+fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<TpmRc, TpmDeviceError> {
     let cmd = TpmTestParmsCommand {
         parameters: TpmtPublicParms {
             object_type: TpmAlgId::Rsa,
@@ -90,7 +121,7 @@ impl TpmDevice {
         &mut self,
         command: &C,
         sessions: &[TpmsAuthCommand],
-    ) -> Result<(TpmRc, TpmResponseBody, TpmAuthResponses), CliError>
+    ) -> Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmDeviceError>
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
@@ -149,15 +180,17 @@ impl TpmDevice {
         self.transport.read_exact(&mut header)?;
 
         let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            return Err(CliError::Execution("input data underflow".to_string()));
+            return Err(TpmDeviceError::InvalidResponse(
+                "input data underflow".to_string(),
+            ));
         };
         let size = u32::from_be_bytes(size_bytes) as usize;
 
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
             drop(tx);
-            return Err(
-                ParseError::Custom(format!("Invalid response size in header: {size}")).into(),
-            );
+            return Err(TpmDeviceError::InvalidResponse(format!(
+                "Invalid response size in header: {size}"
+            )));
         }
 
         let mut resp_buf = header.to_vec();
@@ -200,7 +233,7 @@ impl TpmDevice {
                 }
                 Ok((rc, response, auth))
             }
-            Err((rc, _)) => Err(CliError::TpmRc(rc)),
+            Err((rc, _)) => Err(TpmDeviceError::Tpm(rc)),
         }
     }
 
@@ -208,8 +241,8 @@ impl TpmDevice {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if querying the TPM fails.
-    pub fn get_all_algorithms(&mut self) -> Result<Vec<(TpmAlgId, String)>, CliError> {
+    /// Returns a `TpmDeviceError` if querying the TPM fails.
+    pub fn get_all_algorithms(&mut self) -> Result<Vec<(TpmAlgId, String)>, TpmDeviceError> {
         let mut supported_algs = Vec::new();
 
         let alg_props_vec = self.get_capability(TpmCap::Algs, 0, TPM_CAP_PROPERTY_MAX)?;
@@ -288,8 +321,8 @@ impl TpmDevice {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(&mut self, handle_type: u32) -> Result<Vec<u32>, CliError> {
+    /// Returns a `TpmDeviceError` if the `get_capability` call to the TPM device fails.
+    pub fn get_all_handles(&mut self, handle_type: u32) -> Result<Vec<u32>, TpmDeviceError> {
         let cap_data_vec =
             self.get_capability(TpmCap::Handles, handle_type, TPM_CAP_PROPERTY_MAX)?;
         let handles: Vec<u32> = cap_data_vec
@@ -316,7 +349,7 @@ impl TpmDevice {
         cap: TpmCap,
         mut property: u32,
         count: u32,
-    ) -> Result<Vec<TpmsCapabilityData>, CliError> {
+    ) -> Result<Vec<TpmsCapabilityData>, TpmDeviceError> {
         let mut all_caps = Vec::new();
         loop {
             let cmd = TpmGetCapabilityCommand {
@@ -329,9 +362,11 @@ impl TpmDevice {
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
-            } = resp
-                .GetCapability()
-                .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            } = resp.GetCapability().map_err(|e| {
+                TpmDeviceError::InvalidResponse(format!(
+                    "unexpected get capability response: {e:?}"
+                ))
+            })?;
 
             let next_prop = if more_data.into() {
                 match &capability_data.data {
@@ -365,18 +400,18 @@ impl TpmDevice {
     ///
     /// # Errors
     ///
-    /// Returns `CliError` if the `ReadPublic` command fails.
+    /// Returns `TpmDeviceError` if the `ReadPublic` command fails.
     pub fn read_public(
         &mut self,
         handle: TpmTransient,
-    ) -> Result<(TpmRc, TpmtPublic, Tpm2bName), CliError> {
+    ) -> Result<(TpmRc, TpmtPublic, Tpm2bName), TpmDeviceError> {
         let cmd = TpmReadPublicCommand {
             object_handle: handle.0.into(),
         };
         let (rc, resp, _) = self.execute(&cmd, &[])?;
-        let read_public_resp = resp
-            .ReadPublic()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        let read_public_resp = resp.ReadPublic().map_err(|e| {
+            TpmDeviceError::InvalidResponse(format!("unexpected read public response: {e:?}"))
+        })?;
         Ok((rc, read_public_resp.out_public.inner, read_public_resp.name))
     }
 }

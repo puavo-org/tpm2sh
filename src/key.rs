@@ -3,6 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
+    command::CommandError,
     crypto::{crypto_hmac, PrivateKey},
     error::{CliError, ParseError},
     session::AuthSession,
@@ -324,7 +325,7 @@ pub fn private_key_from_pem_file(path: &Path) -> Result<PrivateKey, CliError> {
 ///
 /// # Errors
 ///
-/// Returns a `CliError::Execution` if the session's hash algorithm is not
+/// Returns a `CliError` if the session's hash algorithm is not
 /// supported, or if an HMAC operation fails.
 pub fn create_auth(
     session: &AuthSession,
@@ -348,9 +349,10 @@ pub fn create_auth(
         TpmAlgId::Sha384 => Sha384::digest(&cp_hash_payload).to_vec(),
         TpmAlgId::Sha512 => Sha512::digest(&cp_hash_payload).to_vec(),
         alg => {
-            return Err(CliError::Execution(format!(
+            return Err(CommandError::UnsupportedAlgorithm(format!(
                 "unsupported session hash algorithm: {alg}"
-            )))
+            ))
+            .into())
         }
     };
 
@@ -364,12 +366,13 @@ pub fn create_auth(
             &[session.attributes.bits()],
         ],
     )
-    .map_err(CliError::TpmRc)?;
+    .map_err(CliError::from)?;
 
     Ok(TpmsAuthCommand {
         session_handle: session.handle,
         nonce: *nonce_caller,
         session_attributes: session.attributes,
-        hmac: tpm2_protocol::data::Tpm2bAuth::try_from(hmac_bytes.as_slice())?,
+        hmac: tpm2_protocol::data::Tpm2bAuth::try_from(hmac_bytes.as_slice())
+            .map_err(CommandError::from)?,
     })
 }

@@ -3,6 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
+    command::CommandError,
     error::{CliError, ParseError},
     parser::{parse_policy, PolicyExpr},
 };
@@ -21,17 +22,20 @@ pub(crate) fn pcr_selection_to_list(
     let mut list = TpmlPcrSelection::new();
     let pcr_select_size = pcr_count.div_ceil(8);
     if pcr_select_size > TPM_PCR_SELECT_MAX {
-        return Err(CliError::PcrSelection(format!(
+        return Err(CommandError::InvalidPcrSelection(format!(
             "required pcr select size {pcr_select_size} exceeds maximum {TPM_PCR_SELECT_MAX}"
-        )));
+        ))
+        .into());
     }
 
     for bank_str in selection_str.split('+') {
-        let (alg_str, indices_str) = bank_str
-            .split_once(':')
-            .ok_or_else(|| CliError::PcrSelection(format!("invalid bank format: '{bank_str}'")))?;
+        let (alg_str, indices_str) = bank_str.split_once(':').ok_or_else(|| {
+            CommandError::InvalidPcrSelection(format!("invalid bank format: '{bank_str}'"))
+        })?;
         let alg = PcrAlgId::from_str(alg_str)
-            .map_err(|()| CliError::PcrSelection(format!("invalid algorithm: {alg_str}")))?
+            .map_err(|()| {
+                CommandError::InvalidPcrSelection(format!("invalid algorithm: {alg_str}"))
+            })?
             .0;
 
         let mut pcr_select_bytes = vec![0u8; pcr_select_size];
@@ -39,16 +43,19 @@ pub(crate) fn pcr_selection_to_list(
             let pcr_index: usize = index_str.parse().map_err(ParseError::from)?;
 
             if pcr_index >= pcr_count {
-                return Err(CliError::PcrSelection(format!(
+                return Err(CommandError::InvalidPcrSelection(format!(
                     "pcr index {pcr_index} is out of range for a TPM with {pcr_count} PCRs"
-                )));
+                ))
+                .into());
             }
             pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
         }
         list.try_push(TpmsPcrSelection {
             hash: alg,
-            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
-        })?;
+            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())
+                .map_err(CommandError::from)?,
+        })
+        .map_err(CommandError::from)?;
     }
     Ok(list)
 }

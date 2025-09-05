@@ -4,7 +4,8 @@
 
 use crate::{
     cli::Cli,
-    device::TpmDevice,
+    command::CommandError,
+    device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     parser::PolicyExpr,
     session::session_from_args,
@@ -82,7 +83,8 @@ impl<'a> Context<'a> {
             PolicyExpr::TpmHandle(handle) => Ok(TpmTransient(*handle)),
             PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
                 let context_blob = uri.to_bytes()?;
-                let (context, remainder) = TpmsContext::parse(&context_blob)?;
+                let (context, remainder) =
+                    TpmsContext::parse(&context_blob).map_err(ParseError::from)?;
                 if !remainder.is_empty() {
                     return Err(ParseError::Custom("trailing data".to_string()).into());
                 }
@@ -135,7 +137,7 @@ impl<'a> Context<'a> {
         } else if handle >= TPM_RH_TRANSIENT_FIRST {
             self.delete_transient(device, TpmTransient(handle))?;
         } else {
-            return Err(CliError::InvalidHandleType { handle });
+            return Err(CommandError::InvalidHandleType { handle }.into());
         }
         Ok(handle)
     }
@@ -229,7 +231,7 @@ impl<'a> Context<'a> {
         self.non_existence_invariant(handle)?;
         self.capacity_invariant()?;
         if handle.0 < TPM_RH_TRANSIENT_FIRST {
-            return Err(CliError::InvalidHandleType { handle: handle.0 });
+            return Err(CommandError::InvalidHandleType { handle: handle.0 }.into());
         }
         if let Some(h) = self.handles.iter_mut().find(|h| h.is_none()) {
             *h = Some(handle);
@@ -241,11 +243,11 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `CliError::DeviceLockPoisoned` if the device mutex is poisoned.
+    /// Returns `CliError::Device` if the device mutex is poisoned.
     pub fn flush(self, device: Option<Arc<Mutex<TpmDevice>>>) -> Result<(), CliError> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
-                let mut guard = device.lock().map_err(|_| CliError::DeviceLockPoisoned)?;
+                let mut guard = device.lock().map_err(|_| TpmDeviceError::LockPoisoned)?;
                 for handle in self.handles.into_iter().flatten() {
                     let cmd = TpmFlushContextCommand {
                         flush_handle: handle.into(),
@@ -259,31 +261,27 @@ impl<'a> Context<'a> {
         Ok(())
     }
 
-    fn capacity_invariant(&self) -> Result<(), CliError> {
+    fn capacity_invariant(&self) -> Result<(), CommandError> {
         if self.handles_len() == MAX_HANDLES {
-            Err(CliError::Execution(format!(
-                "handle capacity {MAX_HANDLES} exceeded"
-            )))
+            Err(CommandError::HandleCapacityExceeded {
+                capacity: MAX_HANDLES,
+            })
         } else {
             Ok(())
         }
     }
 
-    fn existence_invariant(&self, handle: TpmTransient) -> Result<(), CliError> {
+    fn existence_invariant(&self, handle: TpmTransient) -> Result<(), CommandError> {
         if self.handles.contains(&Some(handle)) {
             Ok(())
         } else {
-            Err(CliError::Execution(format!(
-                "non-existing tpm://{handle:#010x}"
-            )))
+            Err(CommandError::HandleNotTracked { handle })
         }
     }
 
-    fn non_existence_invariant(&self, handle: TpmTransient) -> Result<(), CliError> {
+    fn non_existence_invariant(&self, handle: TpmTransient) -> Result<(), CommandError> {
         if self.handles.contains(&Some(handle)) {
-            Err(CliError::Execution(format!(
-                "pre-existing tpm://{handle:#010x}"
-            )))
+            Err(CommandError::HandleAlreadyTracked { handle })
         } else {
             Ok(())
         }

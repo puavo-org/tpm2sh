@@ -9,7 +9,7 @@ use cli::{
         objects::Objects, seal::Seal, start_session::StartSession, unseal::Unseal,
     },
     device::TpmDevice,
-    error::CliError,
+    error::{CliError, ParseError},
     parser::PolicyExpr,
     session::AuthSession,
     uri::Uri,
@@ -245,8 +245,9 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
     let public_uri: Uri = lines.next().unwrap().parse().unwrap();
     let private_uri: Uri = lines.next().unwrap().parse().unwrap();
 
-    let (in_public, _) = Tpm2bPublic::parse(&public_uri.to_bytes()?)?;
-    let (in_private, _) = Tpm2bPrivate::parse(&private_uri.to_bytes()?)?;
+    let (in_public, _) = Tpm2bPublic::parse(&public_uri.to_bytes()?).map_err(ParseError::from)?;
+    let (in_private, _) =
+        Tpm2bPrivate::parse(&private_uri.to_bytes()?).map_err(ParseError::from)?;
     let load_cmd = TpmLoadCommand {
         parent_handle: 0x8000_0000.into(),
         in_private,
@@ -285,9 +286,9 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
             auth_hash: cli::key::tpm_alg_id_from_str(alg).unwrap(),
         })
     } else {
-        Err(CliError::Execution(
+        Err(CliError::Parse(ParseError::Custom(
             "Failed to parse session URI".to_string(),
-        ))
+        )))
     }?;
 
     let policy_pcr_cmd = TpmPolicyPcrCommand {

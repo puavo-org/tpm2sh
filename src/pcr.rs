@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{device::TpmDevice, error::CliError};
+use crate::{command::CommandError, device::TpmDevice, error::CliError};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::{
     data::{TpmAlgId, TpmCap, TpmlPcrSelection, TpmuCapabilities},
@@ -49,9 +49,9 @@ pub fn read(
                 if (byte >> bit_idx) & 1 == 1 {
                     let pcr_index = u32::try_from(byte_idx * 8 + bit_idx)
                         .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
-                    let value = digest_iter
-                        .next()
-                        .ok_or_else(|| CliError::Execution("PCR selection mismatch".to_string()))?;
+                    let value = digest_iter.next().ok_or_else(|| {
+                        CommandError::InvalidPcrSelection("PCR selection mismatch".to_string())
+                    })?;
                     pcrs.push(Pcr {
                         bank: selection.hash,
                         index: pcr_index,
@@ -69,21 +69,23 @@ pub fn read(
 pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, CliError> {
     let cap_data = device.get_capability(TpmCap::Pcrs, 0, crate::device::TPM_CAP_PROPERTY_MAX)?;
     let Some(first_cap) = cap_data.into_iter().next() else {
-        return Err(CliError::Execution(
+        return Err(CommandError::InvalidPcrSelection(
             "TPM reported no capabilities for PCRs.".to_string(),
-        ));
+        )
+        .into());
     };
 
     if let TpmuCapabilities::Pcrs(pcrs) = first_cap.data {
         if let Some(first_bank) = pcrs.iter().next() {
             Ok(first_bank.pcr_select.len() * 8)
         } else {
-            Err(CliError::Execution(
-                "TPM reported no active PCR banks.".to_string(),
-            ))
+            Err(
+                CommandError::InvalidPcrSelection("TPM reported no active PCR banks.".to_string())
+                    .into(),
+            )
         }
     } else {
-        Err(CliError::Execution(
+        Err(CliError::Unexpected(
             "Unexpected capability data type when querying for PCRs.".to_string(),
         ))
     }

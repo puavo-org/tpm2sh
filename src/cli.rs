@@ -9,7 +9,7 @@ use crate::{
         pcr_read::PcrRead, policy::Policy, print_error::PrintError, reset_lock::ResetLock,
         save::Save, seal::Seal, start_session::StartSession, unseal::Unseal,
     },
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     uri::Uri,
     Command, ParseResult,
@@ -189,10 +189,10 @@ macro_rules! subcommand_registry {
                     ,)*
                     $(
                         Self::$device_command(args) => {
-                            let device_arc = device.ok_or(CliError::DeviceNotProvided)?;
+                            let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
                             let mut guard = device_arc
                                 .lock()
-                                .map_err(|_| CliError::DeviceLockPoisoned)?;
+                                .map_err(|_| TpmDeviceError::LockPoisoned)?;
                             args.run(&mut guard, context)
                         }
                     ,)*
@@ -200,22 +200,19 @@ macro_rules! subcommand_registry {
             }
         }
 
-        static SUBCOMMANDS: &[SubcommandObject] = &[
-            $(
-                SubcommandObject {
-                    name: $local_name,
-                    help: $local_command::HELP,
-                    dispatch: |p| dispatch(p, Commands::$local_command),
-                },
-            )*
-            $(
-                SubcommandObject {
-                    name: $device_name,
-                    help: $device_command::HELP,
-                    dispatch: |p| dispatch(p, Commands::$device_command),
-                },
-            )*
-        ];
+        static SUBCOMMANDS: &[SubcommandObject] = &[$ (
+            SubcommandObject {
+                name: $local_name,
+                help: $local_command::HELP,
+                dispatch: |p| dispatch(p, Commands::$local_command),
+            },
+        )* $ (
+            SubcommandObject {
+                name: $device_name,
+                help: $device_command::HELP,
+                dispatch: |p| dispatch(p, Commands::$device_command),
+            },
+        )*];
     };
 }
 

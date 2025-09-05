@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, KeyFormat, LocalCommand, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     error::CliError,
     key::TpmKey,
     uri::Uri,
@@ -50,9 +50,7 @@ impl LocalCommand for Convert {
     /// Returns a `CliError` if the execution fails
     fn run(&self, context: &mut Context) -> Result<(), CliError> {
         if self.from == self.to {
-            return Err(CliError::Execution(
-                "input and output formats cannot be the same".to_string(),
-            ));
+            return Err(CommandError::SameConversionFormat.into());
         }
         let input_bytes = self.input.to_bytes()?;
         let tpm_key = match self.from {

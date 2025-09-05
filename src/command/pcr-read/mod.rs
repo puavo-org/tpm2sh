@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     device::TpmDevice,
     error::CliError,
     key::tpm_alg_id_from_str,
@@ -50,7 +50,7 @@ impl DeviceCommand for PcrRead {
         let pcr_count = pcr::pcr_get_count(device)?;
         let pcr_selection_in = self.pcr.to_pcr_selection(pcr_count)?;
         let pcr_values = crate::pcr::read(device, &pcr_selection_in)?;
-        let alg_id = tpm_alg_id_from_str(&self.alg).map_err(CliError::Execution)?;
+        let alg_id = tpm_alg_id_from_str(&self.alg).map_err(CommandError::UnsupportedAlgorithm)?;
         let composite_digest = pcr::pcr_composite_digest(&pcr_values, alg_id)?;
         writeln!(
             context.writer,

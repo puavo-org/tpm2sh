@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     device::TpmDevice,
     error::{CliError, ParseError},
     session::session_from_args,
@@ -74,7 +74,7 @@ impl DeviceCommand for Seal {
         let auth_policy = if let Some(policy_hex) = &self.policy {
             object_attributes |= TpmaObject::USER_WITH_AUTH;
             let digest_bytes = hex::decode(policy_hex).map_err(ParseError::from)?;
-            Tpm2bDigest::try_from(digest_bytes.as_slice())?
+            Tpm2bDigest::try_from(digest_bytes.as_slice()).map_err(CommandError::from)?
         } else {
             Tpm2bDigest::default()
         };
@@ -95,8 +95,10 @@ impl DeviceCommand for Seal {
             parent_handle: parent_handle.0.into(),
             in_sensitive: Tpm2bSensitiveCreate {
                 inner: TpmsSensitiveCreate {
-                    user_auth: Tpm2bAuth::try_from(sealed_obj_password)?,
-                    data: Tpm2bSensitiveData::try_from(data_to_seal.as_slice())?,
+                    user_auth: Tpm2bAuth::try_from(sealed_obj_password)
+                        .map_err(CommandError::from)?,
+                    data: Tpm2bSensitiveData::try_from(data_to_seal.as_slice())
+                        .map_err(CommandError::from)?,
                 },
             },
             in_public: Tpm2bPublic {
@@ -110,7 +112,7 @@ impl DeviceCommand for Seal {
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
 
         let create_resp = resp.Create().map_err(|e| {
-            CliError::Execution(format!("unexpected response type for Create: {e:?}"))
+            CliError::Unexpected(format!("unexpected response type for Create: {e:?}"))
         })?;
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;

@@ -36,8 +36,8 @@ use tpm2_protocol::{
         TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle,
         TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmsAuthCommand,
         TpmsCapabilityData, TpmsContext, TpmtPublic, TpmtPublicParms, TpmtSensitive,
-        TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms,
-        TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST,
+        TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms, TPM_RH_PERSISTENT_FIRST,
+        TPM_RH_TRANSIENT_FIRST,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,

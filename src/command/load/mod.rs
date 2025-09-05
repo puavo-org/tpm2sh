@@ -6,7 +6,7 @@ use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::context::Context,
     device::TpmDevice,
-    error::CliError,
+    error::{CliError, ParseError},
     session::session_from_args,
     uri::Uri,
 };
@@ -58,8 +58,8 @@ impl DeviceCommand for Load {
         let parent_handle = context.load(device, &self.parent)?;
         let pub_bytes = self.public.to_bytes()?;
         let priv_bytes = self.private.to_bytes()?;
-        let (in_public, _) = Tpm2bPublic::parse(&pub_bytes)?;
-        let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes)?;
+        let (in_public, _) = Tpm2bPublic::parse(&pub_bytes).map_err(ParseError::from)?;
+        let (in_private, _) = Tpm2bPrivate::parse(&priv_bytes).map_err(ParseError::from)?;
         let load_cmd = TpmLoadCommand {
             parent_handle: parent_handle.0.into(),
             in_private,

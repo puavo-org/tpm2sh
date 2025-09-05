@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     crypto::{
         crypto_ecdh_p256, crypto_ecdh_p384, crypto_ecdh_p521, crypto_hmac, crypto_kdfa,
         crypto_make_name, PrivateKey, KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
@@ -74,19 +74,22 @@ fn protect_seed_with_rsa(
 ) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), CliError> {
     let n = match &parent_public.unique {
         TpmuPublicId::Rsa(data) => Ok(data.as_ref()),
-        _ => Err(CliError::Execution("RSA: invalid unique".to_string())),
+        _ => Err(CommandError::InvalidKey("RSA: invalid unique".to_string())),
     }?;
     let e_raw = match &parent_public.parameters {
         TpmuPublicParms::Rsa(params) => Ok(params.exponent),
-        _ => Err(CliError::Execution("RSA: invalid parameters".to_string())),
+        _ => Err(CommandError::InvalidKey(
+            "RSA: invalid parameters".to_string(),
+        )),
     }?;
     let e = if e_raw == 0 { 65537 } else { e_raw };
     let rsa_pub_key = RsaPublicKey::new(
         rsa::BigUint::from_bytes_be(n),
-        rsa::BigUint::from_u32(e)
-            .ok_or_else(|| CliError::Execution("RSA: invalid integer conversion".to_string()))?,
+        rsa::BigUint::from_u32(e).ok_or_else(|| {
+            CommandError::InvalidKey("RSA: invalid integer conversion".to_string())
+        })?,
     )
-    .map_err(|e| CliError::Execution(format!("RSA: invalid public key: {e}")))?;
+    .map_err(|e| CommandError::InvalidKey(format!("RSA: invalid public key: {e}")))?;
 
     let mut rng = thread_rng();
     let parent_name_alg = parent_public.name_alg;
@@ -113,16 +116,17 @@ fn protect_seed_with_rsa(
             seed,
         ),
         _ => {
-            return Err(CliError::Execution(format!(
+            return Err(CommandError::UnsupportedAlgorithm(format!(
                 "RSA-OAEP: unsupported nameAlg: {parent_name_alg:?}"
-            )));
+            ))
+            .into())
         }
     };
     let encrypted_seed = encrypted_seed_result
-        .map_err(|e| CliError::Execution(format!("RSA-OAEP: encryption failed: {e}")))?;
+        .map_err(|e| CommandError::InvalidKey(format!("RSA-OAEP: encryption failed: {e}")))?;
 
     Ok((
-        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())?,
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice()).map_err(CommandError::from)?,
         Tpm2bData::default(),
     ))
 }
@@ -134,44 +138,49 @@ fn protect_seed_with_ecc(
 ) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), CliError> {
     let (parent_point, curve_id) = match (&parent_public.unique, &parent_public.parameters) {
         (TpmuPublicId::Ecc(point), TpmuPublicParms::Ecc(params)) => Ok((point, params.curve_id)),
-        _ => Err(CliError::Execution(
-            "parent is not a valid ECC key".to_string(),
-        )),
+        _ => Err(CommandError::InvalidParentKeyType {
+            reason: "parent is not a valid ECC key",
+        }),
     }?;
 
     let (encrypted_seed, ephemeral_point_bytes) =
         match curve_id {
             TpmEccCurve::NistP256 => crypto_ecdh_p256(parent_point, parent_public.name_alg, seed)
-                .map_err(CliError::TpmRc)?,
+                .map_err(CliError::from)?,
             TpmEccCurve::NistP384 => crypto_ecdh_p384(parent_point, parent_public.name_alg, seed)
-                .map_err(CliError::TpmRc)?,
+                .map_err(CliError::from)?,
             TpmEccCurve::NistP521 => crypto_ecdh_p521(parent_point, parent_public.name_alg, seed)
-                .map_err(CliError::TpmRc)?,
+                .map_err(CliError::from)?,
             _ => {
-                return Err(CliError::Execution(format!(
+                return Err(CommandError::UnsupportedAlgorithm(format!(
                     "unsupported parent ECC curve for import: {curve_id:?}"
-                )))
+                ))
+                .into())
             }
         };
 
     if ephemeral_point_bytes.is_empty() || ephemeral_point_bytes[0] != UNCOMPRESSED_POINT_TAG {
-        return Err(CliError::Execution(
+        return Err(CommandError::InvalidKey(
             "invalid ephemeral ECC public key format".to_string(),
-        ));
+        )
+        .into());
     }
     let coord_len = (ephemeral_point_bytes.len() - 1) / 2;
     let x = &ephemeral_point_bytes[1..=coord_len];
     let y = &ephemeral_point_bytes[1 + coord_len..];
 
     Ok((
-        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())?,
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice()).map_err(CommandError::from)?,
         Tpm2bData::try_from(
             build_to_vec(&TpmsEccPoint {
-                x: tpm2_protocol::data::Tpm2bEccParameter::try_from(x)?,
-                y: tpm2_protocol::data::Tpm2bEccParameter::try_from(y)?,
+                x: tpm2_protocol::data::Tpm2bEccParameter::try_from(x)
+                    .map_err(CommandError::from)?,
+                y: tpm2_protocol::data::Tpm2bEccParameter::try_from(y)
+                    .map_err(CommandError::from)?,
             })?
             .as_slice(),
-        )?,
+        )
+        .map_err(CommandError::from)?,
     ))
 }
 
@@ -198,13 +207,14 @@ fn create_import_blob(
         TpmAlgId::Rsa => protect_seed_with_rsa(parent_public, &seed)?,
         TpmAlgId::Ecc => protect_seed_with_ecc(parent_public, &seed)?,
         _ => {
-            return Err(CliError::Execution(
-                "parent key must be RSA or ECC".to_string(),
-            ))
+            return Err(CommandError::InvalidParentKeyType {
+                reason: "parent key must be RSA or ECC",
+            }
+            .into())
         }
     };
 
-    let object_name = crypto_make_name(object_public).map_err(CliError::TpmRc)?;
+    let object_name = crypto_make_name(object_public).map_err(CliError::from)?;
 
     let sym_key = crypto_kdfa(
         parent_name_alg,
@@ -214,14 +224,14 @@ fn create_import_blob(
         parent_name,
         128,
     )
-    .map_err(CliError::TpmRc)?;
+    .map_err(CliError::from)?;
 
     let integrity_key_bits = u16::try_from(
         tpm2_protocol::tpm_hash_size(&parent_name_alg).ok_or_else(|| {
-            CliError::Execution("parent nameAlg is not a supported hash".to_string())
+            CommandError::UnsupportedAlgorithm("parent nameAlg is not a supported hash".to_string())
         })? * 8,
     )
-    .map_err(|_| CliError::Execution("hash size conversion error".to_string()))?;
+    .map_err(|_| CommandError::InvalidKey("hash size conversion error".to_string()))?;
 
     let hmac_key = crypto_kdfa(
         parent_name_alg,
@@ -231,12 +241,13 @@ fn create_import_blob(
         &[],
         integrity_key_bits,
     )
-    .map_err(CliError::TpmRc)?;
+    .map_err(CliError::from)?;
 
     let sensitive = tpm2_protocol::data::TpmtSensitive::from_private_bytes(
         object_public.object_type,
         private_bytes,
-    )?;
+    )
+    .map_err(CommandError::from)?;
     let sensitive_data_vec = build_to_vec(&sensitive)?;
 
     let mut enc_data = sensitive_data_vec;
@@ -246,21 +257,24 @@ fn create_import_blob(
     cipher.encrypt(&mut enc_data);
 
     let final_mac = crypto_hmac(parent_name_alg, &hmac_key, &[&enc_data, parent_name])
-        .map_err(CliError::TpmRc)?;
+        .map_err(CliError::from)?;
 
     let duplicate_blob = {
         let mut duplicate_blob_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut duplicate_blob_buf);
-            tpm2_protocol::data::Tpm2bDigest::try_from(final_mac.as_slice())?.build(&mut writer)?;
-            writer.write_bytes(&enc_data)?;
+            tpm2_protocol::data::Tpm2bDigest::try_from(final_mac.as_slice())
+                .map_err(CommandError::from)?
+                .build(&mut writer)
+                .map_err(CommandError::from)?;
+            writer.write_bytes(&enc_data).map_err(CommandError::from)?;
             writer.len()
         };
         duplicate_blob_buf[..len].to_vec()
     };
 
     Ok((
-        Tpm2bPrivate::try_from(duplicate_blob.as_slice())?,
+        Tpm2bPrivate::try_from(duplicate_blob.as_slice()).map_err(CommandError::from)?,
         in_sym_seed,
         encryption_key,
     ))
@@ -276,7 +290,7 @@ fn prepare_key_for_import(
 
     let public = private_key
         .to_public(parent_name_alg)
-        .map_err(CliError::TpmRc)?;
+        .map_err(CliError::from)?;
     let sensitive_blob = private_key.sensitive_blob();
 
     Ok((private_key, public, sensitive_blob))
@@ -319,7 +333,7 @@ impl DeviceCommand for Import {
         let sessions = session_from_args(&import_cmd, &handles, context.cli)?;
         let (_rc, resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp.Import().map_err(|e| {
-            CliError::Execution(format!("unexpected response type for Import: {e:?}"))
+            CliError::Unexpected(format!("unexpected response type for Import: {e:?}"))
         })?;
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;

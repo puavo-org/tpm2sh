@@ -4,6 +4,7 @@
 
 use crate::{
     cli::Cli,
+    command::CommandError,
     error::{CliError, ParseError},
     key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
     parser::PolicyExpr,
@@ -80,7 +81,7 @@ fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, 
         session_handle: TpmSession(TpmRh::Pw as u32),
         nonce: Tpm2bNonce::default(),
         session_attributes: TpmaSession::empty(),
-        hmac: Tpm2bAuth::try_from(password.as_bytes())?,
+        hmac: Tpm2bAuth::try_from(password.as_bytes()).map_err(CommandError::from)?,
     }])
 }
 
@@ -89,14 +90,18 @@ fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, 
 ///
 /// # Errors
 ///
-/// Returns a `CliError::Execution` if authorization is not valid.
+/// Returns a `CliError` if authorization is not valid.
 pub fn session_from_args<C: TpmHeader>(
     command: &C,
     handles: &[u32],
     cli: &Cli,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
     match (&cli.session, &cli.password) {
-        (Some(_), Some(_)) => Err(CliError::MutualExclusionArgs("session", "password")),
+        (Some(_), Some(_)) => Err(CommandError::MutualExclusionArgs {
+            arg1: "session",
+            arg2: "password",
+        }
+        .into()),
         (Some(uri), None) => {
             let session = match uri.ast() {
                 PolicyExpr::Session { .. } => AuthSession::from_ast(uri.ast())?,
@@ -108,20 +113,25 @@ pub fn session_from_args<C: TpmHeader>(
                     AuthSession::from_ast(&ast)?
                 }
                 _ => {
-                    return Err(CliError::Execution(
-                        "the '--session' argument requires a 'file://', 'data://', or 'session://' URI"
-                            .to_string(),
-                    ));
+                    return Err(CommandError::InvalidUriScheme {
+                        expected: "file://, data://, or session://".to_string(),
+                        actual: uri.to_string(),
+                    }
+                    .into())
                 }
             };
 
             let params = build_to_vec(command)?;
             let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
-                CliError::Execution(format!("'{}' is unknown algorithm", session.auth_hash))
+                CommandError::UnsupportedAlgorithm(format!(
+                    "'{}' is unknown algorithm",
+                    session.auth_hash
+                ))
             })?;
             let mut nonce_bytes = vec![0; nonce_size];
             rand::thread_rng().fill_bytes(&mut nonce_bytes);
-            let nonce_caller = data::Tpm2bNonce::try_from(nonce_bytes.as_slice())?;
+            let nonce_caller =
+                data::Tpm2bNonce::try_from(nonce_bytes.as_slice()).map_err(CommandError::from)?;
             Ok(vec![create_auth(
                 &session,
                 &nonce_caller,

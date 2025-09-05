@@ -4,7 +4,7 @@
 
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
-    command::context::Context,
+    command::{context::Context, CommandError},
     device::TpmDevice,
     error::CliError,
     pcr::pcr_get_count,
@@ -51,9 +51,10 @@ impl DeviceCommand for PcrEvent {
         let pcr_count = pcr_get_count(device)?;
         let selection = self.pcr.to_pcr_selection(pcr_count)?;
         if selection.len() != 1 {
-            return Err(CliError::Execution(
+            return Err(CommandError::InvalidPcrSelection(
                 "pcr-event requires a selection of exactly one PCR bank".to_string(),
-            ));
+            )
+            .into());
         }
         let pcr_selection = &selection[0];
         let set_bits_count = pcr_selection
@@ -62,10 +63,11 @@ impl DeviceCommand for PcrEvent {
             .map(|byte| byte.count_ones())
             .sum::<u32>();
         if set_bits_count != 1 {
-            return Err(CliError::Execution(format!(
+            return Err(CommandError::InvalidPcrSelection(format!(
                 "pcr-event requires a selection of exactly one PCR (provided selection '{}' contains {})",
                 self.pcr, set_bits_count
-            )));
+            ))
+            .into());
         }
         let pcr_index = pcr_selection
             .pcr_select
@@ -79,11 +81,13 @@ impl DeviceCommand for PcrEvent {
                 }
             })
             .ok_or_else(|| {
-                CliError::Execution("pcr-event could not determine the index".to_string())
+                CommandError::InvalidPcrSelection(
+                    "pcr-event could not determine the index".to_string(),
+                )
             })?;
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
-        let event_data = Tpm2bEvent::try_from(data_bytes.as_slice())?;
+        let event_data = Tpm2bEvent::try_from(data_bytes.as_slice()).map_err(CommandError::from)?;
         let command = TpmPcrEventCommand {
             pcr_handle: handles[0],
             event_data,
