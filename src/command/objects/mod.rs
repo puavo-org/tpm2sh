@@ -6,9 +6,9 @@ use crate::{
     command::context::Context,
     device::TpmDevice,
     error::CliError,
+    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
 };
 use lexopt::Parser;
-use tpm2_protocol::data::TpmRh;
 
 #[derive(Debug, Default)]
 pub struct Objects;
@@ -29,11 +29,11 @@ impl DeviceCommand for Objects {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let transient_handles = device.get_all_handles(TpmRh::TransientFirst)?;
+        let transient_handles = device.get_all_handles(TPM_RH_TRANSIENT_FIRST)?;
         for handle in transient_handles {
             writeln!(context.writer, "tpm://{handle:#010x}")?;
         }
-        let persistent_handles = device.get_all_handles(TpmRh::PersistentFirst)?;
+        let persistent_handles = device.get_all_handles(TPM_RH_PERSISTENT_FIRST)?;
         for handle in persistent_handles {
             writeln!(context.writer, "tpm://{handle:#010x}")?;
         }

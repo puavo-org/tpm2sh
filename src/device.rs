@@ -23,9 +23,9 @@ use std::{
 use log::{trace, warn};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRh, TpmSt, TpmaCc,
-        TpmlPcrSelection, TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic,
-        TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmSt, TpmaCc, TpmlPcrSelection,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
+        TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
@@ -289,9 +289,9 @@ impl TpmDevice {
     /// # Errors
     ///
     /// Returns a `CliError` if the `get_capability` call to the TPM device fails.
-    pub fn get_all_handles(&mut self, handle_type: TpmRh) -> Result<Vec<u32>, CliError> {
+    pub fn get_all_handles(&mut self, handle_type: u32) -> Result<Vec<u32>, CliError> {
         let cap_data_vec =
-            self.get_capability(TpmCap::Handles, handle_type as u32, TPM_CAP_PROPERTY_MAX)?;
+            self.get_capability(TpmCap::Handles, handle_type, TPM_CAP_PROPERTY_MAX)?;
         let handles: Vec<u32> = cap_data_vec
             .into_iter()
             .flat_map(|cap_data| {

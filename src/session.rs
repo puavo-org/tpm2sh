@@ -77,7 +77,7 @@ impl fmt::Display for AuthSession {
 fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
     debug!(target: "cli::session", "building password session: password_len = {}", password.len());
     Ok(vec![data::TpmsAuthCommand {
-        session_handle: TpmSession(TpmRh::Password as u32),
+        session_handle: TpmSession(TpmRh::Pw as u32),
         nonce: Tpm2bNonce::default(),
         session_attributes: TpmaSession::empty(),
         hmac: Tpm2bAuth::try_from(password.as_bytes())?,

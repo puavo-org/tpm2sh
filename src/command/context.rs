@@ -8,6 +8,7 @@ use crate::{
     error::{CliError, ParseError},
     parser::PolicyExpr,
     session::session_from_args,
+    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     uri::Uri,
     util::build_to_vec,
 };
@@ -130,9 +131,9 @@ impl<'a> Context<'a> {
     /// Returns a `CliError` if the handle is invalid or the delete operation fails.
     pub fn delete(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<u32, CliError> {
         let handle = uri.to_tpm_handle()?;
-        if handle >= TpmRh::PersistentFirst as u32 {
+        if handle >= TPM_RH_PERSISTENT_FIRST {
             self.delete_persistent(device, TpmPersistent(handle))?;
-        } else if handle >= TpmRh::TransientFirst as u32 {
+        } else if handle >= TPM_RH_TRANSIENT_FIRST {
             self.delete_transient(device, TpmTransient(handle))?;
         } else {
             return Err(CliError::InvalidHandleType { handle });
@@ -228,7 +229,7 @@ impl<'a> Context<'a> {
     pub fn track(&mut self, handle: TpmTransient) -> Result<(), CliError> {
         self.non_existence_invariant(handle)?;
         self.capacity_invariant()?;
-        if handle.0 < TpmRh::TransientFirst as u32 {
+        if handle.0 < TPM_RH_TRANSIENT_FIRST {
             return Err(CliError::InvalidHandleType { handle: handle.0 });
         }
         if let Some(h) = self.handles.iter_mut().find(|h| h.is_none()) {

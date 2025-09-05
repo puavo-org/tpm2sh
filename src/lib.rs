@@ -16,6 +16,7 @@ pub mod parser;
 pub mod pcr;
 pub mod print;
 pub mod session;
+pub mod tpm;
 pub mod transport;
 pub mod uri;
 pub mod util;

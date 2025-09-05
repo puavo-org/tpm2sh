@@ -11,6 +11,7 @@ use crate::{
         KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
     },
     device::TpmTransport,
+    tpm::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
 };
 use aes::Aes128;
@@ -291,7 +292,7 @@ impl MockTpm {
     }
 
     fn load_persistent_if_needed(&mut self, handle: u32) -> Result<(), TpmRc> {
-        if handle < TpmRh::PersistentFirst as u32 {
+        if handle < TPM_RH_PERSISTENT_FIRST {
             return Ok(());
         }
         if self.objects.contains_key(&handle) {
@@ -602,7 +603,7 @@ fn mocktpm_evict_control(
     let persistent_handle = cmd.persistent_handle.0;
     let object_handle = cmd.object_handle.0;
 
-    if object_handle >= TpmRh::TransientFirst as u32 {
+    if object_handle >= TPM_RH_TRANSIENT_FIRST {
         let key_to_persist = tpm
             .objects
             .get(&object_handle)
@@ -612,7 +613,7 @@ fn mocktpm_evict_control(
 
         let file_path = nvram_path.join(format!("{persistent_handle:#010x}.dat"));
         fs::write(file_path, key_bytes).map_err(|_| TpmRc::from(TpmRcBase::NvUnavailable))?;
-    } else if object_handle >= TpmRh::PersistentFirst as u32 {
+    } else if object_handle >= TPM_RH_PERSISTENT_FIRST {
         if object_handle != persistent_handle {
             return Err(TpmRc::from(TpmRcBase::Handle));
         }
@@ -686,7 +687,7 @@ fn mocktpm_get_capability(
         TpmCap::Handles => {
             let mut handles: Vec<u32> = Vec::new();
             let prop = cmd.property;
-            if prop >= (TpmRh::TransientFirst as u32) && prop < (TpmRh::PersistentFirst as u32) {
+            if (TPM_RH_TRANSIENT_FIRST..TPM_RH_PERSISTENT_FIRST).contains(&prop) {
                 handles = tpm.objects.keys().copied().collect();
                 handles.sort_unstable();
             }
