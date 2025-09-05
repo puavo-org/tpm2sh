@@ -5,6 +5,8 @@
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 pub mod cli;
 pub mod command;
 pub mod crypto;
@@ -22,6 +24,13 @@ pub mod util;
 
 pub use command::CommandError;
 pub use device::TpmDeviceError;
+
+/// A global flag to signal graceful teardown of the application.
+///
+/// Set by the Ctrl-C handler to allow the main loop to finish its current
+/// operation and perform necessary cleanup (e.g., flushing TPM contexts)
+/// before exiting.
+pub static TEARDOWN: AtomicBool = AtomicBool::new(false);
 
 /// A trait for executing the top-level Commands enum.
 pub trait Command {
@@ -98,6 +107,11 @@ pub fn execute_cli() -> Result<(), crate::error::CliError> {
                 let result = command.run(device_arc.clone(), &mut context);
 
                 context.flush(device_arc)?;
+
+                if TEARDOWN.load(Ordering::Relaxed) {
+                    std::process::exit(130);
+                }
+
                 result
             } else {
                 print!("{}", include_str!("help.txt"));

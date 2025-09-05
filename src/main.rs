@@ -4,7 +4,7 @@
 
 use cli::execute_cli;
 use log::error;
-use std::io::Write;
+use std::{io::Write, process, sync::atomic::Ordering};
 
 /// CTRL-C exits with 130 as exit codes larger than 128 commonly refer to an
 /// external signal indexed by the signal number.
@@ -14,19 +14,19 @@ fn main() {
         .init();
 
     if ctrlc::set_handler(move || {
+        cli::TEARDOWN.store(true, Ordering::Relaxed);
         let mut stderr = std::io::stderr();
         let _ = write!(stderr, "\x1B[?25h");
         let _ = stderr.flush();
-        std::process::exit(130);
     })
     .is_err()
     {
         eprintln!("CTRL-C handler failed");
-        std::process::exit(1);
+        process::exit(1);
     }
 
     if let Err(err) = execute_cli() {
         error!("{err}");
-        std::process::exit(1);
+        process::exit(1);
     }
 }
