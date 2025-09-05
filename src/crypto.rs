@@ -5,28 +5,34 @@
 //! This file contains cryptographic algorithms shared by tpm2sh and `MockTPM`.
 
 use crate::util;
-
 use aes::Aes128;
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
 use const_oid::db::rfc5912::{SECP_256_R_1, SECP_384_R_1, SECP_521_R_1};
 use hmac::{Hmac, Mac};
+use num_traits::FromPrimitive;
 use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
 use p256::SecretKey;
 use pkcs8::{
     der::{self, asn1::AnyRef, Decode, Encode},
     EncodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
 };
+use rand::{thread_rng, CryptoRng, RngCore};
 use rsa::{
     traits::{PrivateKeyParts, PublicKeyParts},
-    RsaPrivateKey,
+    Oaep, RsaPrivateKey,
 };
+use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
-use tpm2_protocol::data::{
-    Tpm2bDigest, Tpm2bEccParameter, Tpm2bPublicKeyRsa, TpmAlgId, TpmEccCurve, TpmRc, TpmRcBase,
-    TpmaObject, TpmsEccParms, TpmsEccPoint, TpmsRsaParms, TpmtKdfScheme, TpmtPublic, TpmtScheme,
-    TpmtSymDefObject, TpmuPublicId, TpmuPublicParms,
+use tpm2_protocol::{
+    data::{
+        Tpm2bData, Tpm2bDigest, Tpm2bEccParameter, Tpm2bEncryptedSecret, Tpm2bPublicKeyRsa,
+        TpmAlgId, TpmEccCurve, TpmRc, TpmRcBase, TpmaObject, TpmsEccParms, TpmsEccPoint,
+        TpmsRsaParms, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject, TpmuPublicId,
+        TpmuPublicParms,
+    },
+    TpmErrorKind,
 };
 
 pub const ID_LOADABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.3");
@@ -37,6 +43,21 @@ pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 pub const KDF_LABEL_DUPLICATE: &str = "DUPLICATE";
 pub const KDF_LABEL_INTEGRITY: &str = "INTEGRITY";
 pub const KDF_LABEL_STORAGE: &str = "STORAGE";
+
+/// Converts `TpmErrorKind` to `TpmRc`.
+trait TpmErrorKindExt {
+    fn to_tpm_rc(self) -> TpmRc;
+}
+
+impl TpmErrorKindExt for TpmErrorKind {
+    fn to_tpm_rc(self) -> TpmRc {
+        let base = match self {
+            TpmErrorKind::BuildCapacity | TpmErrorKind::ParseCapacity => TpmRcBase::Size,
+            _ => TpmRcBase::Value,
+        };
+        TpmRc::from(base)
+    }
+}
 
 /// Computes an HMAC digest over a series of data chunks.
 ///
@@ -137,6 +158,167 @@ pub fn crypto_kdfa(
     }
 
     Ok(key_stream)
+}
+
+/// A trait to abstract RSA OAEP encryption over different hash algorithms.
+///
+/// # Errors
+///
+/// Returns a `TpmRc` error on failure.
+trait TpmRsaOaepEncrypt {
+    fn oaep_encrypt(
+        key: &rsa::RsaPublicKey,
+        rng: &mut (impl CryptoRng + RngCore),
+        label: &str,
+        data: &[u8],
+    ) -> rsa::Result<Vec<u8>>;
+}
+
+impl TpmRsaOaepEncrypt for Sha1 {
+    fn oaep_encrypt(
+        key: &rsa::RsaPublicKey,
+        rng: &mut (impl CryptoRng + RngCore),
+        label: &str,
+        data: &[u8],
+    ) -> rsa::Result<Vec<u8>> {
+        key.encrypt(rng, Oaep::new_with_label::<Sha1, _>(label), data)
+    }
+}
+
+impl TpmRsaOaepEncrypt for Sha256 {
+    fn oaep_encrypt(
+        key: &rsa::RsaPublicKey,
+        rng: &mut (impl CryptoRng + RngCore),
+        label: &str,
+        data: &[u8],
+    ) -> rsa::Result<Vec<u8>> {
+        key.encrypt(rng, Oaep::new_with_label::<Sha256, _>(label), data)
+    }
+}
+
+impl TpmRsaOaepEncrypt for Sha384 {
+    fn oaep_encrypt(
+        key: &rsa::RsaPublicKey,
+        rng: &mut (impl CryptoRng + RngCore),
+        label: &str,
+        data: &[u8],
+    ) -> rsa::Result<Vec<u8>> {
+        key.encrypt(rng, Oaep::new_with_label::<Sha384, _>(label), data)
+    }
+}
+
+impl TpmRsaOaepEncrypt for Sha512 {
+    fn oaep_encrypt(
+        key: &rsa::RsaPublicKey,
+        rng: &mut (impl CryptoRng + RngCore),
+        label: &str,
+        data: &[u8],
+    ) -> rsa::Result<Vec<u8>> {
+        key.encrypt(rng, Oaep::new_with_label::<Sha512, _>(label), data)
+    }
+}
+
+/// Dispatches RSA OAEP encryption based on the `TpmAlgId`.
+fn dispatch_rsa_oaep_encrypt(
+    key: &rsa::RsaPublicKey,
+    rng: &mut (impl CryptoRng + RngCore),
+    name_alg: TpmAlgId,
+    label: &str,
+    data: &[u8],
+) -> Result<Vec<u8>, TpmRc> {
+    match name_alg {
+        TpmAlgId::Sha1 => Sha1::oaep_encrypt(key, rng, label, data),
+        TpmAlgId::Sha256 => Sha256::oaep_encrypt(key, rng, label, data),
+        TpmAlgId::Sha384 => Sha384::oaep_encrypt(key, rng, label, data),
+        TpmAlgId::Sha512 => Sha512::oaep_encrypt(key, rng, label, data),
+        _ => return Err(TpmRc::from(TpmRcBase::Scheme)),
+    }
+    .map_err(|_| TpmRc::from(TpmRcBase::Value))
+}
+
+/// Encrypts the import seed using the parent's RSA public key.
+///
+/// See Table 27 in TCG TPM 2.0 Architectures specification for more information.
+///
+/// # Errors
+///
+/// Returns a `TpmRc` error on failure.
+pub fn protect_seed_with_rsa(
+    parent_public: &TpmtPublic,
+    seed: &[u8; 32],
+) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), TpmRc> {
+    let n = match &parent_public.unique {
+        TpmuPublicId::Rsa(data) => Ok(data.as_ref()),
+        _ => Err(TpmRc::from(TpmRcBase::Key)),
+    }?;
+    let e_raw = match &parent_public.parameters {
+        TpmuPublicParms::Rsa(params) => Ok(params.exponent),
+        _ => Err(TpmRc::from(TpmRcBase::Key)),
+    }?;
+    let e = if e_raw == 0 { 65537 } else { e_raw };
+    let rsa_pub_key = rsa::RsaPublicKey::new(
+        rsa::BigUint::from_bytes_be(n),
+        rsa::BigUint::from_u32(e).ok_or(TpmRc::from(TpmRcBase::Value))?,
+    )
+    .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+
+    let mut rng = thread_rng();
+    let encrypted_seed = dispatch_rsa_oaep_encrypt(
+        &rsa_pub_key,
+        &mut rng,
+        parent_public.name_alg,
+        KDF_LABEL_DUPLICATE,
+        seed,
+    )?;
+
+    Ok((
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())
+            .map_err(TpmErrorKindExt::to_tpm_rc)?,
+        Tpm2bData::default(),
+    ))
+}
+
+/// Encrypts the import seed using an ECDH shared secret derived from the parent's ECC public key.
+///
+/// # Errors
+///
+/// Returns a `TpmRc` error on failure.
+pub fn protect_seed_with_ecc(
+    parent_public: &TpmtPublic,
+    seed: &[u8; 32],
+) -> Result<(Tpm2bEncryptedSecret, Tpm2bData), TpmRc> {
+    let (parent_point, curve_id) = match (&parent_public.unique, &parent_public.parameters) {
+        (TpmuPublicId::Ecc(point), TpmuPublicParms::Ecc(params)) => Ok((point, params.curve_id)),
+        _ => Err(TpmRc::from(TpmRcBase::Key)),
+    }?;
+
+    let (encrypted_seed, ephemeral_point_bytes) = match curve_id {
+        TpmEccCurve::NistP256 => crypto_ecdh_p256(parent_point, parent_public.name_alg, seed)?,
+        TpmEccCurve::NistP384 => crypto_ecdh_p384(parent_point, parent_public.name_alg, seed)?,
+        TpmEccCurve::NistP521 => crypto_ecdh_p521(parent_point, parent_public.name_alg, seed)?,
+        _ => return Err(TpmRc::from(TpmRcBase::Curve)),
+    };
+
+    if ephemeral_point_bytes.is_empty() || ephemeral_point_bytes[0] != UNCOMPRESSED_POINT_TAG {
+        return Err(TpmRc::from(TpmRcBase::Value));
+    }
+    let coord_len = (ephemeral_point_bytes.len() - 1) / 2;
+    let x = &ephemeral_point_bytes[1..=coord_len];
+    let y = &ephemeral_point_bytes[1 + coord_len..];
+
+    Ok((
+        Tpm2bEncryptedSecret::try_from(encrypted_seed.as_slice())
+            .map_err(TpmErrorKindExt::to_tpm_rc)?,
+        Tpm2bData::try_from(
+            util::build_to_vec(&TpmsEccPoint {
+                x: Tpm2bEccParameter::try_from(x).map_err(TpmErrorKindExt::to_tpm_rc)?,
+                y: Tpm2bEccParameter::try_from(y).map_err(TpmErrorKindExt::to_tpm_rc)?,
+            })
+            .map_err(|_| TpmRc::from(TpmRcBase::Value))?
+            .as_slice(),
+        )
+        .map_err(TpmErrorKindExt::to_tpm_rc)?,
+    ))
 }
 
 macro_rules! ecdh {
