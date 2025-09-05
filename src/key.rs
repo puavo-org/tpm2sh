@@ -8,7 +8,7 @@ use crate::{
     session::AuthSession,
 };
 
-use std::{cmp::Ordering, collections::BTreeMap, fs, path::Path, str::FromStr};
+use std::{cmp::Ordering, fs, path::Path, str::FromStr};
 
 use p256::SecretKey;
 use pkcs8::{
@@ -20,14 +20,6 @@ use pkcs8::{
 use rsa::RsaPrivateKey;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
-
-pub type PcrBank = BTreeMap<String, String>;
-
-#[derive(Debug, Clone, Default)]
-pub struct PcrValues {
-    pub update: u32,
-    pub banks: BTreeMap<String, PcrBank>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgInfo {

@@ -23,14 +23,14 @@ use std::{
 use log::{trace, warn};
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmSt, TpmaCc, TpmlPcrSelection,
-        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
-        TpmuCapabilities, TpmuPublicParms,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmSt, TpmaCc, TpmsAuthCommand,
+        TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms, TpmuCapabilities,
+        TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmPcrReadCommand,
-        TpmPcrReadResponse, TpmReadPublicCommand, TpmResponseBody, TpmTestParmsCommand,
+        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmReadPublicCommand,
+        TpmResponseBody, TpmTestParmsCommand,
     },
     TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -359,25 +359,6 @@ impl TpmDevice {
             }
         }
         Ok(all_caps)
-    }
-
-    /// Reads PCR values from the TPM.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the TPM command fails.
-    pub fn pcr_read(
-        &mut self,
-        pcr_selection_in: &TpmlPcrSelection,
-    ) -> Result<(TpmRc, TpmPcrReadResponse), CliError> {
-        let cmd = TpmPcrReadCommand {
-            pcr_selection_in: *pcr_selection_in,
-        };
-        let (rc, resp, _) = self.execute(&cmd, &[])?;
-        let pcr_resp = resp
-            .PcrRead()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
-        Ok((rc, pcr_resp))
     }
 
     /// Reads the public area and name of a TPM object.

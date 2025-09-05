@@ -67,8 +67,8 @@ impl PolicyExecutor<'_> {
             hex::decode(digest_hex).map_err(ParseError::from)?
         } else {
             let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
-            let (_rc, read_resp) = self.device.pcr_read(&pcr_selection_in)?;
-            pcr_composite_digest(&read_resp, self.session_hash_alg)?
+            let pcr_values = crate::pcr::read(self.device, &pcr_selection_in)?;
+            pcr_composite_digest(&pcr_values, self.session_hash_alg)?
         };
 
         let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;

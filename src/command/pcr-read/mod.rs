@@ -8,7 +8,7 @@ use crate::{
     device::TpmDevice,
     error::CliError,
     key::tpm_alg_id_from_str,
-    pcr::{pcr_composite_digest, pcr_get_count},
+    pcr,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
@@ -47,11 +47,11 @@ impl DeviceCommand for PcrRead {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let pcr_count = pcr_get_count(device)?;
+        let pcr_count = pcr::pcr_get_count(device)?;
         let pcr_selection_in = self.pcr.to_pcr_selection(pcr_count)?;
-        let (_rc, pcr_read_resp) = device.pcr_read(&pcr_selection_in)?;
+        let pcr_values = crate::pcr::read(device, &pcr_selection_in)?;
         let alg_id = tpm_alg_id_from_str(&self.alg).map_err(CliError::Execution)?;
-        let composite_digest = pcr_composite_digest(&pcr_read_resp, alg_id)?;
+        let composite_digest = pcr::pcr_composite_digest(&pcr_values, alg_id)?;
         writeln!(
             context.writer,
             "pcr-digest://{}:{}",
