@@ -123,6 +123,23 @@ impl<'a> Context<'a> {
         Ok(())
     }
 
+    /// Deletes a persistent or transient object by URI.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the handle is invalid or the delete operation fails.
+    pub fn delete(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<u32, CliError> {
+        let handle = uri.to_tpm_handle()?;
+        if handle >= TpmRh::PersistentFirst as u32 {
+            self.delete_persistent(device, TpmPersistent(handle))?;
+        } else if handle >= TpmRh::TransientFirst as u32 {
+            self.delete_transient(device, TpmTransient(handle))?;
+        } else {
+            return Err(CliError::InvalidHandleType { handle });
+        }
+        Ok(handle)
+    }
+
     /// Deletes a persistent object.
     ///
     /// # Errors

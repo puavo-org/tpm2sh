@@ -9,7 +9,6 @@ use crate::{
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
-use tpm2_protocol::{data::TpmRh, TpmPersistent, TpmTransient};
 
 #[derive(Debug, Default)]
 pub struct Delete {
@@ -41,16 +40,7 @@ impl DeviceCommand for Delete {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let handle = self.handle.to_tpm_handle()?;
-
-        if handle >= TpmRh::PersistentFirst as u32 {
-            context.delete_persistent(device, TpmPersistent(handle))?;
-        } else if handle >= TpmRh::TransientFirst as u32 {
-            context.delete_transient(device, TpmTransient(handle))?;
-        } else {
-            return Err(CliError::InvalidHandleType { handle });
-        }
-
+        let handle = context.delete(device, &self.handle)?;
         writeln!(context.writer, "tpm://{handle:#010x}")?;
         Ok(())
     }
