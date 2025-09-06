@@ -340,8 +340,11 @@ fn format_help(header: &str, args: &str, opts: &str) -> String {
     let mut help = String::from(header);
     help.push_str(&format_section("Arguments", args, 2));
     help.push_str(&format_section("Options", opts, 2));
-    help.push_str("\nGlobal options:\n\n");
-    help.push_str(include_str!("options.txt"));
+    help.push_str(&format_section(
+        "Global options",
+        include_str!("options.txt"),
+        2,
+    ));
     help
 }
 
@@ -355,8 +358,7 @@ pub fn format_main_help() -> String {
 
     let mut help = String::from("TPM 2.0 shell\n\nUsage: tpm2sh [OPTIONS] [COMMAND]\n");
     help.push_str(&format_section("Commands", &commands_str, 2));
-    help.push_str("\nOptions:\n\n");
-    help.push_str(include_str!("options.txt"));
+    help.push_str(&format_section("Options", include_str!("options.txt"), 2));
     help
 }
 

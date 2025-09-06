@@ -1,6 +1,12 @@
-  -d, --device <DEVICE>                 device path (default: '/dev/tpmrm0')
-     --log-format <LOG_FORMAT>          plain (default) or pretty
-  -p, --password <PASSWORD>             authorization password
-  -S, --session <URI>                   'tpm://', 'file://' or 'data://'
-  -h, --help                            print help
-  -V, --version                         print version
+-d, --device <DEVICE>
+device path (default: '/dev/tpmrm0')
+--log-format <LOG_FORMAT>
+plain (default) or pretty
+-p, --password <PASSWORD>
+authorization password
+-S, --session <URI>
+'tpm://', 'file://' or 'data://'
+-h, --help
+print help
+-V, --version
+print version
