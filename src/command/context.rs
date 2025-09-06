@@ -102,58 +102,45 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Saves a transient object's context to a file, persistent handle, or stdout.
+    /// Saves a tracked transient object's context to a file or stdout.
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the TPM command or I/O fails.
-    pub fn save_or_persist(
+    /// Returns a `CliError` if the handle is not tracked, or if TPM command or
+    /// I/O operations fail.
+    pub fn save_context(
         &mut self,
         device: &mut TpmDevice,
         handle_to_save: TpmTransient,
         output_uri: Option<&Uri>,
     ) -> Result<(), CliError> {
         self.existence_invariant(handle_to_save)?;
+        let save_cmd = TpmContextSaveCommand {
+            save_handle: handle_to_save,
+        };
+        let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
+        let save_resp = resp
+            .ContextSave()
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::ContextSave,
+            })?;
+        let context_bytes = build_to_vec(&save_resp.context)?;
+
         if let Some(uri) = output_uri {
             match uri.ast() {
-                Expression::TpmHandle(handle) => {
-                    let persistent_handle = TpmPersistent(*handle);
-                    self.evict(device, handle_to_save, persistent_handle)?;
-                    writeln!(self.writer, "tpm://{persistent_handle:#010x}")?;
-                }
                 Expression::FilePath(path) => {
-                    let save_cmd = TpmContextSaveCommand {
-                        save_handle: handle_to_save,
-                    };
-                    let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
-                    let save_resp =
-                        resp.ContextSave()
-                            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                                command: TpmCc::ContextSave,
-                            })?;
-                    let context_bytes = build_to_vec(&save_resp.context)?;
                     std::fs::write(path, context_bytes)
                         .map_err(|e| CliError::File(path.clone(), e))?;
                     writeln!(self.writer, "file://{path}")?;
                 }
                 _ => {
                     return Err(CliError::Command(CommandError::InvalidUriScheme {
-                        expected: "tpm:// or file://".to_string(),
+                        expected: "file://".to_string(),
                         actual: uri.to_string(),
                     }));
                 }
             }
         } else {
-            let save_cmd = TpmContextSaveCommand {
-                save_handle: handle_to_save,
-            };
-            let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
-            let save_resp = resp
-                .ContextSave()
-                .map_err(|_| TpmDeviceError::MismatchedResponse {
-                    command: TpmCc::ContextSave,
-                })?;
-            let context_bytes = build_to_vec(&save_resp.context)?;
             writeln!(
                 self.writer,
                 "data://base64,{}",
@@ -236,21 +223,22 @@ impl<'a> Context<'a> {
         Ok(())
     }
 
-    /// Convert a transient object as persistent.
+    /// Makes a tracked transient object persistent.
     ///
-    /// After making the handle persistent, drop it from the tracking list so
-    /// that unintended flush for invalidated handle won't happen.
+    /// After making the handle persistent, it is untracked to prevent an
+    /// unintended flush of an invalid handle on exit.
     ///
     /// # Errors
     ///
     /// Returns a `CliError` if the handle is not a tracked transient handle,
     /// or if the `EvictControl` command fails.
-    pub fn evict(
+    pub fn persist_transient(
         &mut self,
         device: &mut TpmDevice,
         transient_handle: TpmTransient,
         persistent_handle: TpmPersistent,
     ) -> Result<(), CliError> {
+        self.existence_invariant(transient_handle)?;
         let auth_handle = TpmRh::Owner;
         let cmd = TpmEvictControlCommand {
             auth: (auth_handle as u32).into(),

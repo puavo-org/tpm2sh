@@ -9,6 +9,7 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::{private_key_from_pem_bytes, TpmKey},
+    policy::Expression,
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
@@ -19,12 +20,13 @@ use cipher::{AsyncStreamCipher, KeyIvInit};
 use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
+    self,
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmCc, TpmtPublic,
         TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{TpmImportCommand, TpmLoadCommand},
-    TpmBuild, TpmParse, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuild, TpmParse, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 #[derive(Debug)]
@@ -255,7 +257,17 @@ impl DeviceCommand for Load {
             })?;
 
         context.track(resp.object_handle)?;
-        context.save_or_persist(device, resp.object_handle, self.output.as_ref())?;
+
+        if let Some(uri) = &self.output {
+            if let Expression::TpmHandle(handle) = uri.ast() {
+                let persistent_handle = TpmPersistent(*handle);
+                context.persist_transient(device, resp.object_handle, persistent_handle)?;
+                writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
+                return Ok(());
+            }
+        }
+
+        context.save_context(device, resp.object_handle, self.output.as_ref())?;
         Ok(())
     }
 }

@@ -8,12 +8,13 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
+    policy::Expression,
     session::session_from_args,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
-
 use tpm2_protocol::{
+    self,
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
         TpmAlgId, TpmCc, TpmRh, TpmaObject, TpmlPcrSelection, TpmsEccParms, TpmsEccPoint,
@@ -21,6 +22,7 @@ use tpm2_protocol::{
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmCreatePrimaryCommand,
+    TpmPersistent,
 };
 
 #[derive(Debug, Default)]
@@ -151,7 +153,17 @@ impl DeviceCommand for CreatePrimary {
         let object_handle = resp.object_handle;
 
         context.track(object_handle)?;
-        context.save_or_persist(device, object_handle, self.output.as_ref())?;
+
+        if let Some(uri) = &self.output {
+            if let Expression::TpmHandle(handle) = uri.ast() {
+                let persistent_handle = TpmPersistent(*handle);
+                context.persist_transient(device, object_handle, persistent_handle)?;
+                writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
+                return Ok(());
+            }
+        }
+
+        context.save_context(device, object_handle, self.output.as_ref())?;
 
         Ok(())
     }
