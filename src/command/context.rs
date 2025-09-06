@@ -257,14 +257,22 @@ impl<'a> Context<'a> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
                 let mut guard = device.lock().map_err(|_| TpmDeviceError::LockPoisoned)?;
+                let mut first_err = None;
+
                 for handle in self.handles.into_iter().flatten() {
                     let cmd = TpmFlushContextCommand {
                         flush_handle: handle.into(),
                     };
                     if let Err(err) = guard.execute(&cmd, &[]) {
                         log::warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
-                        return Err(err.into());
+                        if first_err.is_none() {
+                            first_err = Some(err.into());
+                        }
                     }
+                }
+
+                if let Some(err) = first_err {
+                    return Err(err);
                 }
             }
         }
