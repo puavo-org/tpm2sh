@@ -23,12 +23,12 @@ use std::{
 };
 use thiserror::Error;
 
-use log::{trace, warn};
+use log::trace;
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmSt, TpmaCc, TpmsAuthCommand,
-        TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms, TpmuCapabilities,
-        TpmuPublicParms,
+        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmSt, TpmaCc,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
+        TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
@@ -217,14 +217,13 @@ impl TpmDevice {
 
         let result = tpm_parse_response(C::COMMAND, &resp_buf)?;
         match &result {
-            Ok((rc, response_body, _)) => {
+            Ok((response, _)) => {
                 if let LogFormat::Pretty = self.log_format {
-                    trace!(target: "cli::device", "Response (rc={rc})");
-                    response_body.print("", 1);
+                    trace!(target: "cli::device", "Response");
+                    response.print("", 1);
                 }
             }
-            Err((rc, _)) => {
-                trace!(target: "cli::device", "Error Response (rc={rc})");
+            Err(_) => {
                 if let LogFormat::Pretty = self.log_format {
                     trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
                 }
@@ -232,13 +231,11 @@ impl TpmDevice {
         }
 
         match result {
-            Ok((rc, response, auth)) => {
-                if rc.is_warning() {
-                    warn!(target: "cli::device", "TPM command completed with a warning: rc = {rc}");
-                }
+            Ok((response, auth)) => {
+                let rc = TpmRc::from(TpmRcBase::Success);
                 Ok((rc, response, auth))
             }
-            Err((rc, _)) => Err(TpmDeviceError::Tpm(rc)),
+            Err(rc) => Err(TpmDeviceError::Tpm(rc)),
         }
     }
 

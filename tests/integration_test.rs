@@ -12,7 +12,6 @@ use cli::{
     device::TpmDevice,
     error::{CliError, ParseError},
     policy::Expression,
-    session::AuthSession,
     uri::Uri,
     Command,
 };
@@ -26,12 +25,9 @@ use pkcs8::EncodePrivateKey;
 use rstest::{fixture, rstest};
 use tempfile::{tempdir, TempDir};
 use tpm2_protocol::{
-    data::{
-        Tpm2bAuth, Tpm2bDigest, Tpm2bNonce, Tpm2bPrivate, Tpm2bPublic, TpmaSession,
-        TpmlPcrSelection, TpmsAuthCommand,
-    },
-    message::{TpmLoadCommand, TpmPolicyPcrCommand},
-    TpmParse, TpmSession,
+    data::{Tpm2bDigest, TpmlPcrSelection},
+    message::TpmPolicyPcrCommand,
+    TpmSession,
 };
 
 struct TestFixture {
@@ -269,7 +265,7 @@ fn test_subcommand_pcr_read(test_context: TestFixture) {
 }
 
 #[ignore]
-fn test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
+fn _test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
