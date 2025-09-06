@@ -15,7 +15,7 @@ use crate::{
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
-    data::{TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
+    data::{TpmCc, TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     message::{
         TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
         TpmFlushContextCommand, MAX_HANDLES,
@@ -92,7 +92,9 @@ impl<'a> Context<'a> {
                 let (_rc, resp, _) = device.execute(&cmd, &[])?;
                 let resp = resp
                     .ContextLoad()
-                    .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+                    .map_err(|_| TpmDeviceError::MismatchedResponse {
+                        command: TpmCc::ContextLoad,
+                    })?;
                 self.track(resp.loaded_handle)?;
                 Ok(resp.loaded_handle)
             }
@@ -115,7 +117,9 @@ impl<'a> Context<'a> {
         let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::ContextSave,
+            })?;
         let context_bytes = build_to_vec(&save_resp.context)?;
         writeln!(
             self.writer,
@@ -162,7 +166,9 @@ impl<'a> Context<'a> {
         let sessions = session_from_args(&cmd, &handles, self.cli)?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::EvictControl,
+            })?;
         Ok(())
     }
 
@@ -211,7 +217,9 @@ impl<'a> Context<'a> {
         let sessions = session_from_args(&cmd, &handles, self.cli)?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::EvictControl,
+            })?;
         if let Some(slot) = self
             .handles
             .iter_mut()
@@ -243,7 +251,8 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `CliError::Device` if the device mutex is poisoned.
+    /// Returns `CliError` if the device mutex is poisoned or if flushing a
+    /// handle fails. It returns the first error encountered.
     pub fn flush(self, device: Option<Arc<Mutex<TpmDevice>>>) -> Result<(), CliError> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
@@ -254,6 +263,7 @@ impl<'a> Context<'a> {
                     };
                     if let Err(err) = guard.execute(&cmd, &[]) {
                         log::warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
+                        return Err(err.into());
                     }
                 }
             }

@@ -5,14 +5,14 @@
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::context::Context,
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     session::session_from_args,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
-    data::{Tpm2bPrivate, Tpm2bPublic},
+    data::{Tpm2bPrivate, Tpm2bPublic, TpmCc},
     message::TpmLoadCommand,
     TpmParse,
 };
@@ -70,7 +70,9 @@ impl DeviceCommand for Load {
         let (_rc, resp, _) = device.execute(&load_cmd, &sessions)?;
         let resp = resp
             .Load()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::Load,
+            })?;
         context.track(resp.object_handle)?;
         context.save(device, resp.object_handle)?;
         Ok(())

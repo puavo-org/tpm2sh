@@ -6,7 +6,7 @@ use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     crypto::{self, crypto_hmac, crypto_kdfa, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE},
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::private_key_from_pem_bytes,
     session::session_from_args,
@@ -21,7 +21,7 @@ use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
     data::{
-        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmtPublic,
+        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmCc, TpmtPublic,
         TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmImportCommand,
@@ -203,9 +203,11 @@ impl DeviceCommand for Import {
         let handles = [parent_handle.into()];
         let sessions = session_from_args(&import_cmd, &handles, context.cli)?;
         let (_rc, resp, _) = device.execute(&import_cmd, &sessions)?;
-        let import_resp = resp.Import().map_err(|e| {
-            CliError::Unexpected(format!("unexpected response type for Import: {e:?}"))
-        })?;
+        let import_resp = resp
+            .Import()
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::Import,
+            })?;
         let pub_key_bytes = build_to_vec(&Tpm2bPublic { inner: public })?;
         let priv_key_bytes = build_to_vec(&import_resp.out_private)?;
         writeln!(

@@ -4,7 +4,7 @@
 use crate::{
     cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
     command::{context::Context, CommandError},
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     parser::{parse_policy, PolicyExpr},
     pcr::{pcr_composite_digest, pcr_get_count},
@@ -15,7 +15,7 @@ use lexopt::{Arg, Parser, ValueExt};
 
 use tpm2_protocol::{
     data::{
-        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmlDigest,
+        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRh, TpmlDigest,
         TpmtSymDefObject,
     },
     message::{
@@ -197,7 +197,9 @@ fn start_trial_session(
     let (_rc, resp, _) = device.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
-        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::StartAuthSession,
+        })?;
     Ok(start_resp.session_handle)
 }
 
@@ -220,7 +222,9 @@ fn get_policy_digest(
     let (_rc, resp, _) = device.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
-        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::PolicyGetDigest,
+        })?;
     Ok(digest_resp.policy_digest)
 }
 

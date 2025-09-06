@@ -5,7 +5,7 @@
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     session::session_from_args,
     uri::Uri,
@@ -17,7 +17,7 @@ use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
-        TpmAlgId, TpmaObject, TpmlPcrSelection, TpmsKeyedhashParms, TpmsSensitiveCreate,
+        TpmAlgId, TpmCc, TpmaObject, TpmlPcrSelection, TpmsKeyedhashParms, TpmsSensitiveCreate,
         TpmtPublic, TpmtScheme, TpmuPublicId, TpmuPublicParms,
     },
     message::TpmCreateCommand,
@@ -111,9 +111,11 @@ impl DeviceCommand for Seal {
         let sessions = session_from_args(&cmd, &handles, context.cli)?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
 
-        let create_resp = resp.Create().map_err(|e| {
-            CliError::Unexpected(format!("unexpected response type for Create: {e:?}"))
-        })?;
+        let create_resp = resp
+            .Create()
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::Create,
+            })?;
         let pub_bytes = build_to_vec(&create_resp.out_public)?;
         let priv_bytes = build_to_vec(&create_resp.out_private)?;
         writeln!(

@@ -5,7 +5,7 @@
 use crate::{
     cli::{handle_help, required, DeviceCommand, Hierarchy, Subcommand},
     command::context::Context,
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
     session::session_from_args,
@@ -16,7 +16,7 @@ use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData,
-        TpmAlgId, TpmRh, TpmaObject, TpmlPcrSelection, TpmsEccParms, TpmsEccPoint,
+        TpmAlgId, TpmCc, TpmRh, TpmaObject, TpmlPcrSelection, TpmsEccParms, TpmsEccPoint,
         TpmsKeyedhashParms, TpmsRsaParms, TpmsSensitiveCreate, TpmtKdfScheme, TpmtPublic,
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
@@ -143,7 +143,9 @@ impl DeviceCommand for CreatePrimary {
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::CreatePrimary,
+            })?;
         let object_handle = resp.object_handle;
         if let Some(uri) = &self.handle {
             let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);

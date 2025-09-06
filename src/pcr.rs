@@ -2,10 +2,14 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{command::CommandError, device::TpmDevice, error::CliError};
+use crate::{
+    command::CommandError,
+    device::{TpmDevice, TpmDeviceError},
+    error::CliError,
+};
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use tpm2_protocol::{
-    data::{TpmAlgId, TpmCap, TpmlPcrSelection, TpmuCapabilities},
+    data::{TpmAlgId, TpmCap, TpmCc, TpmlPcrSelection, TpmuCapabilities},
     message::TpmPcrReadCommand,
 };
 
@@ -35,7 +39,9 @@ pub fn read(
     let (_, resp, _) = device.execute(&cmd, &[])?;
     let pcr_read_resp = resp
         .PcrRead()
-        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::PcrRead,
+        })?;
 
     let mut pcrs = Vec::new();
     let mut digest_iter = pcr_read_resp.pcr_values.iter();
@@ -47,8 +53,9 @@ pub fn read(
             }
             for bit_idx in 0..8 {
                 if (byte >> bit_idx) & 1 == 1 {
-                    let pcr_index = u32::try_from(byte_idx * 8 + bit_idx)
-                        .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+                    let pcr_index = u32::try_from(byte_idx * 8 + bit_idx).map_err(|_| {
+                        CommandError::InvalidPcrSelection("PCR index conversion failed".to_string())
+                    })?;
                     let value = digest_iter.next().ok_or_else(|| {
                         CommandError::InvalidPcrSelection("PCR selection mismatch".to_string())
                     })?;
@@ -85,9 +92,10 @@ pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, CliError> {
             )
         }
     } else {
-        Err(CliError::Unexpected(
+        Err(TpmDeviceError::InvalidResponse(
             "Unexpected capability data type when querying for PCRs.".to_string(),
-        ))
+        )
+        .into())
     }
 }
 

@@ -5,12 +5,12 @@
 use crate::{
     cli::{parse_no_args, DeviceCommand, Subcommand},
     command::context::Context,
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     session::session_from_args,
 };
 use lexopt::Parser;
-use tpm2_protocol::{data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
+use tpm2_protocol::{data::TpmCc, data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
 #[derive(Debug, Default)]
 pub struct ResetLock;
@@ -38,7 +38,9 @@ impl DeviceCommand for ResetLock {
         let sessions = session_from_args(&command, &handles, context.cli)?;
         let (_rc, resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::DictionaryAttackLockReset,
+            })?;
         Ok(())
     }
 }

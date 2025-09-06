@@ -7,6 +7,7 @@ use crate::{
     error::ParseError,
     key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
     print::TpmPrint,
+    TEARDOWN,
 };
 use std::{
     collections::HashSet,
@@ -17,6 +18,7 @@ use std::{
         mpsc::{self, RecvTimeoutError},
         Arc,
     },
+    thread,
     time::Duration,
 };
 use thiserror::Error;
@@ -54,6 +56,9 @@ pub enum TpmDeviceError {
 
     #[error("TPM returned an error code: {0}")]
     Tpm(TpmRc),
+
+    #[error("Mismatched response type for command '{command}'")]
+    MismatchedResponse { command: TpmCc },
 
     #[error("Invalid response from TPM: {0}")]
     InvalidResponse(String),
@@ -147,7 +152,7 @@ impl TpmDevice {
         let spinner_started = Arc::new(AtomicBool::new(false));
         if std::io::stderr().is_terminal() && C::COMMAND != TpmCc::FlushContext {
             let spinner_started = spinner_started.clone();
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
                     spinner_started.store(true, Ordering::Relaxed);
                     let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -158,8 +163,8 @@ impl TpmDevice {
                     let _ = stderr.flush();
 
                     let mut i = 0;
-                    while let Err(RecvTimeoutError::Timeout) =
-                        rx.recv_timeout(Duration::from_millis(100))
+                    while !TEARDOWN.load(Ordering::Relaxed)
+                        && rx.recv_timeout(Duration::from_millis(100)).is_err()
                     {
                         let frame = spinner_chars[i % spinner_chars.len()];
                         let _ = write!(stderr, "\r\x1B[1m\x1B[36m{frame} {message}\x1B[0m");
@@ -199,7 +204,7 @@ impl TpmDevice {
 
         drop(tx);
 
-        if spinner_started.load(Ordering::Relaxed) {
+        if spinner_started.load(Ordering::Relaxed) && !TEARDOWN.load(Ordering::Relaxed) {
             let mut stderr = io::stderr();
             let final_message = "✔ TPM operation complete.";
             let _ = write!(stderr, "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h");
@@ -362,11 +367,11 @@ impl TpmDevice {
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
-            } = resp.GetCapability().map_err(|e| {
-                TpmDeviceError::InvalidResponse(format!(
-                    "unexpected get capability response: {e:?}"
-                ))
-            })?;
+            } = resp
+                .GetCapability()
+                .map_err(|_| TpmDeviceError::MismatchedResponse {
+                    command: TpmCc::GetCapability,
+                })?;
 
             let next_prop = if more_data.into() {
                 match &capability_data.data {
@@ -409,9 +414,11 @@ impl TpmDevice {
             object_handle: handle.0.into(),
         };
         let (rc, resp, _) = self.execute(&cmd, &[])?;
-        let read_public_resp = resp.ReadPublic().map_err(|e| {
-            TpmDeviceError::InvalidResponse(format!("unexpected read public response: {e:?}"))
-        })?;
+        let read_public_resp =
+            resp.ReadPublic()
+                .map_err(|_| TpmDeviceError::MismatchedResponse {
+                    command: TpmCc::ReadPublic,
+                })?;
         Ok((rc, read_public_resp.out_public.inner, read_public_resp.name))
     }
 }

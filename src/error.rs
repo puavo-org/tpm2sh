@@ -53,9 +53,6 @@ pub enum CliError {
 
     #[error("TPM returned an error code: {0}")]
     Tpm(TpmRc),
-
-    #[error("unexpected TPM response: {0}")]
-    Unexpected(String),
 }
 
 impl From<TpmRc> for CliError {

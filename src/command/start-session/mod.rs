@@ -5,7 +5,7 @@
 use crate::{
     cli::{handle_help, DeviceCommand, SessionType, Subcommand},
     command::{context::Context, CommandError},
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     session::AuthSession,
 };
@@ -14,7 +14,7 @@ use rand::{thread_rng, RngCore};
 
 use tpm2_protocol::{
     data::{
-        Tpm2bAuth, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmRh, TpmaSession,
+        Tpm2bAuth, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRh, TpmaSession,
         TpmtSymDefObject, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmStartAuthSessionCommand,
@@ -72,9 +72,12 @@ impl DeviceCommand for StartSession {
             auth_hash,
         };
         let (_rc, response, _) = device.execute(&cmd, &[])?;
-        let start_auth_session_resp = response
-            .StartAuthSession()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+        let start_auth_session_resp =
+            response
+                .StartAuthSession()
+                .map_err(|_| TpmDeviceError::MismatchedResponse {
+                    command: TpmCc::StartAuthSession,
+                })?;
         let session = AuthSession {
             handle: start_auth_session_resp.session_handle,
             nonce_tpm: start_auth_session_resp.nonce_tpm,

@@ -5,13 +5,13 @@
 use crate::{
     cli::{handle_help, required, DeviceCommand, Subcommand},
     command::context::Context,
-    device::TpmDevice,
+    device::{TpmDevice, TpmDeviceError},
     error::CliError,
     session::session_from_args,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
-use tpm2_protocol::message::TpmUnsealCommand;
+use tpm2_protocol::{data::TpmCc, message::TpmUnsealCommand};
 
 #[derive(Debug, Default)]
 pub struct Unseal {
@@ -52,7 +52,9 @@ impl DeviceCommand for Unseal {
         let (_rc, unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp
             .Unseal()
-            .map_err(|e| CliError::Unexpected(format!("{e:?}")))?;
+            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                command: TpmCc::Unseal,
+            })?;
         context.writer.write_all(&unseal_resp.out_data)?;
         Ok(())
     }
