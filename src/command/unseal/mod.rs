@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, required, Cli, DeviceCommand, Subcommand},
+    cli::{handle_help, parse_parent_option, required, Cli, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
@@ -23,6 +23,7 @@ use tpm2_protocol::{
 #[derive(Debug, Default)]
 pub struct Unseal {
     pub uri: Uri,
+    pub parent: Option<Uri>,
     pub password: Option<String>,
 }
 
@@ -32,13 +33,16 @@ impl Subcommand for Unseal {
     const ARGUMENTS: &'static str = include_str!("arguments.txt");
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
+    const OPTION_PARENT: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut uri = None;
+        let mut parent = None;
         let mut password = None;
 
         while let Some(arg) = parser.next()? {
             match arg {
+                Arg::Long("parent") => parse_parent_option(parser, &mut parent)?,
                 Arg::Long("password") => password = Some(parser.value()?.string()?),
                 Arg::Value(val) if uri.is_none() => uri = Some(val.parse()?),
                 _ => return handle_help(arg),
@@ -46,6 +50,7 @@ impl Subcommand for Unseal {
         }
         Ok(Unseal {
             uri: required(uri, "<URI>")?,
+            parent,
             password,
         })
     }
@@ -74,6 +79,14 @@ impl DeviceCommand for Unseal {
         let object_handle = match self.uri.ast() {
             Expression::TpmHandle(handle) => TpmTransient(*handle),
             Expression::FilePath(_) | Expression::Data { .. } => {
+                let parent_uri = self.parent.as_ref().ok_or_else(|| {
+                    CliError::Command(CommandError::Custom(
+                        "the '--parent' option is required when unsealing from a file or data URI"
+                            .to_string(),
+                    ))
+                })?;
+                let parent_handle = context.load(device, parent_uri)?;
+
                 let key_bytes = self.uri.to_bytes()?;
                 let tpm_key = TpmKey::from_pem(&key_bytes)
                     .or_else(|_| TpmKey::from_der(&key_bytes))
@@ -87,8 +100,6 @@ impl DeviceCommand for Unseal {
                     Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ParseError::from)?;
                 let (in_private, _) =
                     Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ParseError::from)?;
-
-                let parent_handle = TpmTransient(tpm_key.parent);
 
                 let load_cmd = TpmLoadCommand {
                     parent_handle: parent_handle.0.into(),

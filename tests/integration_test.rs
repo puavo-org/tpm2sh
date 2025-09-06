@@ -283,7 +283,7 @@ fn _test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), 
     let policy_digest = Sha256::digest(b"pcr policy digest").to_vec();
 
     let seal_cmd = Commands::Seal(Seal {
-        parent: parent_uri,
+        parent: parent_uri.clone(),
         data: format!("data://utf8,{secret}").parse().unwrap(),
         policy: Some(hex::encode(&policy_digest)),
         password: None,
@@ -331,6 +331,7 @@ fn _test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), 
 
     let unseal_cmd = Commands::Unseal(Unseal {
         uri: sealed_key_uri,
+        parent: Some(parent_uri.clone()),
         password: None,
     });
 

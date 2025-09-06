@@ -1,3 +1,1 @@
-Unseals a keyedhash object from transient handle ('tpm://') or a ASN.1 ('file://' or 'data://').
-
-Usage: tpm2sh unseal <URI>
+The command accepts a URI for the sealed object. If a transient handle ('tpm://') is provided, the object is unsealed directly. If the object is provided as an ASN.1 file ('file://') or data blob ('data://'), it must first be loaded into the TPM, which requires its parent key. In this case, the parent key's context must be specified using the '--parent' option.

@@ -22,6 +22,8 @@ use std::{
 };
 use tpm2_protocol::data::{TpmRh, TpmSe};
 
+const PARENT_OPTION_HELP: &str = "--parent <URI>\n'data://', 'file://' or 'tpm://'";
+
 /// A trait for CLI subcommands.
 pub trait Subcommand: Sized {
     const USAGE: &'static str;
@@ -29,6 +31,7 @@ pub trait Subcommand: Sized {
     const ARGUMENTS: &'static str;
     const OPTIONS: &'static str;
     const SUMMARY: &'static str;
+    const OPTION_PARENT: bool = false;
 
     /// Parse subcommand.
     ///
@@ -211,6 +214,7 @@ macro_rules! subcommand_registry {
                 help: $local_command::HELP,
                 arguments: $local_command::ARGUMENTS,
                 options: $local_command::OPTIONS,
+                option_parent: $local_command::OPTION_PARENT,
                 dispatch: |p| dispatch(p, Commands::$local_command),
             },
         )* $ (
@@ -220,6 +224,7 @@ macro_rules! subcommand_registry {
                 help: $device_command::HELP,
                 arguments: $device_command::ARGUMENTS,
                 options: $device_command::OPTIONS,
+                option_parent: $device_command::OPTION_PARENT,
                 dispatch: |p| dispatch(p, Commands::$device_command),
             },
         )*];
@@ -267,6 +272,22 @@ pub fn required<T>(arg: Option<T>, name: &'static str) -> Result<T, lexopt::Erro
     arg.ok_or_else(|| format!("missing required argument {name}").into())
 }
 
+/// Helper for parsing a `--parent <URI>` option.
+///
+/// # Errors
+///
+/// Returns a `lexopt::Error` if the option is duplicated or its value is invalid.
+pub fn parse_parent_option(
+    parser: &mut Parser,
+    parent: &mut Option<Uri>,
+) -> Result<(), lexopt::Error> {
+    if parent.is_some() {
+        return Err("the '--parent' option was provided more than once".into());
+    }
+    *parent = Some(parser.value()?.parse()?);
+    Ok(())
+}
+
 /// Helper for parsing subcommands that take no arguments.
 ///
 /// # Errors
@@ -294,6 +315,20 @@ fn format_section(title: &str, content: &str, indent: usize) -> String {
         writeln!(&mut section, "{indented_name}{}{desc}", " ".repeat(padding),).unwrap();
     }
     section
+}
+
+fn build_options_string(has_parent: bool, custom_options: &'static str) -> String {
+    let mut options = String::new();
+    if has_parent {
+        options.push_str(PARENT_OPTION_HELP);
+    }
+    if !custom_options.trim().is_empty() {
+        if !options.is_empty() {
+            options.push('\n');
+        }
+        options.push_str(custom_options);
+    }
+    options
 }
 
 fn format_help(header: &str, args: &str, opts: &str) -> String {
@@ -335,10 +370,11 @@ where
         Ok(args) => Ok(wrapper(args)),
         Err(lexopt::Error::Custom(err)) if err.to_string() == "help requested" => {
             let header = format!("{}\n\n{}", S::SUMMARY.trim(), S::HELP);
+            let options = build_options_string(S::OPTION_PARENT, S::OPTIONS);
             Err(ParseResult::Help(format_help(
                 &header,
                 S::ARGUMENTS,
-                S::OPTIONS,
+                &options,
             )))
         }
         Err(e) => Err(ParseResult::ErrorAndUsage {
@@ -354,6 +390,7 @@ struct SubcommandObject {
     help: &'static str,
     arguments: &'static str,
     options: &'static str,
+    option_parent: bool,
     dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
 
@@ -377,7 +414,8 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
                         .find(|cmd| cmd.name == cmd_name.as_ref())
                         .map(|cmd| {
                             let header = format!("{}\n\n{}", cmd.summary.trim(), cmd.help);
-                            format_help(&header, cmd.arguments, cmd.options)
+                            let options = build_options_string(cmd.option_parent, cmd.options);
+                            format_help(&header, cmd.arguments, &options)
                         })
                         .ok_or_else(|| {
                             lexopt::Error::from(format!("unknown command '{cmd_name}'"))

@@ -1,2 +1,2 @@
---parent <KEY URI>
-'tpm://', 'file://' or 'data://'
+--output <URI>
+'file://' or 'tpm://'

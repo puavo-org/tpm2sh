@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, required, DeviceCommand, Subcommand},
+    cli::{handle_help, parse_parent_option, required, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     crypto::{self, crypto_hmac, crypto_kdfa, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE},
     device::{TpmDevice, TpmDeviceError},
@@ -40,6 +40,7 @@ impl Subcommand for Load {
     const ARGUMENTS: &'static str = include_str!("arguments.txt");
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
+    const OPTION_PARENT: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut parent = None;
@@ -48,7 +49,7 @@ impl Subcommand for Load {
 
         while let Some(arg) = parser.next()? {
             match arg {
-                Arg::Long("parent") => parent = Some(parser.value()?.parse()?),
+                Arg::Long("parent") => parse_parent_option(parser, &mut parent)?,
                 Arg::Long("output") => output = Some(parser.value()?.parse()?),
                 Arg::Value(val) => positional_args.push(val.parse()?),
                 _ => return handle_help(arg),

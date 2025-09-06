@@ -66,6 +66,9 @@ pub enum CommandError {
 
     #[error("TPM protocol error")]
     Build(TpmErrorKind),
+
+    #[error("{0}")]
+    Custom(String),
 }
 
 impl From<TpmErrorKind> for CommandError {
