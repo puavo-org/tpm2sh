@@ -23,6 +23,7 @@ use std::{
 use tpm2_protocol::data::{TpmRh, TpmSe};
 
 const PARENT_OPTION_HELP: &str = "--parent <URI>\n'data://', 'file://' or 'tpm://'";
+const OUTPUT_OPTION_HELP: &str = "--output <URI>\n'tpm://' or 'file://'";
 
 /// A trait for CLI subcommands.
 pub trait Subcommand: Sized {
@@ -32,6 +33,7 @@ pub trait Subcommand: Sized {
     const OPTIONS: &'static str;
     const SUMMARY: &'static str;
     const OPTION_PARENT: bool = false;
+    const OPTION_OUTPUT: bool = false;
 
     /// Parse subcommand.
     ///
@@ -215,6 +217,7 @@ macro_rules! subcommand_registry {
                 arguments: $local_command::ARGUMENTS,
                 options: $local_command::OPTIONS,
                 option_parent: $local_command::OPTION_PARENT,
+                option_output: $local_command::OPTION_OUTPUT,
                 dispatch: |p| dispatch(p, Commands::$local_command),
             },
         )* $ (
@@ -225,6 +228,7 @@ macro_rules! subcommand_registry {
                 arguments: $device_command::ARGUMENTS,
                 options: $device_command::OPTIONS,
                 option_parent: $device_command::OPTION_PARENT,
+                option_output: $device_command::OPTION_OUTPUT,
                 dispatch: |p| dispatch(p, Commands::$device_command),
             },
         )*];
@@ -322,10 +326,20 @@ fn format_section(title: &str, content: &str, indent: usize) -> String {
     section
 }
 
-fn build_options_string(has_parent: bool, custom_options: &'static str) -> String {
+fn build_options_string(
+    has_parent: bool,
+    has_output: bool,
+    custom_options: &'static str,
+) -> String {
     let mut options = String::new();
     if has_parent {
         options.push_str(PARENT_OPTION_HELP);
+    }
+    if has_output {
+        if !options.is_empty() {
+            options.push('\n');
+        }
+        options.push_str(OUTPUT_OPTION_HELP);
     }
     if !custom_options.trim().is_empty() {
         if !options.is_empty() {
@@ -377,7 +391,7 @@ where
         Ok(args) => Ok(wrapper(args)),
         Err(lexopt::Error::Custom(err)) if err.to_string() == "help requested" => {
             let header = format!("{}\n\n{}", S::SUMMARY.trim(), S::HELP);
-            let options = build_options_string(S::OPTION_PARENT, S::OPTIONS);
+            let options = build_options_string(S::OPTION_PARENT, S::OPTION_OUTPUT, S::OPTIONS);
             Err(ParseResult::Help(format_help(
                 &header,
                 S::ARGUMENTS,
@@ -398,6 +412,7 @@ struct SubcommandObject {
     arguments: &'static str,
     options: &'static str,
     option_parent: bool,
+    option_output: bool,
     dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
 
@@ -421,7 +436,11 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
                         .find(|cmd| cmd.name == cmd_name.as_ref())
                         .map(|cmd| {
                             let header = format!("{}\n\n{}", cmd.summary.trim(), cmd.help);
-                            let options = build_options_string(cmd.option_parent, cmd.options);
+                            let options = build_options_string(
+                                cmd.option_parent,
+                                cmd.option_output,
+                                cmd.options,
+                            );
                             format_help(&header, cmd.arguments, &options)
                         })
                         .ok_or_else(|| {

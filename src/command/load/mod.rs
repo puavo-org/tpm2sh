@@ -9,7 +9,6 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::{private_key_from_pem_bytes, TpmKey},
-    policy::Expression,
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
@@ -26,7 +25,7 @@ use tpm2_protocol::{
         TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{TpmImportCommand, TpmLoadCommand},
-    TpmBuild, TpmParse, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuild, TpmParse, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 #[derive(Debug)]
@@ -43,6 +42,7 @@ impl Subcommand for Load {
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_PARENT: bool = true;
+    const OPTION_OUTPUT: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut parent = None;
@@ -257,17 +257,6 @@ impl DeviceCommand for Load {
             })?;
 
         context.track(resp.object_handle)?;
-
-        if let Some(uri) = &self.output {
-            if let Expression::TpmHandle(handle) = uri.ast() {
-                let persistent_handle = TpmPersistent(*handle);
-                context.persist_transient(device, resp.object_handle, persistent_handle)?;
-                writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
-                return Ok(());
-            }
-        }
-
-        context.save_context(device, resp.object_handle, self.output.as_ref())?;
-        Ok(())
+        context.finalize_object_output(device, resp.object_handle, self.output.as_ref())
     }
 }

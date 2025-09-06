@@ -8,7 +8,6 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
-    policy::Expression,
     session::session_from_args,
     uri::Uri,
 };
@@ -22,7 +21,6 @@ use tpm2_protocol::{
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmCreatePrimaryCommand,
-    TpmPersistent,
 };
 
 #[derive(Debug, Default)]
@@ -38,6 +36,7 @@ impl Subcommand for CreatePrimary {
     const ARGUMENTS: &'static str = include_str!("arguments.txt");
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
+    const OPTION_OUTPUT: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut hierarchy = Hierarchy::default();
@@ -153,18 +152,6 @@ impl DeviceCommand for CreatePrimary {
         let object_handle = resp.object_handle;
 
         context.track(object_handle)?;
-
-        if let Some(uri) = &self.output {
-            if let Expression::TpmHandle(handle) = uri.ast() {
-                let persistent_handle = TpmPersistent(*handle);
-                context.persist_transient(device, object_handle, persistent_handle)?;
-                writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
-                return Ok(());
-            }
-        }
-
-        context.save_context(device, object_handle, self.output.as_ref())?;
-
-        Ok(())
+        context.finalize_object_output(device, object_handle, self.output.as_ref())
     }
 }

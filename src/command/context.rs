@@ -311,6 +311,31 @@ impl<'a> Context<'a> {
         Ok(())
     }
 
+    /// Handles the output of a newly created or loaded object.
+    ///
+    /// Depending on the `output_uri`, this either makes the object persistent in
+    /// the TPM or saves its context to an external location.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if persisting or saving fails.
+    pub fn finalize_object_output(
+        &mut self,
+        device: &mut TpmDevice,
+        object_handle: TpmTransient,
+        output_uri: Option<&Uri>,
+    ) -> Result<(), CliError> {
+        if let Some(uri) = output_uri {
+            if let Expression::TpmHandle(handle) = uri.ast() {
+                let persistent_handle = TpmPersistent(*handle);
+                self.persist_transient(device, object_handle, persistent_handle)?;
+                writeln!(self.writer, "tpm://{persistent_handle:#010x}")?;
+                return Ok(());
+            }
+        }
+        self.save_context(device, object_handle, output_uri)
+    }
+
     fn capacity_invariant(&self) -> Result<(), CommandError> {
         if self.handles_len() == MAX_HANDLES {
             Err(CommandError::HandleCapacityExceeded {
