@@ -76,6 +76,14 @@ impl DeviceCommand for Unseal {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+        if self.password.is_some() && context.cli.session.is_some() {
+            return Err(CommandError::MutualExclusionArgs {
+                arg1: "password",
+                arg2: "session",
+            }
+            .into());
+        }
+
         let object_handle = match self.uri.ast() {
             Expression::TpmHandle(handle) => TpmTransient(*handle),
             Expression::FilePath(_) | Expression::Data { .. } => {
@@ -129,17 +137,9 @@ impl DeviceCommand for Unseal {
         let unseal_cmd = TpmUnsealCommand {
             item_handle: object_handle.0.into(),
         };
-
         let unseal_handles = [object_handle.into()];
 
         let unseal_sessions = if let Some(password) = &self.password {
-            if context.cli.session.is_some() {
-                return Err(CommandError::MutualExclusionArgs {
-                    arg1: "password",
-                    arg2: "session",
-                }
-                .into());
-            }
             let local_cli = Cli {
                 password: Some(password.clone()),
                 ..Default::default()
