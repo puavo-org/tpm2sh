@@ -238,10 +238,7 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
         .unwrap();
 
     let output = String::from_utf8(out_buf).unwrap();
-    let expected = format!(
-        "pcr(\"sha256:7\", \"{}\")",
-        hex::encode(expected_composite_digest)
-    );
+    let expected = format!("pcr(sha256:7, {})", hex::encode(expected_composite_digest));
     assert_eq!(output.trim(), expected);
 }
 
@@ -259,13 +256,13 @@ fn test_subcommand_pcr_read(test_context: TestFixture) {
     let composite_data = [[0u8; 32].as_slice(), [0u8; 32].as_slice()].concat();
     let expected_digest = Sha256::digest(composite_data);
     let output = String::from_utf8(out_buf).unwrap();
-    let expected = format!("pcr(\"sha256:0,7\", \"{}\")", hex::encode(expected_digest));
+    let expected = format!("pcr(sha256:0,7, {})", hex::encode(expected_digest));
 
     assert_eq!(output.trim(), expected);
 }
 
-#[ignore]
-fn _test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
+#[rstest]
+fn test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()

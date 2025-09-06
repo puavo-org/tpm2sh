@@ -1,2 +1,1 @@
-
 Usage: tpm2sh pcr-event <PCR> <DATA>

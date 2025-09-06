@@ -5,9 +5,9 @@ use cli::policy::{parse, Expression, Parsing};
 use rstest::rstest;
 
 #[rstest]
-#[case(r#"pcr("sha256:0")"#, Parsing::AuthorizationPolicy, true)]
+#[case("pcr(sha256:0)", Parsing::AuthorizationPolicy, true)]
 #[case(
-    r#"or(pcr("sha256:0"), secret(tpm://0x40000001))"#,
+    "or(pcr(sha256:0), secret(tpm://0x40000001))",
     Parsing::AuthorizationPolicy,
     true
 )]
@@ -15,14 +15,14 @@ use rstest::rstest;
 #[case("tpm://0x81000001", Parsing::Object, true)]
 #[case("file:///path", Parsing::Object, true)]
 #[case("data://hex,deadbeef", Parsing::Object, true)]
-#[case(r#"pcr("sha256:0")"#, Parsing::Object, false)]
+#[case("pcr(sha256:0)", Parsing::Object, false)]
 #[case("file:///path", Parsing::Data, true)]
 #[case("data://hex,deadbeef", Parsing::Data, true)]
 #[case("tpm://0x81000001", Parsing::Data, false)]
-#[case(r#"pcr("sha256:0")"#, Parsing::Data, false)]
-#[case(r#"pcr("sha256:0")"#, Parsing::PcrSelection, true)]
-#[case(r#"pcr("sha256:0,7+sha1:2")"#, Parsing::PcrSelection, true)]
-#[case(r#"pcr("sha256:0", "deadbeef")"#, Parsing::PcrSelection, false)]
+#[case("pcr(sha256:0)", Parsing::Data, false)]
+#[case("pcr(sha256:0)", Parsing::PcrSelection, true)]
+#[case("pcr(sha256:0,7+sha1:2)", Parsing::PcrSelection, true)]
+#[case("pcr(sha256:0, deadbeef)", Parsing::PcrSelection, false)]
 #[case("tpm://0x81000001", Parsing::PcrSelection, false)]
 #[case(
     "session://handle=0x80000001;nonce=1122;attrs=01;key=;alg=sha256",
@@ -50,9 +50,9 @@ fn test_policy_parsing_modes(
 }
 
 #[rstest]
-#[case(r#"pcr("sha256:0")"#, Expression::Pcr { selection: "sha256:0".to_string(), digest: None, count: None })]
-#[case(r#"pcr("sha1:0,15", "deadbeef")"#, Expression::Pcr { selection: "sha1:0,15".to_string(), digest: Some("deadbeef".to_string()), count: None })]
-#[case(r#"secret(tpm://0x40000001)"#, Expression::Secret { auth_handle_uri: Box::new(Expression::TpmHandle(0x40000001)), password: None })]
+#[case("pcr(sha256:0)", Expression::Pcr { selection: "sha256:0".to_string(), digest: None, count: None })]
+#[case("pcr(sha1:0,15, deadbeef)", Expression::Pcr { selection: "sha1:0,15".to_string(), digest: Some("deadbeef".to_string()), count: None })]
+#[case("secret(tpm://0x40000001)", Expression::Secret { auth_handle_uri: Box::new(Expression::TpmHandle(0x40000001)), password: None })]
 fn test_policy_parser_valid_ast(#[case] input: &str, #[case] expected: Expression) {
     let result = parse(input, Parsing::AuthorizationPolicy)
         .unwrap_or_else(|e| panic!(r#"policy parser failed on valid input "{input}": {e}"#));

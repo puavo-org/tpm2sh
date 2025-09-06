@@ -62,9 +62,9 @@ impl fmt::Display for Expression {
                 digest,
                 count,
             } => {
-                write!(f, "pcr(\"{selection}\"")?;
+                write!(f, "pcr({selection}")?;
                 if let Some(d) = digest {
-                    write!(f, ", \"{d}\"")?;
+                    write!(f, ", {d}")?;
                 }
                 if let Some(c) = count {
                     write!(f, ", count={c}")?;
@@ -239,16 +239,6 @@ fn string_argument(input: &str) -> IResult<&str, String> {
     )(input)
 }
 
-fn pcr_selection_argument(input: &str) -> IResult<&str, String> {
-    map(
-        alt((
-            delimited(char('\"'), recognize(many0(is_not("\""))), char('\"')),
-            recognize(pcr_selection_body),
-        )),
-        |s: &str| s.to_string(),
-    )(input)
-}
-
 fn count_parameter(input: &str) -> IResult<&str, u32> {
     map_res(
         preceded(tag("count="), take_while1(is_dec_digit)),
@@ -266,8 +256,10 @@ where
 fn pcr_expression(input: &str) -> IResult<&str, Expression> {
     map(
         tuple((
-            pcr_selection_argument,
-            opt(comma_sep(string_argument)),
+            map(pcr_selection_body, |s| s.to_string()),
+            opt(comma_sep(map(take_while1(is_hex_digit), |s: &str| {
+                s.to_string()
+            }))),
             opt(comma_sep(count_parameter)),
         )),
         |(selection, digest, count)| Expression::Pcr {

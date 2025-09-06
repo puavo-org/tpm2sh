@@ -1,2 +1,2 @@
 <EXPRESSION>
-pcr policy expression
+PCR policy expression
