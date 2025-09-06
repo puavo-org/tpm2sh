@@ -12,6 +12,7 @@ use cli::{
     device::TpmDevice,
     error::{CliError, ParseError},
     policy::Expression,
+    session::session_from_args,
     uri::Uri,
     Command,
 };
@@ -262,7 +263,60 @@ fn test_subcommand_pcr_read(test_context: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
+fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError> {
+    let create_cmd = Commands::CreatePrimary(CreatePrimary {
+        algorithm: "keyedhash:sha256".parse().unwrap(),
+        ..Default::default()
+    });
+    let mut parent_context_uri_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut parent_context_uri_buf);
+    create_cmd.run(Some(test_context.device.clone()), &mut context)?;
+    let parent_uri: Uri = String::from_utf8(parent_context_uri_buf)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+
+    let secret = "KEKKONEN";
+    let password = "test_password";
+    let seal_cmd = Commands::Seal(Seal {
+        parent: parent_uri.clone(),
+        data: format!("data://utf8,{secret}").parse().unwrap(),
+        password: Some(password.to_string()),
+        policy: None,
+        output: None,
+    });
+    let mut sealed_key_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
+    seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
+    let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
+
+    let key_dir = tempdir().unwrap();
+    let sealed_key_path = key_dir.path().join("sealed.key");
+    std::fs::write(&sealed_key_path, &sealed_key_pem)?;
+    let sealed_key_uri: Uri = format!("file://{}", sealed_key_path.to_str().unwrap())
+        .parse()
+        .unwrap();
+
+    let unseal_cmd = Commands::Unseal(Unseal {
+        uri: sealed_key_uri,
+        parent: Some(parent_uri),
+        password: Some(password.to_string()),
+    });
+
+    let mut unsealed_data_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut unsealed_data_buf);
+    unseal_cmd.run(Some(test_context.device.clone()), &mut context)?;
+    let unsealed_output = String::from_utf8(unsealed_data_buf).unwrap();
+    let expected_output = format!("data://utf8,{secret}");
+
+    assert_eq!(unsealed_output.trim(), expected_output);
+
+    Ok(())
+}
+
+#[rstest]
+fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), CliError> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
@@ -320,11 +374,20 @@ fn test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), C
         pcr_digest: Tpm2bDigest::try_from(policy_digest.as_slice()).unwrap(),
         pcrs: TpmlPcrSelection::default(),
     };
+
+    let cli_for_policy = Cli {
+        session: Some(session_uri.clone()),
+        ..Default::default()
+    };
+    let policy_pcr_handles = [session.0];
+    let sessions_for_policy_pcr =
+        session_from_args(&policy_pcr_cmd, &policy_pcr_handles, &cli_for_policy)?;
+
     let _ = test_context
         .device
         .lock()
         .unwrap()
-        .execute(&policy_pcr_cmd, &[])?;
+        .execute(&policy_pcr_cmd, &sessions_for_policy_pcr)?;
 
     let unseal_cmd = Commands::Unseal(Unseal {
         uri: sealed_key_uri,
