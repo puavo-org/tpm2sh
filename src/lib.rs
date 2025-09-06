@@ -69,8 +69,13 @@ pub enum ParseResult {
 /// Returns a `crate::error::CliError` if opening the device, or executing the command fails.
 pub fn execute_cli() -> Result<(), crate::error::CliError> {
     let parse_result = cli::parse_args().unwrap_or_else(|err| {
-        eprintln!("Error: {err}");
-        eprintln!("\n{}", include_str!("usage.txt"));
+        let err_string = err.to_string();
+        eprintln!("Error: {err_string}");
+        if err_string.starts_with("unknown command") {
+            eprintln!("\nFor more information, try '--help'.");
+        } else {
+            eprintln!("\n{}", include_str!("usage.txt"));
+        }
         std::process::exit(2);
     });
 

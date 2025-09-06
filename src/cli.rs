@@ -304,15 +304,20 @@ fn format_section(title: &str, content: &str, indent: usize) -> String {
     if content.trim().is_empty() {
         return String::new();
     }
-    let mut section = format!("\n{title}:\n");
+    let mut section = format!("\n{title}:\n\n");
     let lines: Vec<_> = content.lines().collect();
 
-    for chunk in lines.chunks_exact(2) {
+    for chunk in lines.chunks(2) {
         let name = chunk[0].trim_end();
-        let desc = chunk[1].trim();
         let indented_name = format!("{}{}", " ".repeat(indent), name);
-        let padding = 40_usize.saturating_sub(indented_name.len());
-        writeln!(&mut section, "{indented_name}{}{desc}", " ".repeat(padding),).unwrap();
+
+        if chunk.len() > 1 {
+            let desc = chunk[1].trim();
+            let padding = 40_usize.saturating_sub(indented_name.len());
+            writeln!(&mut section, "{indented_name}{}{desc}", " ".repeat(padding)).unwrap();
+        } else {
+            writeln!(&mut section, "{indented_name}").unwrap();
+        }
     }
     section
 }
@@ -334,7 +339,7 @@ fn build_options_string(has_parent: bool, custom_options: &'static str) -> Strin
 fn format_help(header: &str, args: &str, opts: &str) -> String {
     let mut help = String::from(header);
     help.push_str(&format_section("Arguments", args, 2));
-    help.push_str(&format_section("Options", opts, 8));
+    help.push_str(&format_section("Options", opts, 2));
     help.push_str("\nGlobal options:\n\n");
     help.push_str(include_str!("options.txt"));
     help
@@ -348,7 +353,7 @@ pub fn format_main_help() -> String {
         writeln!(&mut commands_str, "{}\n{}", cmd.name, cmd.summary.trim()).unwrap();
     }
 
-    let mut help = String::from("TPM 2.0 shell\n\nUsage: tpm2sh [OPTIONS] [COMMAND]");
+    let mut help = String::from("TPM 2.0 shell\n\nUsage: tpm2sh [OPTIONS] [COMMAND]\n");
     help.push_str(&format_section("Commands", &commands_str, 2));
     help.push_str("\nOptions:\n\n");
     help.push_str(include_str!("options.txt"));
