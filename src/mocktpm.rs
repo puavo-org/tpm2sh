@@ -33,11 +33,11 @@ use tpm2_protocol::{
     data::{
         Tpm2bCreationData, Tpm2bDigest, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa,
         Tpm2bSensitiveData, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh,
-        TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca, TpmlEccCurve, TpmlHandle,
-        TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc, TpmsAuthCommand,
-        TpmsCapabilityData, TpmsContext, TpmtPublic, TpmtPublicParms, TpmtSensitive,
-        TpmtTkCreation, TpmuCapabilities, TpmuPublicId, TpmuPublicParms, TPM_RH_PERSISTENT_FIRST,
-        TPM_RH_TRANSIENT_FIRST,
+        TpmaAlgorithm, TpmaCc, TpmlAlgProperty, TpmlCca, TpmlDigest, TpmlEccCurve, TpmlHandle,
+        TpmlPcrSelection, TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc,
+        TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsPcrSelection, TpmtPublic,
+        TpmtPublicParms, TpmtSensitive, TpmtTkCreation, TpmuCapabilities, TpmuPublicId,
+        TpmuPublicParms, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,
@@ -47,7 +47,8 @@ use tpm2_protocol::{
         TpmEccParametersResponse, TpmEvictControlCommand, TpmEvictControlResponse,
         TpmFlushContextCommand, TpmFlushContextResponse, TpmGetCapabilityCommand,
         TpmGetCapabilityResponse, TpmImportCommand, TpmImportResponse, TpmLoadCommand,
-        TpmLoadResponse, TpmPolicyGetDigestCommand, TpmPolicyGetDigestResponse,
+        TpmLoadResponse, TpmPcrEventCommand, TpmPcrEventResponse, TpmPcrReadCommand,
+        TpmPcrReadResponse, TpmPolicyGetDigestCommand, TpmPolicyGetDigestResponse,
         TpmPolicyPcrCommand, TpmPolicyPcrResponse, TpmReadPublicCommand, TpmReadPublicResponse,
         TpmResponseBody, TpmStartAuthSessionCommand, TpmStartAuthSessionResponse,
         TpmTestParmsCommand, TpmTestParmsResponse, TpmUnsealCommand, TpmUnsealResponse,
@@ -57,6 +58,7 @@ use tpm2_protocol::{
 };
 
 const TPM_HEADER_SIZE: usize = 10;
+const PCR_COUNT: usize = 24;
 
 type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
 
@@ -247,6 +249,8 @@ mocktpm_response!(
     GetCapability,
     Import,
     Load,
+    PcrEvent,
+    PcrRead,
     PolicyGetDigest,
     PolicyPcr,
     ReadPublic,
@@ -259,6 +263,7 @@ mocktpm_response!(
 struct MockTpm {
     objects: HashMap<u32, MockTpmKey>,
     sessions: HashMap<u32, MockSession>,
+    pcrs: HashMap<TpmAlgId, Vec<Vec<u8>>>,
     next_transient_handle: u32,
     next_session_handle: u32,
     nvram_path: Option<PathBuf>,
@@ -283,10 +288,16 @@ impl MockTpm {
             assert!(p.is_dir(), "Persistence path must be a directory");
             p.to_path_buf()
         });
+
+        let mut pcrs = HashMap::new();
+        pcrs.insert(TpmAlgId::Sha256, vec![vec![0; 32]; PCR_COUNT]);
+        pcrs.insert(TpmAlgId::Sha1, vec![vec![0; 20]; PCR_COUNT]);
+
         Self {
             next_transient_handle: 0x8000_0000,
             next_session_handle: 0x0300_0000,
             nvram_path: path,
+            pcrs,
             ..Default::default()
         }
     }
@@ -331,6 +342,8 @@ impl MockTpm {
             GetCapability => mocktpm_get_capability,
             Import => mocktpm_import,
             Load => mocktpm_load,
+            PcrEvent => mocktpm_pcr_event,
+            PcrRead => mocktpm_pcr_read,
             PolicyGetDigest => mocktpm_policy_get_digest,
             PolicyPcr => mocktpm_policy_pcr,
             ReadPublic => mocktpm_read_public,
@@ -384,6 +397,8 @@ fn mocktpm_supported_commands() -> &'static [TpmCc] {
         TpmCc::GetCapability,
         TpmCc::Import,
         TpmCc::Load,
+        TpmCc::PcrEvent,
+        TpmCc::PcrRead,
         TpmCc::PolicyGetDigest,
         TpmCc::PolicyPcr,
         TpmCc::ReadPublic,
@@ -711,7 +726,21 @@ fn mocktpm_get_capability(
             TpmuCapabilities::TpmProperties(list)
         }
         TpmCap::Pcrs => {
-            return Err(TpmRc::from(TpmRcBase::Value));
+            let mut pcr_selection = TpmlPcrSelection::new();
+            for (alg, pcr_bank) in &tpm.pcrs {
+                let mut pcr_select = vec![0; pcr_bank.len() / 8];
+                for i in 0..pcr_bank.len() {
+                    pcr_select[i / 8] |= 1 << (i % 8);
+                }
+                pcr_selection
+                    .try_push(TpmsPcrSelection {
+                        hash: *alg,
+                        pcr_select: TpmBuffer::try_from(pcr_select.as_slice())
+                            .map_err(|_| TpmRc::from(TpmRcBase::Failure))?,
+                    })
+                    .map_err(|_| TpmRc::from(TpmRcBase::Failure))?;
+            }
+            TpmuCapabilities::Pcrs(pcr_selection)
         }
     };
 
@@ -904,6 +933,89 @@ fn mocktpm_load(
     Ok((
         TpmRc::from(TpmRcBase::Success),
         TpmResponseBody::Load(resp),
+        TpmAuthResponses::default(),
+    ))
+}
+
+#[allow(clippy::unnecessary_wraps)]
+fn mocktpm_pcr_event(
+    tpm: &mut MockTpm,
+    cmd: &TpmPcrEventCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    if cmd.pcr_handle >= u32::try_from(PCR_COUNT).unwrap() {
+        return Err(TpmRc::from(TpmRcBase::Handle));
+    }
+    let pcr_index = cmd.pcr_handle as usize;
+
+    for (alg, pcr_bank) in &mut tpm.pcrs {
+        let old_val = &pcr_bank[pcr_index];
+        let new_val = match alg {
+            TpmAlgId::Sha1 => {
+                let event_digest = Sha1::digest(cmd.event_data.as_ref());
+                let mut combined = Vec::with_capacity(old_val.len() + event_digest.len());
+                combined.extend_from_slice(old_val);
+                combined.extend_from_slice(&event_digest);
+                Sha1::digest(&combined).to_vec()
+            }
+            TpmAlgId::Sha256 => {
+                let event_digest = Sha256::digest(cmd.event_data.as_ref());
+                let mut combined = Vec::with_capacity(old_val.len() + event_digest.len());
+                combined.extend_from_slice(old_val);
+                combined.extend_from_slice(&event_digest);
+                Sha256::digest(&combined).to_vec()
+            }
+            _ => continue,
+        };
+        pcr_bank[pcr_index] = new_val;
+    }
+
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::PcrEvent(TpmPcrEventResponse::default()),
+        TpmAuthResponses::default(),
+    ))
+}
+
+fn mocktpm_pcr_read(
+    tpm: &mut MockTpm,
+    cmd: &TpmPcrReadCommand,
+    _sessions: &[TpmsAuthCommand],
+) -> MockTpmResult {
+    let mut pcr_values = TpmlDigest::new();
+    let mut pcr_selection_out = TpmlPcrSelection::new();
+
+    for selection in cmd.pcr_selection_in.iter() {
+        if let Some(pcr_bank) = tpm.pcrs.get(&selection.hash) {
+            for (byte_idx, &byte) in selection.pcr_select.iter().enumerate() {
+                for bit_idx in 0..8 {
+                    if (byte >> bit_idx) & 1 == 1 {
+                        let pcr_index = byte_idx * 8 + bit_idx;
+                        if pcr_index < pcr_bank.len() {
+                            let digest = Tpm2bDigest::try_from(pcr_bank[pcr_index].as_slice())
+                                .map_err(|_| TpmRc::from(TpmRcBase::Value))?;
+                            pcr_values
+                                .try_push(digest)
+                                .map_err(|_| TpmRc::from(TpmRcBase::Memory))?;
+                        }
+                    }
+                }
+            }
+            pcr_selection_out
+                .try_push(*selection)
+                .map_err(|_| TpmRc::from(TpmRcBase::Memory))?;
+        }
+    }
+
+    let resp = TpmPcrReadResponse {
+        pcr_update_counter: 1,
+        pcr_selection_out,
+        pcr_values,
+    };
+
+    Ok((
+        TpmRc::from(TpmRcBase::Success),
+        TpmResponseBody::PcrRead(resp),
         TpmAuthResponses::default(),
     ))
 }

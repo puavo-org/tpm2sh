@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use cli::{parser::PolicyExpr, session::AuthSession, uri::Uri};
+use cli::{policy::Expression, session::AuthSession, uri::Uri};
 use rstest::rstest;
 use std::str::FromStr;
 use tpm2_protocol::{
@@ -38,7 +38,7 @@ fn test_session_content_parser_valid(
     let uri = Uri::from_str(input).expect("parsing valid session uri failed");
     let ast = uri.ast();
 
-    if let PolicyExpr::Session {
+    if let Expression::Session {
         handle: h,
         nonce: n,
         attrs: a,
@@ -86,7 +86,7 @@ fn test_session_roundtrip() {
     let parsed_uri = Uri::from_str(&format!("session://{formatted}")).unwrap();
     let ast = parsed_uri.ast();
 
-    if let PolicyExpr::Session {
+    if let Expression::Session {
         handle,
         nonce,
         attrs,

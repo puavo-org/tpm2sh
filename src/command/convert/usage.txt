@@ -1,3 +1,3 @@
-Usage: tpm2sh convert <INPUT>
+Usage: tpm2sh convert <INPUT> <OUTPUT>
 
 For more information, try '--help'.

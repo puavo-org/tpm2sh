@@ -4,10 +4,10 @@
 
 use crate::{
     command::{
-        algorithms::Algorithms, context::Context, convert::Convert, create_primary::CreatePrimary,
-        delete::Delete, import::Import, load::Load, objects::Objects, pcr_event::PcrEvent,
-        pcr_read::PcrRead, policy::Policy, print_error::PrintError, reset_lock::ResetLock,
-        save::Save, seal::Seal, start_session::StartSession, unseal::Unseal,
+        context::Context, convert::Convert, create_primary::CreatePrimary, delete::Delete,
+        list::List, load::Load, pcr_event::PcrEvent, pcr_read::PcrRead, policy::Policy,
+        print_error::PrintError, reset_lock::ResetLock, seal::Seal, start_session::StartSession,
+        unseal::Unseal,
     },
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
@@ -16,6 +16,7 @@ use crate::{
 };
 use lexopt::{Arg, Parser, ValueExt};
 use std::{
+    fmt::Write,
     str::FromStr,
     sync::{Arc, Mutex},
 };
@@ -25,6 +26,9 @@ use tpm2_protocol::data::{TpmRh, TpmSe};
 pub trait Subcommand: Sized {
     const USAGE: &'static str;
     const HELP: &'static str;
+    const ARGUMENTS: &'static str;
+    const OPTIONS: &'static str;
+    const SUMMARY: &'static str;
 
     /// Parse subcommand.
     ///
@@ -203,13 +207,19 @@ macro_rules! subcommand_registry {
         static SUBCOMMANDS: &[SubcommandObject] = &[$ (
             SubcommandObject {
                 name: $local_name,
+                summary: $local_command::SUMMARY,
                 help: $local_command::HELP,
+                arguments: $local_command::ARGUMENTS,
+                options: $local_command::OPTIONS,
                 dispatch: |p| dispatch(p, Commands::$local_command),
             },
         )* $ (
             SubcommandObject {
                 name: $device_name,
+                summary: $device_command::SUMMARY,
                 help: $device_command::HELP,
+                arguments: $device_command::ARGUMENTS,
+                options: $device_command::OPTIONS,
                 dispatch: |p| dispatch(p, Commands::$device_command),
             },
         )*];
@@ -222,17 +232,14 @@ subcommand_registry!(
         (PrintError, "print-error"),
     ],
     device: [
-        (Algorithms, "algorithms"),
         (CreatePrimary, "create-primary"),
         (Delete, "delete"),
-        (Import, "import"),
+        (List, "list"),
         (Load, "load"),
-        (Objects, "objects"),
         (PcrEvent, "pcr-event"),
         (PcrRead, "pcr-read"),
         (Policy, "policy"),
         (ResetLock, "reset-lock"),
-        (Save, "save"),
         (Seal, "seal"),
         (StartSession, "start-session"),
         (Unseal, "unseal"),
@@ -272,6 +279,47 @@ pub fn parse_no_args<T: Default>(parser: &mut Parser) -> Result<T, lexopt::Error
     Ok(T::default())
 }
 
+fn format_section(title: &str, content: &str, indent: usize) -> String {
+    if content.trim().is_empty() {
+        return String::new();
+    }
+    let mut section = format!("\n{title}:\n");
+    let lines: Vec<_> = content.lines().collect();
+
+    for chunk in lines.chunks_exact(2) {
+        let name = chunk[0].trim_end();
+        let desc = chunk[1].trim();
+        let indented_name = format!("{}{}", " ".repeat(indent), name);
+        let padding = 40_usize.saturating_sub(indented_name.len());
+        writeln!(&mut section, "{indented_name}{}{desc}", " ".repeat(padding),).unwrap();
+    }
+    section
+}
+
+fn format_help(header: &str, args: &str, opts: &str) -> String {
+    let mut help = String::from(header);
+    help.push_str(&format_section("Arguments", args, 2));
+    help.push_str(&format_section("Options", opts, 8));
+    help.push_str("\nGlobal options:\n\n");
+    help.push_str(include_str!("options.txt"));
+    help
+}
+
+/// Formats the main help message for the application.
+#[must_use]
+pub fn format_main_help() -> String {
+    let mut commands_str = String::new();
+    for cmd in SUBCOMMANDS {
+        writeln!(&mut commands_str, "{}\n{}", cmd.name, cmd.summary.trim()).unwrap();
+    }
+
+    let mut help = String::from("TPM 2.0 shell\n\nUsage: tpm2sh [OPTIONS] [COMMAND]");
+    help.push_str(&format_section("Commands", &commands_str, 2));
+    help.push_str("\nOptions:\n\n");
+    help.push_str(include_str!("options.txt"));
+    help
+}
+
 /// Helper to dispatch parsing to the correct `Subcommand` impl.
 ///
 /// # Errors
@@ -286,7 +334,12 @@ where
     match S::parse(parser) {
         Ok(args) => Ok(wrapper(args)),
         Err(lexopt::Error::Custom(err)) if err.to_string() == "help requested" => {
-            Err(ParseResult::Help(S::HELP))
+            let header = format!("{}\n\n{}", S::SUMMARY.trim(), S::HELP);
+            Err(ParseResult::Help(format_help(
+                &header,
+                S::ARGUMENTS,
+                S::OPTIONS,
+            )))
         }
         Err(e) => Err(ParseResult::ErrorAndUsage {
             error: e.to_string(),
@@ -297,7 +350,10 @@ where
 
 struct SubcommandObject {
     name: &'static str,
+    summary: &'static str,
     help: &'static str,
+    arguments: &'static str,
+    options: &'static str,
     dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
 
@@ -319,12 +375,15 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
                     SUBCOMMANDS
                         .iter()
                         .find(|cmd| cmd.name == cmd_name.as_ref())
-                        .map(|cmd| cmd.help)
+                        .map(|cmd| {
+                            let header = format!("{}\n\n{}", cmd.summary.trim(), cmd.help);
+                            format_help(&header, cmd.arguments, cmd.options)
+                        })
                         .ok_or_else(|| {
                             lexopt::Error::from(format!("unknown command '{cmd_name}'"))
                         })?
                 } else {
-                    include_str!("help.txt")
+                    format_main_help()
                 };
                 return Ok(ParseResult::Help(help_text));
             }
@@ -359,7 +418,7 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
     };
 
     if cmd_name == "help" {
-        return Ok(ParseResult::Help(include_str!("help.txt")));
+        return Ok(ParseResult::Help(format_main_help()));
     }
 
     let Some(subcommand) = SUBCOMMANDS.iter().find(|c| c.name == cmd_name) else {

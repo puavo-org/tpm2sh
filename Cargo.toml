@@ -19,13 +19,13 @@ name = "tpm2sh"
 path = "src/main.rs"
 
 [[test]]
-name = "parser"
-path = "tests/parser.rs"
+name = "integration-test"
+path = "tests/integration_test.rs"
 harness = true
 
 [[test]]
-name = "integration-test"
-path = "tests/integration_test.rs"
+name = "policy"
+path = "tests/policy.rs"
 harness = true
 
 [[test]]

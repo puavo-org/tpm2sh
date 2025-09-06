@@ -1,0 +1,2 @@
+-s, --session-type <TYPE>
+hmac (default), policy or trial

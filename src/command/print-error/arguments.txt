@@ -1,0 +1,2 @@
+<RC>
+TPM error code in decimal or hex format

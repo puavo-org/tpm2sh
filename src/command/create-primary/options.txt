@@ -1,0 +1,4 @@
+-H, --hierarchy <HIERARCHY>
+owner (default), platform or endorsement
+--output <URI>
+'tpm://' or 'file://'

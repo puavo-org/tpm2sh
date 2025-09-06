@@ -7,7 +7,7 @@ use crate::{
     command::CommandError,
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    parser::PolicyExpr,
+    policy::Expression,
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
@@ -80,8 +80,8 @@ impl<'a> Context<'a> {
     pub fn load(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<TpmTransient, CliError> {
         self.capacity_invariant()?;
         match uri.ast() {
-            PolicyExpr::TpmHandle(handle) => Ok(TpmTransient(*handle)),
-            PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
+            Expression::TpmHandle(handle) => Ok(TpmTransient(*handle)),
+            Expression::Data { .. } | Expression::FilePath(_) => {
                 let context_blob = uri.to_bytes()?;
                 let (context, remainder) =
                     TpmsContext::parse(&context_blob).map_err(ParseError::from)?;
@@ -102,30 +102,64 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Saves a transient object's context.
+    /// Saves a transient object's context to a file, persistent handle, or stdout.
     ///
     /// # Errors
     ///
     /// Returns a `CliError` if the TPM command or I/O fails.
-    pub fn save(
+    pub fn save_or_persist(
         &mut self,
         device: &mut TpmDevice,
-        save_handle: TpmTransient,
+        handle_to_save: TpmTransient,
+        output_uri: Option<&Uri>,
     ) -> Result<(), CliError> {
-        self.existence_invariant(save_handle)?;
-        let save_cmd = TpmContextSaveCommand { save_handle };
-        let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
-        let save_resp = resp
-            .ContextSave()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::ContextSave,
-            })?;
-        let context_bytes = build_to_vec(&save_resp.context)?;
-        writeln!(
-            self.writer,
-            "data://base64,{}",
-            base64_engine.encode(context_bytes)
-        )?;
+        self.existence_invariant(handle_to_save)?;
+        if let Some(uri) = output_uri {
+            match uri.ast() {
+                Expression::TpmHandle(handle) => {
+                    let persistent_handle = TpmPersistent(*handle);
+                    self.evict(device, handle_to_save, persistent_handle)?;
+                    writeln!(self.writer, "tpm://{persistent_handle:#010x}")?;
+                }
+                Expression::FilePath(path) => {
+                    let save_cmd = TpmContextSaveCommand {
+                        save_handle: handle_to_save,
+                    };
+                    let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
+                    let save_resp =
+                        resp.ContextSave()
+                            .map_err(|_| TpmDeviceError::MismatchedResponse {
+                                command: TpmCc::ContextSave,
+                            })?;
+                    let context_bytes = build_to_vec(&save_resp.context)?;
+                    std::fs::write(path, context_bytes)
+                        .map_err(|e| CliError::File(path.clone(), e))?;
+                    writeln!(self.writer, "file://{path}")?;
+                }
+                _ => {
+                    return Err(CliError::Command(CommandError::InvalidUriScheme {
+                        expected: "tpm:// or file://".to_string(),
+                        actual: uri.to_string(),
+                    }));
+                }
+            }
+        } else {
+            let save_cmd = TpmContextSaveCommand {
+                save_handle: handle_to_save,
+            };
+            let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
+            let save_resp = resp
+                .ContextSave()
+                .map_err(|_| TpmDeviceError::MismatchedResponse {
+                    command: TpmCc::ContextSave,
+                })?;
+            let context_bytes = build_to_vec(&save_resp.context)?;
+            writeln!(
+                self.writer,
+                "data://base64,{}",
+                base64_engine.encode(context_bytes)
+            )?;
+        }
         Ok(())
     }
 
@@ -135,15 +169,25 @@ impl<'a> Context<'a> {
     ///
     /// Returns a `CliError` if the handle is invalid or the delete operation fails.
     pub fn delete(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<u32, CliError> {
-        let handle = uri.to_tpm_handle()?;
-        if handle >= TPM_RH_PERSISTENT_FIRST {
-            self.delete_persistent(device, TpmPersistent(handle))?;
-        } else if handle >= TPM_RH_TRANSIENT_FIRST {
-            self.delete_transient(device, TpmTransient(handle))?;
-        } else {
-            return Err(CommandError::InvalidHandleType { handle }.into());
+        match uri.ast() {
+            Expression::TpmHandle(handle) => {
+                let handle = *handle;
+                if handle >= TPM_RH_PERSISTENT_FIRST {
+                    self.delete_persistent(device, TpmPersistent(handle))?;
+                } else if handle >= TPM_RH_TRANSIENT_FIRST {
+                    self.delete_transient(device, TpmTransient(handle))?;
+                } else {
+                    return Err(CommandError::InvalidHandleType { handle }.into());
+                }
+                Ok(handle)
+            }
+            Expression::Data { .. } | Expression::FilePath(_) => {
+                let transient_handle = self.load(device, uri)?;
+                self.delete_transient(device, transient_handle)?;
+                Ok(transient_handle.0)
+            }
+            _ => Err(ParseError::Custom(format!("invalid URI scheme for delete: {uri}")).into()),
         }
-        Ok(handle)
     }
 
     /// Deletes a persistent object.

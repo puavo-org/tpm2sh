@@ -1,13 +1,3 @@
-Creates a primary key
+Creates a primary key from a chosen hierachy and algorithm. The command creates and loads the object, then returns its saved context.
 
-Usage: tpm2sh create-primary [OPTIONS] --algorithm <ALGORITHM>
-
-Options:
-  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
-  -H, --hierarchy <HIERARCHY>    Hierarchy for the new key [default: owner] [possible values: owner, platform, endorsement]
-      --algorithm <ALGORITHM>    Public key algorithm. Run 'algorithms' for options
-      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
-      --handle <HANDLEURI>       Store object to non-volatile memory (e.g., 'tpm://0x81000001')
-  -p, --password <PASSWORD>      Default authorization password for objects and sessions
-  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
-  -h, --help                     Print help
+The final argument is an optional URI to specify an output file for the saved context. If omitted, the saved context is printed to standard output as a 'data://' URI.

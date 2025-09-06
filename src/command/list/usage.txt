@@ -1,3 +1,3 @@
-Usage: tpm2sh objects
+Usage: tpm2sh list <TYPE>
 
 For more information, try '--help'.

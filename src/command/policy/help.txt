@@ -1,13 +1,5 @@
-Builds authorization policies
 
-Usage: tpm2sh policy [OPTIONS] <EXPRESSION>
+A policy expression defines a condition that must be met, for example,
+'pcr("sha256:0,...")' or 'secret(tpm://...)'.
 
-Arguments:
-  <EXPRESSION>  Policy expression (e.g., 'pcr(sha256:0,...)'
-
-Options:
-  -d, --device <DEVICE>          TPM device path [default: /dev/tpmrm0]
-      --log-format <LOG_FORMAT>  Logging format [default: plain] [possible values: plain, pretty]
-  -p, --password <PASSWORD>      Default authorization password for objects and sessions
-  -S, --session <URI>            Session object URI (e.g., 'tpm://0x03000000')
-  -h, --help                     Print help
+Usage: tpm2sh policy <EXPRESSION>

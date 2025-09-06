@@ -14,8 +14,8 @@ pub mod device;
 pub mod error;
 pub mod key;
 pub mod mocktpm;
-pub mod parser;
 pub mod pcr;
+pub mod policy;
 pub mod print;
 pub mod session;
 pub mod transport;
@@ -55,7 +55,7 @@ pub enum ParseResult {
     /// A command was successfully parsed.
     Command(crate::cli::Cli),
     /// A help message should be printed. The payload is the static string content.
-    Help(&'static str),
+    Help(String),
     /// A usage message should be printed. The payload is the static string content.
     Usage(&'static str),
     /// An error occurred, and a usage message should be printed.
@@ -114,7 +114,7 @@ pub fn execute_cli() -> Result<(), crate::error::CliError> {
 
                 result
             } else {
-                print!("{}", include_str!("help.txt"));
+                print!("{}", cli::format_main_help());
                 Ok(())
             }
         }

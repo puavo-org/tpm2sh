@@ -5,15 +5,13 @@
 use thiserror::Error;
 use tpm2_protocol::{TpmErrorKind, TpmTransient};
 
-pub mod algorithms;
 pub mod context;
 pub mod convert;
 #[path = "create-primary/mod.rs"]
 pub mod create_primary;
 pub mod delete;
-pub mod import;
+pub mod list;
 pub mod load;
-pub mod objects;
 #[path = "pcr-event/mod.rs"]
 pub mod pcr_event;
 #[path = "pcr-read/mod.rs"]
@@ -23,7 +21,6 @@ pub mod policy;
 pub mod print_error;
 #[path = "reset-lock/mod.rs"]
 pub mod reset_lock;
-pub mod save;
 pub mod seal;
 #[path = "start-session/mod.rs"]
 pub mod start_session;

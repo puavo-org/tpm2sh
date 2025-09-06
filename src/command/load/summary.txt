@@ -1,0 +1,1 @@
+Loads a TPM object or imports an external key

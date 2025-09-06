@@ -1,11 +1,2 @@
-Starts an authorization session
 
 Usage: tpm2sh start-session [OPTIONS]
-
-Options:
-  -d, --device <DEVICE>              TPM device path [default: /dev/tpmrm0]
-  -s, --session-type <SESSION_TYPE>  Session type [default: hmac] [possible values: hmac, policy, trial]
-      --log-format <LOG_FORMAT>      Logging format [default: plain] [possible values: plain, pretty]
-  -p, --password <PASSWORD>          Default authorization password for objects and sessions
-  -S, --session <URI>                Session object URI (e.g., 'tpm://0x03000000')
-  -h, --help                         Print help

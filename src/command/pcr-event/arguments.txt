@@ -1,0 +1,4 @@
+<PCR>
+pcr to extend (e.g., 'sha256:7')
+<DATA>
+'file://' or 'data://'

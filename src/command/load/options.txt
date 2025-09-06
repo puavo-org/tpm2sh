@@ -1,0 +1,2 @@
+--parent <KEY URI>
+'tpm://', 'file://' or 'data://'

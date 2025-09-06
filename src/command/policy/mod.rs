@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
+// Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
     cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    parser::{parse_policy, PolicyExpr},
     pcr::{pcr_composite_digest, pcr_get_count},
+    policy::{self, Expression, Parsing},
     session::session_from_args,
     uri::pcr_selection_to_list,
 };
@@ -33,6 +34,9 @@ pub struct Policy {
 impl Subcommand for Policy {
     const USAGE: &'static str = include_str!("usage.txt");
     const HELP: &'static str = include_str!("help.txt");
+    const ARGUMENTS: &'static str = include_str!("arguments.txt");
+    const OPTIONS: &'static str = include_str!("options.txt");
+    const SUMMARY: &'static str = include_str!("summary.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut expression = None;
@@ -90,11 +94,11 @@ impl PolicyExecutor<'_> {
         &mut self,
         _cli: &Cli,
         session_handle: TpmSession,
-        auth_handle_uri: &PolicyExpr,
+        auth_handle_uri: &Expression,
         password: Option<&String>,
     ) -> Result<(), CliError> {
         let auth_handle = match auth_handle_uri {
-            PolicyExpr::TpmHandle(handle) => Ok(*handle),
+            Expression::TpmHandle(handle) => Ok(*handle),
             _ => Err(ParseError::Custom(
                 "secret policy requires a tpm:// handle".to_string(),
             )),
@@ -121,7 +125,7 @@ impl PolicyExecutor<'_> {
         &mut self,
         cli: &Cli,
         session_handle: TpmSession,
-        branches: &[PolicyExpr],
+        branches: &[Expression],
     ) -> Result<(), CliError> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
@@ -151,10 +155,10 @@ impl PolicyExecutor<'_> {
         &mut self,
         cli: &Cli,
         session_handle: TpmSession,
-        ast: &PolicyExpr,
+        ast: &Expression,
     ) -> Result<(), CliError> {
         match ast {
-            PolicyExpr::Pcr {
+            Expression::Pcr {
                 selection,
                 digest,
                 count,
@@ -165,13 +169,13 @@ impl PolicyExecutor<'_> {
                 digest.as_ref(),
                 count.as_ref(),
             ),
-            PolicyExpr::Secret {
+            Expression::Secret {
                 auth_handle_uri,
                 password,
             } => {
                 self.execute_secret_policy(cli, session_handle, auth_handle_uri, password.as_ref())
             }
-            PolicyExpr::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
+            Expression::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
             _ => Err(
                 ParseError::Custom("unsupported expression for policy command".to_string()).into(),
             ),
@@ -235,7 +239,7 @@ impl DeviceCommand for Policy {
     ///
     /// Returns a `CliError` on failure.
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        let ast = parse_policy(&self.expression)?;
+        let ast = policy::parse(&self.expression, Parsing::AuthorizationPolicy)?;
         let pcr_count = pcr_get_count(device)?;
         let session_hash_alg = TpmAlgId::Sha256;
         let session_handle =

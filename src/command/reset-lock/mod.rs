@@ -18,6 +18,9 @@ pub struct ResetLock;
 impl Subcommand for ResetLock {
     const USAGE: &'static str = include_str!("usage.txt");
     const HELP: &'static str = include_str!("help.txt");
+    const ARGUMENTS: &'static str = include_str!("arguments.txt");
+    const OPTIONS: &'static str = include_str!("options.txt");
+    const SUMMARY: &'static str = include_str!("summary.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         parse_no_args(parser)

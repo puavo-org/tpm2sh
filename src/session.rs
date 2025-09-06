@@ -7,7 +7,7 @@ use crate::{
     command::CommandError,
     error::{CliError, ParseError},
     key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
-    parser::PolicyExpr,
+    policy::{self, Expression, Parsing},
     util::build_to_vec,
 };
 use log::debug;
@@ -30,8 +30,8 @@ pub struct AuthSession {
 }
 
 impl AuthSession {
-    fn from_ast(ast: &PolicyExpr) -> Result<Self, ParseError> {
-        if let PolicyExpr::Session {
+    fn from_ast(ast: &Expression) -> Result<Self, ParseError> {
+        if let Expression::Session {
             handle,
             nonce,
             attrs,
@@ -104,12 +104,12 @@ pub fn session_from_args<C: TpmHeader>(
         .into()),
         (Some(uri), None) => {
             let session = match uri.ast() {
-                PolicyExpr::Session { .. } => AuthSession::from_ast(uri.ast())?,
-                PolicyExpr::Data { .. } | PolicyExpr::FilePath(_) => {
+                Expression::Session { .. } => AuthSession::from_ast(uri.ast())?,
+                Expression::Data { .. } | Expression::FilePath(_) => {
                     let session_bytes = uri.to_bytes()?;
                     let session_str =
                         std::str::from_utf8(&session_bytes).map_err(ParseError::from)?;
-                    let ast = crate::parser::parse_policy(session_str)?;
+                    let ast = policy::parse(session_str, Parsing::AuthorizationPolicy)?;
                     AuthSession::from_ast(&ast)?
                 }
                 _ => {

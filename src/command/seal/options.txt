@@ -1,0 +1,6 @@
+--password <PASSWORD>
+password for the new sealed object
+--policy <DIGEST>
+authorization policy digest
+--output <URI>
+output destination ('file://')

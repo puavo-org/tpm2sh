@@ -9,33 +9,36 @@ use crate::{
     error::CliError,
     pcr::pcr_get_count,
     session::session_from_args,
-    uri::Uri,
+    uri::pcr_selection_to_list,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
 
 #[derive(Debug, Default)]
 pub struct PcrEvent {
-    pub pcr: Uri,
-    pub data: Uri,
+    pub pcr_selection: String,
+    pub data: crate::uri::Uri,
 }
 
 impl Subcommand for PcrEvent {
     const USAGE: &'static str = include_str!("usage.txt");
     const HELP: &'static str = include_str!("help.txt");
+    const ARGUMENTS: &'static str = include_str!("arguments.txt");
+    const OPTIONS: &'static str = include_str!("options.txt");
+    const SUMMARY: &'static str = include_str!("summary.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
-        let mut pcr = None;
+        let mut pcr_selection = None;
         let mut data = None;
         while let Some(arg) = parser.next()? {
             match arg {
-                Arg::Value(val) if pcr.is_none() => pcr = Some(val.parse()?),
+                Arg::Value(val) if pcr_selection.is_none() => pcr_selection = Some(val.string()?),
                 Arg::Value(val) if data.is_none() => data = Some(val.parse()?),
                 _ => return handle_help(arg),
             }
         }
         Ok(PcrEvent {
-            pcr: required(pcr, "<PCR>")?,
+            pcr_selection: required(pcr_selection, "<PCR>")?,
             data: required(data, "<DATA>")?,
         })
     }
@@ -49,42 +52,48 @@ impl DeviceCommand for PcrEvent {
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let pcr_count = pcr_get_count(device)?;
-        let selection = self.pcr.to_pcr_selection(pcr_count)?;
+        let selection = pcr_selection_to_list(&self.pcr_selection, pcr_count)?;
+
         if selection.len() != 1 {
             return Err(CommandError::InvalidPcrSelection(
-                "pcr-event requires a selection of exactly one PCR bank".to_string(),
+                "requires a selection of exactly one PCR bank".to_string(),
             )
             .into());
         }
         let pcr_selection = &selection[0];
-        let set_bits_count = pcr_selection
+
+        let set_bits_count: u32 = pcr_selection
             .pcr_select
             .iter()
-            .map(|byte| byte.count_ones())
-            .sum::<u32>();
+            .map(|b| b.count_ones())
+            .sum();
         if set_bits_count != 1 {
             return Err(CommandError::InvalidPcrSelection(format!(
-                "pcr-event requires a selection of exactly one PCR (provided selection '{}' contains {})",
-                self.pcr, set_bits_count
+                "requires a selection of exactly one PCR, but {set_bits_count} were provided in '{}'",
+                self.pcr_selection
             ))
             .into());
         }
+
         let pcr_index = pcr_selection
             .pcr_select
             .iter()
             .enumerate()
             .find_map(|(byte_idx, &byte)| {
                 if byte != 0 {
-                    Some(u32::try_from(byte_idx * 8).unwrap() + byte.trailing_zeros())
+                    let base =
+                        u32::try_from(byte_idx * 8).expect("PCR index calculation overflowed");
+                    Some(base + byte.trailing_zeros())
                 } else {
                     None
                 }
             })
             .ok_or_else(|| {
                 CommandError::InvalidPcrSelection(
-                    "pcr-event could not determine the index".to_string(),
+                    "could not determine the PCR index from the selection".to_string(),
                 )
             })?;
+
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
         let event_data = Tpm2bEvent::try_from(data_bytes.as_slice()).map_err(CommandError::from)?;

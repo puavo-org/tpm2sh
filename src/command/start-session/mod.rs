@@ -29,6 +29,9 @@ pub struct StartSession {
 impl Subcommand for StartSession {
     const USAGE: &'static str = include_str!("usage.txt");
     const HELP: &'static str = include_str!("help.txt");
+    const ARGUMENTS: &'static str = include_str!("arguments.txt");
+    const OPTIONS: &'static str = include_str!("options.txt");
+    const SUMMARY: &'static str = include_str!("summary.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut session_type = SessionType::default();

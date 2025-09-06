@@ -2,9 +2,10 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-//! This module contains the `nom` parser for the unified policy language.
+//! This module contains the parser and executor for the unified policy language.
 
 use crate::error::ParseError;
+use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while, take_while1},
@@ -14,20 +15,30 @@ use nom::{
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
+use std::{fmt, path::Path};
+use tpm2_protocol::data::TpmAlgId;
+
+/// Represents the state of a single PCR register.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pcr {
+    pub bank: TpmAlgId,
+    pub index: u32,
+    pub value: Vec<u8>,
+}
 
 /// The Abstract Syntax Tree (AST) for the unified policy language.
 #[derive(Debug, PartialEq, Clone)]
-pub enum PolicyExpr {
+pub enum Expression {
     Pcr {
         selection: String,
         digest: Option<String>,
         count: Option<u32>,
     },
     Secret {
-        auth_handle_uri: Box<PolicyExpr>,
+        auth_handle_uri: Box<Expression>,
         password: Option<String>,
     },
-    Or(Vec<PolicyExpr>),
+    Or(Vec<Expression>),
     TpmHandle(u32),
     FilePath(String),
     Data {
@@ -43,9 +54,112 @@ pub enum PolicyExpr {
     },
 }
 
-impl Default for PolicyExpr {
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Pcr {
+                selection,
+                digest,
+                count,
+            } => {
+                write!(f, "pcr(\"{selection}\"")?;
+                if let Some(d) = digest {
+                    write!(f, ", \"{d}\"")?;
+                }
+                if let Some(c) = count {
+                    write!(f, ", count={c}")?;
+                }
+                write!(f, ")")
+            }
+            Expression::Secret {
+                auth_handle_uri,
+                password,
+            } => {
+                write!(f, "secret({auth_handle_uri}")?;
+                if let Some(p) = password {
+                    write!(f, ", \"{p}\"")?;
+                }
+                write!(f, ")")
+            }
+            Expression::Or(branches) => {
+                let branch_strs: Vec<String> = branches.iter().map(ToString::to_string).collect();
+                write!(f, "or({})", branch_strs.join(", "))
+            }
+            Expression::TpmHandle(handle) => write!(f, "tpm://{handle:#010x}"),
+            Expression::FilePath(path) => write!(f, "file://{path}"),
+            Expression::Data { encoding, value } => write!(f, "data://{encoding},{value}"),
+            Expression::Session {
+                handle,
+                nonce,
+                attrs,
+                key,
+                alg,
+            } => {
+                write!(
+                    f,
+                    "session://handle={handle:#010x};nonce={};attrs={attrs:02x};key={};alg={alg}",
+                    hex::encode(nonce),
+                    hex::encode(key)
+                )
+            }
+        }
+    }
+}
+
+impl Default for Expression {
     fn default() -> Self {
         Self::FilePath(String::new())
+    }
+}
+
+/// Defines the parsing context to validate expressions for specific commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Parsing {
+    /// Accepts `tpm://`, `file://`, and `data://` URIs.
+    Object,
+    /// Accepts only `file://` and `data://` URIs.
+    Data,
+    /// Accepts a PCR selection string, optionally wrapped in `pcr(...)`.
+    PcrSelection,
+    /// Accepts the full policy language grammar.
+    AuthorizationPolicy,
+    /// Accepts `session://`, `file://`, or `data://` URIs.
+    Session,
+}
+
+impl Expression {
+    /// Resolves a URI-like expression into bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the expression is not data-like or a file cannot be read.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, crate::error::CliError> {
+        match self {
+            Self::FilePath(path) => std::fs::read(Path::new(path))
+                .map_err(|e| crate::error::CliError::File(path.clone(), e)),
+            Self::Data { encoding, value } => match encoding.as_str() {
+                "utf8" => Ok(value.as_bytes().to_vec()),
+                "hex" => Ok(hex::decode(value).map_err(ParseError::from)?),
+                "base64" => Ok(base64_engine.decode(value).map_err(ParseError::from)?),
+                _ => Err(ParseError::Custom(format!(
+                    "Unsupported data URI encoding: '{encoding}'"
+                ))
+                .into()),
+            },
+            _ => Err(ParseError::Custom(format!("Not a data-like expression: {self:?}")).into()),
+        }
+    }
+
+    /// Parses a TPM handle from a `tpm://` expression.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if the expression is not a `TpmHandle`.
+    pub fn to_tpm_handle(&self) -> Result<u32, crate::error::CliError> {
+        match self {
+            Self::TpmHandle(handle) => Ok(*handle),
+            _ => Err(ParseError::Custom(format!("Not a TPM handle expression: {self:?}")).into()),
+        }
     }
 }
 
@@ -149,14 +263,14 @@ where
     preceded(terminated(char(','), space0), f)
 }
 
-fn pcr_expression(input: &str) -> IResult<&str, PolicyExpr> {
+fn pcr_expression(input: &str) -> IResult<&str, Expression> {
     map(
         tuple((
             pcr_selection_argument,
             opt(comma_sep(string_argument)),
             opt(comma_sep(count_parameter)),
         )),
-        |(selection, digest, count)| PolicyExpr::Pcr {
+        |(selection, digest, count)| Expression::Pcr {
             selection,
             digest,
             count,
@@ -164,26 +278,26 @@ fn pcr_expression(input: &str) -> IResult<&str, PolicyExpr> {
     )(input)
 }
 
-fn secret_expression(input: &str) -> IResult<&str, PolicyExpr> {
+fn secret_expression(input: &str) -> IResult<&str, Expression> {
     map(
-        tuple((parse_policy_expr, opt(comma_sep(string_argument)))),
-        |(uri_expr, password)| PolicyExpr::Secret {
+        tuple((parse_expression, opt(comma_sep(string_argument)))),
+        |(uri_expr, password)| Expression::Secret {
             auth_handle_uri: Box::new(uri_expr),
             password,
         },
     )(input)
 }
 
-fn or_expression(input: &str) -> IResult<&str, PolicyExpr> {
+fn or_expression(input: &str) -> IResult<&str, Expression> {
     map(
         pair(
-            parse_policy_expr,
-            many1(preceded(terminated(char(','), space0), parse_policy_expr)),
+            parse_expression,
+            many1(preceded(terminated(char(','), space0), parse_expression)),
         ),
         |(first, mut rest)| {
             let mut branches = vec![first];
             branches.append(&mut rest);
-            PolicyExpr::Or(branches)
+            Expression::Or(branches)
         },
     )(input)
 }
@@ -199,18 +313,18 @@ where
     )
 }
 
-fn tpm_uri(input: &str) -> IResult<&str, PolicyExpr> {
-    map(preceded(tag("tpm://"), hex_u32), PolicyExpr::TpmHandle)(input)
+fn tpm_uri(input: &str) -> IResult<&str, Expression> {
+    map(preceded(tag("tpm://"), hex_u32), Expression::TpmHandle)(input)
 }
 
-fn file_uri(input: &str) -> IResult<&str, PolicyExpr> {
+fn file_uri(input: &str) -> IResult<&str, Expression> {
     map(
         preceded(tag("file://"), take_while1(|c| c != ',' && c != ')')),
-        |s: &str| PolicyExpr::FilePath(s.to_string()),
+        |s: &str| Expression::FilePath(s.to_string()),
     )(input)
 }
 
-fn data_uri(input: &str) -> IResult<&str, PolicyExpr> {
+fn data_uri(input: &str) -> IResult<&str, Expression> {
     map(
         preceded(
             tag("data://"),
@@ -220,16 +334,16 @@ fn data_uri(input: &str) -> IResult<&str, PolicyExpr> {
                 take_while(|c: char| c != ',' && c != ')'),
             ),
         ),
-        |(enc, val): (&str, &str)| PolicyExpr::Data {
+        |(enc, val): (&str, &str)| Expression::Data {
             encoding: enc.to_string(),
             value: val.to_string(),
         },
     )(input)
 }
 
-fn pcr_uri(input: &str) -> IResult<&str, PolicyExpr> {
+fn pcr_uri(input: &str) -> IResult<&str, Expression> {
     map(preceded(tag("pcr://"), pcr_selection_body), |selection| {
-        PolicyExpr::Pcr {
+        Expression::Pcr {
             selection,
             digest: None,
             count: None,
@@ -260,7 +374,7 @@ fn session_kv_list(input: &str) -> IResult<&str, Vec<(&str, &str)>> {
     separated_list1(char(';'), session_kv_pair)(input)
 }
 
-fn session_body(input: &str) -> IResult<&str, PolicyExpr> {
+fn session_body(input: &str) -> IResult<&str, Expression> {
     map_res(session_kv_list, |pairs| -> Result<_, String> {
         let mut handle = None;
         let mut nonce = None;
@@ -282,7 +396,7 @@ fn session_body(input: &str) -> IResult<&str, PolicyExpr> {
                 _ => unreachable!(),
             }
         }
-        Ok(PolicyExpr::Session {
+        Ok(Expression::Session {
             handle: handle.ok_or_else(|| "missing handle".to_string())?,
             nonce: nonce.ok_or_else(|| "missing nonce".to_string())?,
             attrs: attrs.ok_or_else(|| "missing attrs".to_string())?,
@@ -292,16 +406,12 @@ fn session_body(input: &str) -> IResult<&str, PolicyExpr> {
     })(input)
 }
 
-fn session_uri(input: &str) -> IResult<&str, PolicyExpr> {
+fn session_uri(input: &str) -> IResult<&str, Expression> {
     preceded(tag("session://"), session_body)(input)
 }
 
-/// Parses any valid policy language expression.
-///
-/// # Errors
-///
-/// Returns a `nom::Err` if the input string does not match any known expression format.
-pub fn parse_policy_expr(input: &str) -> IResult<&str, PolicyExpr> {
+/// Parses any valid expression.
+fn parse_expression(input: &str) -> IResult<&str, Expression> {
     alt((
         call("pcr", pcr_expression),
         call("secret", secret_expression),
@@ -314,18 +424,44 @@ pub fn parse_policy_expr(input: &str) -> IResult<&str, PolicyExpr> {
     ))(input)
 }
 
-/// Parses a policy language expression, ensuring the entire input is consumed.
+/// Parses an expression string, ensuring the entire input is consumed and conforms to the mode.
 ///
 /// # Errors
 ///
-/// Returns a `ParseError` if the input is not a valid expression or if there is
-/// trailing input left after parsing.
-pub fn parse_policy(input: &str) -> Result<PolicyExpr, ParseError> {
-    match parse_policy_expr(input) {
-        Ok(("", expr)) => Ok(expr),
-        Ok((rem, _)) => Err(ParseError::Custom(format!(
-            "unexpected trailing input: '{rem}'"
-        ))),
-        Err(e) => Err(ParseError::Custom(e.to_string())),
+/// Returns a `ParseError` if the input is not a valid expression for the given mode,
+/// or if there is trailing input left after parsing.
+pub fn parse(input: &str, mode: Parsing) -> Result<Expression, ParseError> {
+    let (remaining, expr) =
+        parse_expression(input).map_err(|e| ParseError::Custom(e.to_string()))?;
+
+    if !remaining.is_empty() {
+        return Err(ParseError::Custom(format!(
+            "unexpected trailing input: '{remaining}'"
+        )));
+    }
+
+    let is_valid = match (mode, &expr) {
+        (Parsing::PcrSelection, Expression::Pcr { digest, count, .. }) => {
+            digest.is_none() && count.is_none()
+        }
+        (Parsing::AuthorizationPolicy, _)
+        | (
+            Parsing::Object,
+            Expression::TpmHandle(_) | Expression::FilePath(_) | Expression::Data { .. },
+        )
+        | (Parsing::Data, Expression::FilePath(_) | Expression::Data { .. })
+        | (
+            Parsing::Session,
+            Expression::Session { .. } | Expression::FilePath(_) | Expression::Data { .. },
+        ) => true,
+        _ => false,
+    };
+
+    if is_valid {
+        Ok(expr)
+    } else {
+        Err(ParseError::Custom(format!(
+            "expression '{input}' is not valid for the expected mode '{mode:?}'"
+        )))
     }
 }

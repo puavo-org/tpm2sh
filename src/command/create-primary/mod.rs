@@ -21,36 +21,38 @@ use tpm2_protocol::{
         TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
     },
     message::TpmCreatePrimaryCommand,
-    TpmPersistent,
 };
 
 #[derive(Debug, Default)]
 pub struct CreatePrimary {
     pub hierarchy: Hierarchy,
     pub algorithm: Alg,
-    pub handle: Option<Uri>,
+    pub output: Option<Uri>,
 }
 
 impl Subcommand for CreatePrimary {
     const USAGE: &'static str = include_str!("usage.txt");
     const HELP: &'static str = include_str!("help.txt");
+    const ARGUMENTS: &'static str = include_str!("arguments.txt");
+    const OPTIONS: &'static str = include_str!("options.txt");
+    const SUMMARY: &'static str = include_str!("summary.txt");
 
     fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut hierarchy = Hierarchy::default();
         let mut algorithm = None;
-        let mut handle = None;
+        let mut output = None;
         while let Some(arg) = parser.next()? {
             match arg {
                 Arg::Long("hierarchy") | Arg::Short('H') => hierarchy = parser.value()?.parse()?,
-                Arg::Long("algorithm") => algorithm = Some(parser.value()?.parse()?),
-                Arg::Long("handle") => handle = Some(parser.value()?.parse()?),
+                Arg::Long("output") => output = Some(parser.value()?.parse()?),
+                Arg::Value(val) if algorithm.is_none() => algorithm = Some(val.parse()?),
                 _ => return handle_help(arg),
             }
         }
         Ok(CreatePrimary {
             hierarchy,
-            algorithm: required(algorithm, "--algorithm")?,
-            handle,
+            algorithm: required(algorithm, "<ALGORITHM>")?,
+            output,
         })
     }
 }
@@ -147,14 +149,10 @@ impl DeviceCommand for CreatePrimary {
                 command: TpmCc::CreatePrimary,
             })?;
         let object_handle = resp.object_handle;
-        if let Some(uri) = &self.handle {
-            let persistent_handle = TpmPersistent(uri.to_tpm_handle()?);
-            context.evict(device, object_handle, persistent_handle)?;
-            writeln!(context.writer, "tpm://{persistent_handle:#010x}")?;
-            Ok(())
-        } else {
-            context.track(object_handle)?;
-            context.save(device, object_handle)
-        }
+
+        context.track(object_handle)?;
+        context.save_or_persist(device, object_handle, self.output.as_ref())?;
+
+        Ok(())
     }
 }

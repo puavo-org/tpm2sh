@@ -3,14 +3,15 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use cli::{
-    cli::{Cli, Commands, LogFormat},
+    cli::{Cli, Commands},
     command::{
-        algorithms::Algorithms, context::Context, create_primary::CreatePrimary, import::Import,
-        objects::Objects, seal::Seal, start_session::StartSession, unseal::Unseal,
+        context::Context, create_primary::CreatePrimary, list::List, load::Load,
+        pcr_event::PcrEvent, pcr_read::PcrRead, seal::Seal, start_session::StartSession,
+        unseal::Unseal,
     },
     device::TpmDevice,
     error::{CliError, ParseError},
-    parser::PolicyExpr,
+    policy::Expression,
     session::AuthSession,
     uri::Uri,
     Command,
@@ -47,8 +48,7 @@ fn test_context() -> TestFixture {
         .try_init();
     let temp_dir = tempdir().unwrap();
     let (handle, transport) = cli::mocktpm::mocktpm_start(Some(temp_dir.path()));
-    let mut cli = Cli::default();
-    cli.log_format = LogFormat::Pretty;
+    let cli = Cli::default();
 
     let device = Arc::new(Mutex::new(TpmDevice::new(transport, cli.log_format)));
 
@@ -61,11 +61,13 @@ fn test_context() -> TestFixture {
 }
 
 #[rstest]
-fn test_subcommand_algorithms(test_context: TestFixture) {
-    let algorithms_cmd = Commands::Algorithms(Algorithms);
+fn test_subcommand_list_algorithms(test_context: TestFixture) {
+    let list_cmd = Commands::List(List {
+        list_type: "algorithm".parse().unwrap(),
+    });
     let mut out_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut out_buf);
-    algorithms_cmd
+    list_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let output = String::from_utf8(out_buf).unwrap();
@@ -128,12 +130,12 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_import(test_context: TestFixture) {
+fn test_subcommand_load_import(test_context: TestFixture) {
     let parent_context_uri = "tpm://0x81000001".to_string();
 
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
-        handle: Some(parent_context_uri.parse().unwrap()),
+        output: Some(parent_context_uri.parse().unwrap()),
         ..Default::default()
     });
 
@@ -154,33 +156,28 @@ fn test_subcommand_import(test_context: TestFixture) {
     let pem_doc = rsa_key.to_pkcs8_pem(Default::default()).unwrap();
     std::fs::write(&key_path, pem_doc.as_bytes()).unwrap();
 
-    let import_cmd = Commands::Import(Import {
+    let load_cmd = Commands::Load(Load {
         parent: parent_context_uri.parse().unwrap(),
-        key: format!("file://{}", key_path.to_str().unwrap())
+        input: format!("file://{}", key_path.to_str().unwrap())
             .parse()
             .unwrap(),
+        output: None,
     });
-    let mut import_output_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut import_output_buf);
-    import_cmd
+    let mut load_output_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut load_output_buf);
+    load_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
-    let output_text = String::from_utf8(import_output_buf).unwrap();
-    let lines: Vec<&str> = output_text.trim().lines().collect();
+    let output_text = String::from_utf8(load_output_buf).unwrap();
 
-    assert_eq!(lines.len(), 2, "Expected two lines of output");
     assert!(
-        lines[0].starts_with("data://base64,"),
-        "Public part should be a base64 data URI"
-    );
-    assert!(
-        lines[1].starts_with("data://base64,"),
-        "Private part should be a base64 data URI"
+        output_text.trim().starts_with("data://base64,"),
+        "Expected output to be a single data URI for the saved context"
     );
 }
 
 #[rstest]
-fn test_subcommand_objects(test_context: TestFixture) {
+fn test_subcommand_list_objects(test_context: TestFixture) {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "rsa:2048:sha256".parse().unwrap(),
         ..Default::default()
@@ -195,10 +192,12 @@ fn test_subcommand_objects(test_context: TestFixture) {
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
 
-    let objects_cmd = Commands::Objects(Objects);
+    let list_cmd = Commands::List(List {
+        list_type: "transient".parse().unwrap(),
+    });
     let mut out_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut out_buf);
-    objects_cmd
+    list_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
     let output = String::from_utf8(out_buf).unwrap();
@@ -213,8 +212,64 @@ fn test_subcommand_objects(test_context: TestFixture) {
     assert_eq!(handles, vec![0x8000_0000, 0x8000_0001]);
 }
 
+#[rstest]
+fn test_subcommand_pcr_event(test_context: TestFixture) {
+    let event_data = hex::decode("deadbeef").unwrap();
+    let pcr_event_cmd = Commands::PcrEvent(PcrEvent {
+        pcr_selection: "sha256:7".to_string(),
+        data: "data://hex,deadbeef".parse().unwrap(),
+    });
+    let mut out_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    pcr_event_cmd
+        .run(Some(test_context.device.clone()), &mut context)
+        .unwrap();
+
+    let event_digest = Sha256::digest(&event_data);
+    let mut pcr_hasher = Sha256::new();
+    pcr_hasher.update(&[0u8; 32]);
+    pcr_hasher.update(&event_digest);
+    let new_pcr_value = pcr_hasher.finalize();
+
+    let expected_composite_digest = Sha256::digest(&new_pcr_value);
+    let pcr_read_cmd = Commands::PcrRead(PcrRead {
+        expression: "pcr(sha256:7)".to_string(),
+    });
+    let mut out_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    pcr_read_cmd
+        .run(Some(test_context.device.clone()), &mut context)
+        .unwrap();
+
+    let output = String::from_utf8(out_buf).unwrap();
+    let expected = format!(
+        "pcr(\"sha256:7\", \"{}\")",
+        hex::encode(expected_composite_digest)
+    );
+    assert_eq!(output.trim(), expected);
+}
+
+#[rstest]
+fn test_subcommand_pcr_read(test_context: TestFixture) {
+    let pcr_read_cmd = Commands::PcrRead(PcrRead {
+        expression: "pcr(sha256:0,7)".to_string(),
+    });
+    let mut out_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    pcr_read_cmd
+        .run(Some(test_context.device.clone()), &mut context)
+        .unwrap();
+
+    let composite_data = [[0u8; 32].as_slice(), [0u8; 32].as_slice()].concat();
+    let expected_digest = Sha256::digest(composite_data);
+    let output = String::from_utf8(out_buf).unwrap();
+    let expected = format!("pcr(\"sha256:0,7\", \"{}\")", hex::encode(expected_digest));
+
+    assert_eq!(output.trim(), expected);
+}
+
 #[ignore]
-fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), CliError> {
+fn test_subcommand_seal_policy_unseal(test_context: TestFixture) -> Result<(), CliError> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
@@ -235,31 +290,20 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
         parent: parent_uri,
         data: format!("data://utf8,{secret}").parse().unwrap(),
         policy: Some(hex::encode(&policy_digest)),
-        ..Default::default()
+        password: None,
+        output: None,
     });
-    let mut sealed_blobs_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut sealed_blobs_buf);
+    let mut sealed_key_buf = Vec::new();
+    let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
     seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
-    let sealed_blobs_str = String::from_utf8(sealed_blobs_buf).unwrap();
-    let mut lines = sealed_blobs_str.lines();
-    let public_uri: Uri = lines.next().unwrap().parse().unwrap();
-    let private_uri: Uri = lines.next().unwrap().parse().unwrap();
+    let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
 
-    let (in_public, _) = Tpm2bPublic::parse(&public_uri.to_bytes()?).map_err(ParseError::from)?;
-    let (in_private, _) =
-        Tpm2bPrivate::parse(&private_uri.to_bytes()?).map_err(ParseError::from)?;
-    let load_cmd = TpmLoadCommand {
-        parent_handle: 0x8000_0000.into(),
-        in_private,
-        in_public,
-    };
-    let (_rc, resp, _) = test_context
-        .device
-        .lock()
-        .unwrap()
-        .execute(&load_cmd, &[])?;
-    let load_resp = resp.Load().unwrap();
-    let loaded_handle = load_resp.object_handle.0;
+    let key_dir = tempdir().unwrap();
+    let sealed_key_path = key_dir.path().join("sealed.key");
+    std::fs::write(&sealed_key_path, &sealed_key_pem)?;
+    let sealed_key_uri: Uri = format!("file://{}", sealed_key_path.to_str().unwrap())
+        .parse()
+        .unwrap();
 
     let start_session_cmd = Commands::StartSession(StartSession::default());
     let mut session_uri_buf = Vec::new();
@@ -270,21 +314,8 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
         .trim()
         .parse()
         .unwrap();
-    let session = if let PolicyExpr::Session {
-        handle,
-        nonce,
-        attrs,
-        key,
-        alg,
-    } = session_uri.ast()
-    {
-        Ok(AuthSession {
-            handle: TpmSession(*handle),
-            nonce_tpm: Tpm2bNonce::try_from(nonce.as_slice()).unwrap(),
-            attributes: TpmaSession::from_bits_truncate(*attrs),
-            hmac_key: Tpm2bAuth::try_from(key.as_slice()).unwrap(),
-            auth_hash: cli::key::tpm_alg_id_from_str(alg).unwrap(),
-        })
+    let session = if let Expression::Session { handle, .. } = session_uri.ast() {
+        Ok(TpmSession(*handle))
     } else {
         Err(CliError::Parse(ParseError::Custom(
             "Failed to parse session URI".to_string(),
@@ -292,23 +323,21 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
     }?;
 
     let policy_pcr_cmd = TpmPolicyPcrCommand {
-        policy_session: session.handle.0.into(),
+        policy_session: session.0.into(),
         pcr_digest: Tpm2bDigest::try_from(policy_digest.as_slice()).unwrap(),
         pcrs: TpmlPcrSelection::default(),
-    };
-    let policy_session_auth = TpmsAuthCommand {
-        session_handle: session.handle,
-        ..Default::default()
     };
     let _ = test_context
         .device
         .lock()
         .unwrap()
-        .execute(&policy_pcr_cmd, &[policy_session_auth])?;
+        .execute(&policy_pcr_cmd, &[])?;
 
     let unseal_cmd = Commands::Unseal(Unseal {
-        handle: format!("tpm://{loaded_handle:#010x}").parse().unwrap(),
+        uri: sealed_key_uri,
+        password: None,
     });
+
     let cli_for_unseal = Cli {
         session: Some(session_uri),
         ..Default::default()
@@ -316,9 +345,10 @@ fn _test_subcommand_seal_load_unseal(test_context: TestFixture) -> Result<(), Cl
     let mut unsealed_data_buf = Vec::new();
     let mut context = Context::new(&cli_for_unseal, &mut unsealed_data_buf);
     unseal_cmd.run(Some(test_context.device.clone()), &mut context)?;
-    let unsealed_secret = String::from_utf8(unsealed_data_buf).unwrap();
+    let unsealed_output = String::from_utf8(unsealed_data_buf).unwrap();
+    let expected_output = format!("data://utf8,{secret}");
 
-    assert_eq!(unsealed_secret, secret);
+    assert_eq!(unsealed_output.trim(), expected_output);
 
     Ok(())
 }

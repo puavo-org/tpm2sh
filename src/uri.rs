@@ -5,10 +5,9 @@
 use crate::{
     command::CommandError,
     error::{CliError, ParseError},
-    parser::{parse_policy, PolicyExpr},
+    policy::{self, Expression, Parsing},
 };
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
-use std::{fmt, ops::Deref, path::Path, str::FromStr};
+use std::{fmt, ops::Deref, str::FromStr};
 use tpm2_protocol::{
     data::{TpmAlgId, TpmlPcrSelection, TpmsPcrSelection, TPM_PCR_SELECT_MAX},
     TpmBuffer,
@@ -79,7 +78,7 @@ impl FromStr for PcrAlgId {
 /// URI data type used for the input data. The input is fully validated,
 /// and only legit URIs get passed to the subcommands.
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Uri(String, PolicyExpr);
+pub struct Uri(String, Expression);
 
 impl Deref for Uri {
     type Target = str;
@@ -99,7 +98,7 @@ impl FromStr for Uri {
     type Err = ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let ast = parse_policy(s)?;
+        let ast = policy::parse(s, Parsing::AuthorizationPolicy)?;
         Ok(Self(s.to_string(), ast))
     }
 }
@@ -107,7 +106,7 @@ impl FromStr for Uri {
 impl Uri {
     /// Returns the parsed AST of the URI
     #[must_use]
-    pub fn ast(&self) -> &PolicyExpr {
+    pub fn ast(&self) -> &Expression {
         &self.1
     }
 
@@ -117,21 +116,7 @@ impl Uri {
     ///
     /// Returns a `CliError` if the URI is malformed or a file cannot be read.
     pub fn to_bytes(&self) -> Result<Vec<u8>, CliError> {
-        match &self.1 {
-            PolicyExpr::FilePath(path) => {
-                std::fs::read(Path::new(path)).map_err(|e| CliError::File(path.clone(), e))
-            }
-            PolicyExpr::Data { encoding, value } => match encoding.as_str() {
-                "utf8" => Ok(value.as_bytes().to_vec()),
-                "hex" => Ok(hex::decode(value).map_err(ParseError::from)?),
-                "base64" => Ok(base64_engine.decode(value).map_err(ParseError::from)?),
-                _ => Err(ParseError::Custom(format!(
-                    "Unsupported data URI encoding: '{encoding}'"
-                ))
-                .into()),
-            },
-            _ => Err(ParseError::Custom(format!("Not a data-like URI: '{}'", self.0)).into()),
-        }
+        self.1.to_bytes()
     }
 
     /// Parses a TPM handle from a `tpm://` URI string.
@@ -140,10 +125,7 @@ impl Uri {
     ///
     /// Returns a `CliError` if the URI is not a `tpm://` URI.
     pub fn to_tpm_handle(&self) -> Result<u32, CliError> {
-        match self.1 {
-            PolicyExpr::TpmHandle(handle) => Ok(handle),
-            _ => Err(ParseError::Custom(format!("Not a TPM handle URI: '{}'", self.0)).into()),
-        }
+        self.1.to_tpm_handle()
     }
 
     /// Parses a PCR selection from a `pcr://` URI string.
@@ -153,7 +135,7 @@ impl Uri {
     /// Returns a `CliError::Parse` if the URI is not a `pcr://` URI.
     pub fn to_pcr_selection(&self, pcr_count: usize) -> Result<TpmlPcrSelection, CliError> {
         match &self.1 {
-            PolicyExpr::Pcr { selection, .. } => pcr_selection_to_list(selection, pcr_count),
+            Expression::Pcr { selection, .. } => pcr_selection_to_list(selection, pcr_count),
             _ => Err(ParseError::Custom(format!("Not a PCR URI: '{}'", self.0)).into()),
         }
     }

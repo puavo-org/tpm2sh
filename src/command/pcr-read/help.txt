@@ -1,14 +1,5 @@
-Reads PCRs and computes a composite digest
 
-Usage: tpm2sh pcr-read [OPTIONS] <ALG> <PCR>
+A PCR policy expression defines the PCR registers and bank to be read, for
+example 'pcr("sha256:0,1,2")'.
 
-Arguments:
-  <ALG> Hash algorithm for the composite digest (e.g., 'sha256')
-  <PCR> PCR selection (e.g. 'pcr://sha256:0,1,2+sha1:0')
-
-Options:
-  -d, --device <DEVICE>         TPM device path [default: /dev/tpmrm0]
-      --log-format <LOG_FORMAT> Logging format [default: plain] [possible values: plain, pretty]
-  -p, --password <PASSWORD>     Default authorization password for objects and sessions
-  -S, --session <URI>           Session object URI (e.g., 'tpm://0x03000000')
-  -h, --help                    Print help
+Usage: tpm2sh pcr-read <EXPRESSION>
