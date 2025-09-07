@@ -9,7 +9,7 @@ use crate::{
     session::AuthSession,
 };
 
-use std::{cmp::Ordering, fs, path::Path, str::FromStr};
+use std::{cmp::Ordering, str::FromStr};
 
 use p256::SecretKey;
 use pkcs8::{
@@ -277,6 +277,47 @@ impl TpmKey {
     }
 }
 
+/// Load and parse a PKCS#8 private key from a byte slice, trying DER then PEM.
+///
+/// # Errors
+///
+/// Returns `CliError` on parsing failure.
+pub fn private_key_from_bytes(bytes: &[u8]) -> Result<PrivateKey, CliError> {
+    private_key_from_der_bytes(bytes)
+        .or_else(|_| private_key_from_pem_bytes(bytes))
+        .map_err(|_| {
+            CliError::Parse(ParseError::Custom(
+                "failed to parse key: not a valid PKCS#8 DER or PEM encoded key".to_string(),
+            ))
+        })
+}
+
+/// Load and parse a DER-encoded PKCS#8 private key from a byte slice.
+///
+/// # Errors
+///
+/// Returns `CliError` on parsing failure.
+pub fn private_key_from_der_bytes(der_bytes: &[u8]) -> Result<PrivateKey, CliError> {
+    let private_key_info = PrivateKeyInfo::from_der(der_bytes).map_err(ParseError::from)?;
+    let oid = private_key_info.algorithm.oid;
+
+    let key = match oid {
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => PrivateKey::Rsa(
+            Box::new(RsaPrivateKey::from_pkcs8_der(der_bytes).map_err(ParseError::from)?),
+        ),
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
+            PrivateKey::Ecc(SecretKey::from_pkcs8_der(der_bytes).map_err(ParseError::from)?)
+        }
+        _ => {
+            return Err(
+                ParseError::Custom("unsupported key algorithm in DER data".to_string()).into(),
+            )
+        }
+    };
+
+    Ok(key)
+}
+
 /// Load and parse a PEM-encoded PKCS#8 private key from a byte slice.
 ///
 /// # Errors
@@ -289,36 +330,7 @@ pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliErr
     if pem_block.tag() != "PRIVATE KEY" {
         return Err(ParseError::Custom(format!("invalid PEM tag: {}", pem_block.tag())).into());
     }
-
-    let contents = pem_block.contents();
-    let private_key_info = PrivateKeyInfo::from_der(contents).map_err(ParseError::from)?;
-    let oid = private_key_info.algorithm.oid;
-
-    let key = match oid {
-        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => PrivateKey::Rsa(
-            Box::new(RsaPrivateKey::from_pkcs8_der(contents).map_err(ParseError::from)?),
-        ),
-        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
-            PrivateKey::Ecc(SecretKey::from_pkcs8_der(contents).map_err(ParseError::from)?)
-        }
-        _ => {
-            return Err(
-                ParseError::Custom("unsupported key algorithm in PEM file".to_string()).into(),
-            )
-        }
-    };
-
-    Ok(key)
-}
-
-/// Load and parse PEM-encoded PKCS#8 private key from a file.
-///
-/// # Errors
-///
-/// Returns `CliError` on file I/O or parsing failure.
-pub fn private_key_from_pem_file(path: &Path) -> Result<PrivateKey, CliError> {
-    let pem_bytes = fs::read(path).map_err(|e| CliError::File(path.display().to_string(), e))?;
-    private_key_from_pem_bytes(&pem_bytes)
+    private_key_from_der_bytes(pem_block.contents())
 }
 
 /// Computes the authorization HMAC for a command session.

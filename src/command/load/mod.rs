@@ -8,7 +8,7 @@ use crate::{
     crypto::{self, crypto_hmac, crypto_kdfa, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    key::{private_key_from_pem_bytes, TpmKey},
+    key::{private_key_from_bytes, TpmKey},
     session::session_from_args,
     uri::Uri,
     util::build_to_vec,
@@ -174,8 +174,8 @@ fn prepare_key_for_import(
     key: &Uri,
     parent_name_alg: TpmAlgId,
 ) -> Result<(crypto::PrivateKey, TpmtPublic, Vec<u8>), CliError> {
-    let pem_bytes = key.to_bytes()?;
-    let private_key = private_key_from_pem_bytes(&pem_bytes)?;
+    let key_bytes = key.to_bytes()?;
+    let private_key = private_key_from_bytes(&key_bytes)?;
 
     let public = private_key
         .to_public(parent_name_alg)
