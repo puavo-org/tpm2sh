@@ -48,18 +48,32 @@ impl LocalCommand for Convert {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, _context: &mut Context) -> Result<(), CliError> {
-        let input_bytes = fs::read(&self.input)
-            .map_err(|e| CliError::File(self.input.display().to_string(), e))?;
-
-        let tpm_key = TpmKey::from_pem(&input_bytes)
-            .or_else(|_| TpmKey::from_der(&input_bytes))
-            .map_err(|_| CommandError::InvalidKey("failed to parse input key".to_string()))?;
+        let input_ext = self
+            .input
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or_default();
 
         let output_ext = self
             .output
             .extension()
             .and_then(std::ffi::OsStr::to_str)
             .unwrap_or_default();
+
+        if !input_ext.is_empty() && input_ext == output_ext {
+            return Err(CommandError::SameConversionFormat.into());
+        }
+
+        let input_bytes = fs::read(&self.input)
+            .map_err(|e| CliError::File(self.input.display().to_string(), e))?;
+
+        let tpm_key = TpmKey::from_pem(&input_bytes)
+            .or_else(|_| TpmKey::from_der(&input_bytes))
+            .map_err(|_| {
+                CommandError::InvalidKey(
+                    "failed to parse input key as PEM or DER format".to_string(),
+                )
+            })?;
 
         let output_bytes = match output_ext {
             "pem" => tpm_key.to_pem()?.into_bytes(),
