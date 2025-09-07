@@ -44,7 +44,7 @@ impl Subcommand for Load {
     const OPTION_PARENT: bool = true;
     const OPTION_OUTPUT: bool = true;
 
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut parent = None;
         let mut output = None;
         let mut positional_args = Vec::new();
@@ -59,11 +59,10 @@ impl Subcommand for Load {
         }
 
         if positional_args.len() != 1 {
-            return Err(format!(
+            return Err(CliError::Parse(ParseError::Custom(format!(
                 "expected 1 positional argument, found {}",
                 positional_args.len()
-            )
-            .into());
+            ))));
         }
 
         Ok(Load {

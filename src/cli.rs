@@ -7,10 +7,10 @@ use crate::{
         context::Context, convert::Convert, create_primary::CreatePrimary, delete::Delete,
         list::List, load::Load, pcr_event::PcrEvent, pcr_read::PcrRead, policy::Policy,
         print_error::PrintError, reset_lock::ResetLock, seal::Seal, start_session::StartSession,
-        unseal::Unseal,
+        unseal::Unseal, CommandError,
     },
     device::{TpmDevice, TpmDeviceError},
-    error::CliError,
+    error::{CliError, ParseError},
     uri::Uri,
     Command, ParseResult,
 };
@@ -39,8 +39,8 @@ pub trait Subcommand: Sized {
     ///
     /// # Errors
     ///
-    /// Returns a `lexopt::Error` if parsing fails.
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error>;
+    /// Returns a `CliError` if parsing fails.
+    fn parse(parser: &mut Parser) -> Result<Self, CliError>;
 }
 
 /// Subcommand not requiring TPM device access.
@@ -259,12 +259,12 @@ subcommand_registry!(
 ///
 /// # Errors
 ///
-/// Returns a `lexopt::Error` if parsing fails.
-pub fn handle_help<T>(arg: Arg) -> Result<T, lexopt::Error> {
+/// Returns a `CliError` if help is requested or the argument is unexpected.
+pub fn handle_help<T>(arg: Arg) -> Result<T, CliError> {
     if arg == Arg::Short('h') || arg == Arg::Long("help") {
-        return Err(lexopt::Error::Custom("help requested".into()));
+        return Err(CliError::Command(CommandError::HelpRequested));
     }
-    Err(arg.unexpected())
+    Err(CliError::Parse(ParseError::from(arg.unexpected())))
 }
 
 /// Helper for enforcing a required command argument.
@@ -296,9 +296,9 @@ pub fn parse_parent_option(
 ///
 /// # Errors
 ///
-/// Returns a `lexopt::Error` if any arguments other than `--help` are provided.
-pub fn parse_no_args<T: Default>(parser: &mut Parser) -> Result<T, lexopt::Error> {
-    while let Some(arg) = parser.next()? {
+/// Returns a `CliError` if any arguments other than `--help` are provided.
+pub fn parse_no_args<T: Default>(parser: &mut Parser) -> Result<T, CliError> {
+    while let Some(arg) = parser.next().map_err(ParseError::from)? {
         handle_help(arg)?;
     }
     Ok(T::default())
@@ -389,7 +389,7 @@ where
 {
     match S::parse(parser) {
         Ok(args) => Ok(wrapper(args)),
-        Err(lexopt::Error::Custom(err)) if err.to_string() == "help requested" => {
+        Err(CliError::Command(CommandError::HelpRequested)) => {
             let header = format!("{}\n\n{}", S::SUMMARY.trim(), S::HELP);
             let options = build_options_string(S::OPTION_PARENT, S::OPTION_OUTPUT, S::OPTIONS);
             Err(ParseResult::Help(format_help(

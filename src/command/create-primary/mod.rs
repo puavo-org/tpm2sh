@@ -38,7 +38,7 @@ impl Subcommand for CreatePrimary {
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_OUTPUT: bool = true;
 
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut hierarchy = Hierarchy::default();
         let mut algorithm = None;
         let mut output = None;

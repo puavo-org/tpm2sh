@@ -22,7 +22,7 @@ impl Subcommand for ResetLock {
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
 
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         parse_no_args(parser)
     }
 }

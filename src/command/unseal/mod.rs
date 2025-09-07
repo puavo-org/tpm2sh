@@ -35,7 +35,7 @@ impl Subcommand for Unseal {
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_PARENT: bool = true;
 
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut uri = None;
         let mut parent = None;
         let mut password = None;

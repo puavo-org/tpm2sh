@@ -28,6 +28,9 @@ pub mod unseal;
 
 #[derive(Debug, Error)]
 pub enum CommandError {
+    #[error("help requested")]
+    HelpRequested,
+
     #[error("Handle capacity ({capacity}) exceeded")]
     HandleCapacityExceeded { capacity: usize },
 

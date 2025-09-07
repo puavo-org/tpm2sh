@@ -43,7 +43,7 @@ impl Subcommand for List {
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
 
-    fn parse(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut list_type = None;
         while let Some(arg) = parser.next()? {
             match arg {
