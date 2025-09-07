@@ -3,14 +3,14 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{self, handle_help, required, Cli, DeviceCommand, SessionType, Subcommand},
+    cli::{self, handle_help, required, DeviceCommand, SessionType, Subcommand},
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     pcr::{pcr_composite_digest, pcr_get_count},
     policy::{self, Expression, Parsing},
-    session::session_from_args,
-    uri::pcr_selection_to_list,
+    session::session_from_uri,
+    uri::{pcr_selection_to_list, Uri},
 };
 use lexopt::{Arg, Parser, ValueExt};
 
@@ -61,7 +61,6 @@ struct PolicyExecutor<'a> {
 impl PolicyExecutor<'_> {
     fn execute_pcr_policy(
         &mut self,
-        _cli: &Cli,
         session_handle: TpmSession,
         selection_str: &str,
         digest: Option<&String>,
@@ -85,14 +84,13 @@ impl PolicyExecutor<'_> {
             pcrs: pcr_selection,
         };
         let handles = [session_handle.into()];
-        let sessions = session_from_args(&cmd, &handles, &Cli::default())?;
+        let sessions = session_from_uri(&cmd, &handles, None)?;
         let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
     fn execute_secret_policy(
         &mut self,
-        _cli: &Cli,
         session_handle: TpmSession,
         auth_handle_uri: &Expression,
         password: Option<&String>,
@@ -112,33 +110,29 @@ impl PolicyExecutor<'_> {
             expiration: 0,
         };
         let handles = [auth_handle, session_handle.into()];
-        let temp_cli = Cli {
-            password: password.cloned(),
-            ..Default::default()
-        };
-        let sessions = session_from_args(&cmd, &handles, &temp_cli)?;
+        let temp_uri: Option<Uri> = password.map(|p| format!("password://{p}").parse().unwrap());
+        let sessions = session_from_uri(&cmd, &handles, temp_uri.as_ref())?;
         let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
     fn execute_or_policy(
         &mut self,
-        cli: &Cli,
         session_handle: TpmSession,
         branches: &[Expression],
     ) -> Result<(), CliError> {
         let mut branch_digests = TpmlDigest::new();
         for branch_ast in branches {
             let branch_handle =
-                start_trial_session(self.device, cli, SessionType::Trial, self.session_hash_alg)?;
-            self.execute_policy_ast(cli, branch_handle, branch_ast)?;
+                start_trial_session(self.device, SessionType::Trial, self.session_hash_alg)?;
+            self.execute_policy_ast(branch_handle, branch_ast)?;
 
-            let digest = get_policy_digest(self.device, cli, branch_handle)?;
+            let digest = get_policy_digest(self.device, branch_handle)?;
             branch_digests
                 .try_push(digest)
                 .map_err(CommandError::from)?;
 
-            flush_session(self.device, cli, branch_handle)?;
+            flush_session(self.device, branch_handle)?;
         }
 
         let cmd = TpmPolicyOrCommand {
@@ -146,14 +140,13 @@ impl PolicyExecutor<'_> {
             p_hash_list: branch_digests,
         };
         let handles = [session_handle.into()];
-        let sessions = session_from_args(&cmd, &handles, &Cli::default())?;
+        let sessions = session_from_uri(&cmd, &handles, None)?;
         let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
         Ok(())
     }
 
     fn execute_policy_ast(
         &mut self,
-        cli: &Cli,
         session_handle: TpmSession,
         ast: &Expression,
     ) -> Result<(), CliError> {
@@ -162,20 +155,14 @@ impl PolicyExecutor<'_> {
                 selection,
                 digest,
                 count,
-            } => self.execute_pcr_policy(
-                cli,
-                session_handle,
-                selection,
-                digest.as_ref(),
-                count.as_ref(),
-            ),
+            } => {
+                self.execute_pcr_policy(session_handle, selection, digest.as_ref(), count.as_ref())
+            }
             Expression::Secret {
                 auth_handle_uri,
                 password,
-            } => {
-                self.execute_secret_policy(cli, session_handle, auth_handle_uri, password.as_ref())
-            }
-            Expression::Or(branches) => self.execute_or_policy(cli, session_handle, branches),
+            } => self.execute_secret_policy(session_handle, auth_handle_uri, password.as_ref()),
+            Expression::Or(branches) => self.execute_or_policy(session_handle, branches),
             _ => Err(
                 ParseError::Custom("unsupported expression for policy command".to_string()).into(),
             ),
@@ -185,7 +172,6 @@ impl PolicyExecutor<'_> {
 
 fn start_trial_session(
     device: &mut TpmDevice,
-    _cli: &Cli,
     session_type: cli::SessionType,
     hash_alg: TpmAlgId,
 ) -> Result<TpmSession, CliError> {
@@ -207,7 +193,7 @@ fn start_trial_session(
     Ok(start_resp.session_handle)
 }
 
-fn flush_session(device: &mut TpmDevice, _cli: &Cli, handle: TpmSession) -> Result<(), CliError> {
+fn flush_session(device: &mut TpmDevice, handle: TpmSession) -> Result<(), CliError> {
     let cmd = TpmFlushContextCommand {
         flush_handle: handle.into(),
     };
@@ -217,7 +203,6 @@ fn flush_session(device: &mut TpmDevice, _cli: &Cli, handle: TpmSession) -> Resu
 
 fn get_policy_digest(
     device: &mut TpmDevice,
-    _cli: &Cli,
     session_handle: TpmSession,
 ) -> Result<Tpm2bDigest, CliError> {
     let cmd = TpmPolicyGetDigestCommand {
@@ -242,16 +227,15 @@ impl DeviceCommand for Policy {
         let ast = policy::parse(&self.expression, Parsing::AuthorizationPolicy)?;
         let pcr_count = pcr_get_count(device)?;
         let session_hash_alg = TpmAlgId::Sha256;
-        let session_handle =
-            start_trial_session(device, context.cli, SessionType::Trial, session_hash_alg)?;
+        let session_handle = start_trial_session(device, SessionType::Trial, session_hash_alg)?;
         let mut executor = PolicyExecutor {
             pcr_count,
             device,
             session_hash_alg,
         };
-        executor.execute_policy_ast(context.cli, session_handle, &ast)?;
-        let final_digest = get_policy_digest(executor.device, context.cli, session_handle)?;
-        flush_session(executor.device, context.cli, session_handle)?;
+        executor.execute_policy_ast(session_handle, &ast)?;
+        let final_digest = get_policy_digest(executor.device, session_handle)?;
+        flush_session(executor.device, session_handle)?;
         writeln!(context.writer, "{}", hex::encode(&*final_digest))?;
         Ok(())
     }

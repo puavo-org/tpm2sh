@@ -24,6 +24,7 @@ use tpm2_protocol::data::{TpmRh, TpmSe};
 
 const PARENT_OPTION_HELP: &str = "--parent <URI>\n'data://', 'file://' or 'tpm://'";
 const OUTPUT_OPTION_HELP: &str = "--output <URI>\n'tpm://' or 'file://'";
+const SESSION_OPTION_HELP: &str = "--session <URI>\nSession URI or 'password://<PASS>'";
 
 /// A trait for CLI subcommands.
 pub trait Subcommand: Sized {
@@ -34,6 +35,7 @@ pub trait Subcommand: Sized {
     const SUMMARY: &'static str;
     const OPTION_PARENT: bool = false;
     const OPTION_OUTPUT: bool = false;
+    const OPTION_SESSION: bool = false;
 
     /// Parse subcommand.
     ///
@@ -86,8 +88,6 @@ impl FromStr for LogFormat {
 pub struct Cli {
     pub device: String,
     pub log_format: LogFormat,
-    pub password: Option<String>,
-    pub session: Option<Uri>,
     pub command: Option<Commands>,
 }
 
@@ -218,6 +218,7 @@ macro_rules! subcommand_registry {
                 options: $local_command::OPTIONS,
                 option_parent: $local_command::OPTION_PARENT,
                 option_output: $local_command::OPTION_OUTPUT,
+                option_session: $local_command::OPTION_SESSION,
                 dispatch: |p| dispatch(p, Commands::$local_command),
             },
         )* $ (
@@ -229,6 +230,7 @@ macro_rules! subcommand_registry {
                 options: $device_command::OPTIONS,
                 option_parent: $device_command::OPTION_PARENT,
                 option_output: $device_command::OPTION_OUTPUT,
+                option_session: $device_command::OPTION_SESSION,
                 dispatch: |p| dispatch(p, Commands::$device_command),
             },
         )*];
@@ -292,6 +294,24 @@ pub fn parse_parent_option(
     Ok(())
 }
 
+/// Helper for parsing a `--session <URI>` option.
+///
+/// # Errors
+///
+/// Returns a `CliError` if the option is duplicated or its value is invalid.
+pub fn parse_session_option(
+    parser: &mut Parser,
+    session: &mut Option<Uri>,
+) -> Result<(), CliError> {
+    if session.is_some() {
+        return Err(CliError::Parse(ParseError::Custom(
+            "the '--session' option was provided more than once".to_string(),
+        )));
+    }
+    *session = Some(parser.value()?.parse()?);
+    Ok(())
+}
+
 /// Helper for parsing subcommands that take no arguments.
 ///
 /// # Errors
@@ -329,6 +349,7 @@ fn format_section(title: &str, content: &str, indent: usize) -> String {
 fn build_options_string(
     has_parent: bool,
     has_output: bool,
+    has_session: bool,
     custom_options: &'static str,
 ) -> String {
     let mut options = String::new();
@@ -340,6 +361,12 @@ fn build_options_string(
             options.push('\n');
         }
         options.push_str(OUTPUT_OPTION_HELP);
+    }
+    if has_session {
+        if !options.is_empty() {
+            options.push('\n');
+        }
+        options.push_str(SESSION_OPTION_HELP);
     }
     if !custom_options.trim().is_empty() {
         if !options.is_empty() {
@@ -391,7 +418,12 @@ where
         Ok(args) => Ok(wrapper(args)),
         Err(CliError::Command(CommandError::HelpRequested)) => {
             let header = format!("{}\n\n{}", S::SUMMARY.trim(), S::HELP);
-            let options = build_options_string(S::OPTION_PARENT, S::OPTION_OUTPUT, S::OPTIONS);
+            let options = build_options_string(
+                S::OPTION_PARENT,
+                S::OPTION_OUTPUT,
+                S::OPTION_SESSION,
+                S::OPTIONS,
+            );
             Err(ParseResult::Help(format_help(
                 &header,
                 S::ARGUMENTS,
@@ -413,6 +445,7 @@ struct SubcommandObject {
     options: &'static str,
     option_parent: bool,
     option_output: bool,
+    option_session: bool,
     dispatch: fn(&mut Parser) -> Result<Commands, ParseResult>,
 }
 
@@ -439,6 +472,7 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
                             let options = build_options_string(
                                 cmd.option_parent,
                                 cmd.option_output,
+                                cmd.option_session,
                                 cmd.options,
                             );
                             format_help(&header, cmd.arguments, &options)
@@ -460,12 +494,6 @@ pub fn parse_args() -> Result<ParseResult, lexopt::Error> {
             }
             Arg::Long("log-format") => {
                 cli.log_format = parser.value()?.parse()?;
-            }
-            Arg::Short('p') | Arg::Long("password") => {
-                cli.password = Some(parser.value()?.string()?);
-            }
-            Arg::Short('S') | Arg::Long("session") => {
-                cli.session = Some(parser.value()?.parse()?);
             }
             Arg::Value(cmd) => {
                 cmd_name_opt = Some(cmd.string()?);

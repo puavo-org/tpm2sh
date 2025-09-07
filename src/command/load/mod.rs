@@ -3,13 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_parent_option, required, DeviceCommand, Subcommand},
+    cli::{
+        handle_help, parse_parent_option, parse_session_option, required, DeviceCommand, Subcommand,
+    },
     command::{context::Context, CommandError},
     crypto::{self, crypto_hmac, crypto_kdfa, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::{private_key_from_bytes, TpmKey},
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
     util::build_to_vec,
 };
@@ -33,6 +35,7 @@ pub struct Load {
     pub parent: Uri,
     pub input: Uri,
     pub output: Option<Uri>,
+    pub session: Option<Uri>,
 }
 
 impl Subcommand for Load {
@@ -43,16 +46,19 @@ impl Subcommand for Load {
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_PARENT: bool = true;
     const OPTION_OUTPUT: bool = true;
+    const OPTION_SESSION: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut parent = None;
         let mut output = None;
+        let mut session = None;
         let mut positional_args = Vec::new();
 
         while let Some(arg) = parser.next()? {
             match arg {
                 Arg::Long("parent") => parse_parent_option(parser, &mut parent)?,
                 Arg::Long("output") => output = Some(parser.value()?.parse()?),
+                Arg::Long("session") => parse_session_option(parser, &mut session)?,
                 Arg::Value(val) => positional_args.push(val.parse()?),
                 _ => return handle_help(arg),
             }
@@ -69,6 +75,7 @@ impl Subcommand for Load {
             parent: required(parent, "--parent")?,
             input: positional_args.remove(0),
             output,
+            session,
         })
     }
 }
@@ -231,7 +238,7 @@ impl DeviceCommand for Load {
                 symmetric_alg,
             };
             let handles = [parent_handle.into()];
-            let sessions = session_from_args(&import_cmd, &handles, context.cli)?;
+            let sessions = session_from_uri(&import_cmd, &handles, self.session.as_ref())?;
             let (_rc, resp, _) = device.execute(&import_cmd, &sessions)?;
             let import_resp = resp
                 .Import()
@@ -247,7 +254,7 @@ impl DeviceCommand for Load {
             in_public,
         };
         let handles = [parent_handle.into()];
-        let sessions = session_from_args(&load_cmd, &handles, context.cli)?;
+        let sessions = session_from_uri(&load_cmd, &handles, self.session.as_ref())?;
         let (_rc, resp, _) = device.execute(&load_cmd, &sessions)?;
         let resp = resp
             .Load()
@@ -256,6 +263,11 @@ impl DeviceCommand for Load {
             })?;
 
         context.track(resp.object_handle)?;
-        context.finalize_object_output(device, resp.object_handle, self.output.as_ref())
+        context.finalize_object_output(
+            device,
+            resp.object_handle,
+            self.output.as_ref(),
+            self.session.as_ref(),
+        )
     }
 }

@@ -3,13 +3,15 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_parent_option, required, Cli, DeviceCommand, Subcommand},
+    cli::{
+        handle_help, parse_parent_option, parse_session_option, required, DeviceCommand, Subcommand,
+    },
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::TpmKey,
     policy::Expression,
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
@@ -24,7 +26,7 @@ use tpm2_protocol::{
 pub struct Unseal {
     pub uri: Uri,
     pub parent: Option<Uri>,
-    pub password: Option<String>,
+    pub session: Option<Uri>,
 }
 
 impl Subcommand for Unseal {
@@ -34,16 +36,17 @@ impl Subcommand for Unseal {
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_PARENT: bool = true;
+    const OPTION_SESSION: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut uri = None;
         let mut parent = None;
-        let mut password = None;
+        let mut session = None;
 
         while let Some(arg) = parser.next()? {
             match arg {
                 Arg::Long("parent") => parse_parent_option(parser, &mut parent)?,
-                Arg::Long("password") => password = Some(parser.value()?.string()?),
+                Arg::Long("session") => parse_session_option(parser, &mut session)?,
                 Arg::Value(val) if uri.is_none() => uri = Some(val.parse()?),
                 _ => return handle_help(arg),
             }
@@ -51,7 +54,7 @@ impl Subcommand for Unseal {
         Ok(Unseal {
             uri: required(uri, "<URI>")?,
             parent,
-            password,
+            session,
         })
     }
 }
@@ -76,14 +79,6 @@ impl DeviceCommand for Unseal {
     ///
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
-        if self.password.is_some() && context.cli.session.is_some() {
-            return Err(CommandError::MutualExclusionArgs {
-                arg1: "password",
-                arg2: "session",
-            }
-            .into());
-        }
-
         let object_handle = match self.uri.ast() {
             Expression::TpmHandle(handle) => TpmTransient(*handle),
             Expression::FilePath(_) | Expression::Data { .. } => {
@@ -115,7 +110,7 @@ impl DeviceCommand for Unseal {
                     in_public,
                 };
                 let handles = [parent_handle.into()];
-                let sessions = session_from_args(&load_cmd, &handles, context.cli)?;
+                let sessions = session_from_uri(&load_cmd, &handles, self.session.as_ref())?;
                 let (_rc, resp, _) = device.execute(&load_cmd, &sessions)?;
                 let load_resp = resp
                     .Load()
@@ -138,16 +133,8 @@ impl DeviceCommand for Unseal {
             item_handle: object_handle.0.into(),
         };
         let unseal_handles = [object_handle.into()];
-
-        let unseal_sessions = if let Some(password) = &self.password {
-            let local_cli = Cli {
-                password: Some(password.clone()),
-                ..Default::default()
-            };
-            session_from_args(&unseal_cmd, &unseal_handles, &local_cli)?
-        } else {
-            session_from_args(&unseal_cmd, &unseal_handles, context.cli)?
-        };
+        let unseal_sessions =
+            session_from_uri(&unseal_cmd, &unseal_handles, self.session.as_ref())?;
 
         let (_rc, unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
         let unseal_resp = unseal_resp

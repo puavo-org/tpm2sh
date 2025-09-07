@@ -3,13 +3,13 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, required, DeviceCommand, Subcommand},
+    cli::{handle_help, parse_session_option, required, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     pcr::pcr_get_count,
-    session::session_from_args,
-    uri::pcr_selection_to_list,
+    session::session_from_uri,
+    uri::{pcr_selection_to_list, Uri},
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
@@ -18,6 +18,7 @@ use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
 pub struct PcrEvent {
     pub pcr_selection: String,
     pub data: crate::uri::Uri,
+    pub session: Option<Uri>,
 }
 
 impl Subcommand for PcrEvent {
@@ -26,12 +27,15 @@ impl Subcommand for PcrEvent {
     const ARGUMENTS: &'static str = include_str!("arguments.txt");
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
+    const OPTION_SESSION: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut pcr_selection = None;
         let mut data = None;
+        let mut session = None;
         while let Some(arg) = parser.next()? {
             match arg {
+                Arg::Long("session") => parse_session_option(parser, &mut session)?,
                 Arg::Value(val) if pcr_selection.is_none() => pcr_selection = Some(val.string()?),
                 Arg::Value(val) if data.is_none() => data = Some(val.parse()?),
                 _ => return handle_help(arg),
@@ -40,6 +44,7 @@ impl Subcommand for PcrEvent {
         Ok(PcrEvent {
             pcr_selection: required(pcr_selection, "<PCR>")?,
             data: required(data, "<DATA>")?,
+            session,
         })
     }
 }
@@ -50,7 +55,7 @@ impl DeviceCommand for PcrEvent {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<(), CliError> {
         let pcr_count = pcr_get_count(device)?;
         let selection = pcr_selection_to_list(&self.pcr_selection, pcr_count)?;
 
@@ -101,7 +106,7 @@ impl DeviceCommand for PcrEvent {
             pcr_handle: handles[0],
             event_data,
         };
-        let sessions = session_from_args(&command, &handles, context.cli)?;
+        let sessions = session_from_uri(&command, &handles, self.session.as_ref())?;
         let (_rc, resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|_| TpmDeviceError::MismatchedResponse {

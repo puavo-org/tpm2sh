@@ -12,7 +12,7 @@ use cli::{
     device::TpmDevice,
     error::{CliError, ParseError},
     policy::Expression,
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
     Command,
 };
@@ -159,6 +159,7 @@ fn test_subcommand_load_import(test_context: TestFixture) {
             .parse()
             .unwrap(),
         output: None,
+        session: None,
     });
     let mut load_output_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut load_output_buf);
@@ -215,6 +216,7 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
     let pcr_event_cmd = Commands::PcrEvent(PcrEvent {
         pcr_selection: "sha256:7".to_string(),
         data: "data://hex,deadbeef".parse().unwrap(),
+        session: None,
     });
     let mut out_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut out_buf);
@@ -285,11 +287,13 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
         password: Some(password.to_string()),
         policy: None,
         output: None,
+        session: None,
     });
     let mut sealed_key_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
     seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
+    eprintln!("{sealed_key_pem}");
 
     let key_dir = tempdir().unwrap();
     let sealed_key_path = key_dir.path().join("sealed.key");
@@ -301,7 +305,7 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
     let unseal_cmd = Commands::Unseal(Unseal {
         uri: sealed_key_uri,
         parent: Some(parent_uri),
-        password: Some(password.to_string()),
+        session: Some(format!("password://{password}").parse().unwrap()),
     });
 
     let mut unsealed_data_buf = Vec::new();
@@ -339,6 +343,7 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         policy: Some(hex::encode(&policy_digest)),
         password: None,
         output: None,
+        session: None,
     });
     let mut sealed_key_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
@@ -375,13 +380,9 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         pcrs: TpmlPcrSelection::default(),
     };
 
-    let cli_for_policy = Cli {
-        session: Some(session_uri.clone()),
-        ..Default::default()
-    };
     let policy_pcr_handles = [session.0];
     let sessions_for_policy_pcr =
-        session_from_args(&policy_pcr_cmd, &policy_pcr_handles, &cli_for_policy)?;
+        session_from_uri(&policy_pcr_cmd, &policy_pcr_handles, Some(&session_uri))?;
 
     let _ = test_context
         .device
@@ -392,15 +393,11 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
     let unseal_cmd = Commands::Unseal(Unseal {
         uri: sealed_key_uri,
         parent: Some(parent_uri.clone()),
-        password: None,
+        session: Some(session_uri),
     });
 
-    let cli_for_unseal = Cli {
-        session: Some(session_uri),
-        ..Default::default()
-    };
     let mut unsealed_data_buf = Vec::new();
-    let mut context = Context::new(&cli_for_unseal, &mut unsealed_data_buf);
+    let mut context = Context::new(&test_context.cli, &mut unsealed_data_buf);
     unseal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let unsealed_output = String::from_utf8(unsealed_data_buf).unwrap();
     let expected_output = format!("data://utf8,{secret}");

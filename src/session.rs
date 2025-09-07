@@ -3,11 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::Cli,
     command::CommandError,
     error::{CliError, ParseError},
     key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
     policy::{self, Expression, Parsing},
+    uri::Uri,
     util::build_to_vec,
 };
 use log::debug;
@@ -85,24 +85,23 @@ fn build_password_session(password: &str) -> Result<Vec<data::TpmsAuthCommand>, 
     }])
 }
 
-/// Acquires the authorization session from the global arguments. `--password`
-/// and `--session` are mutually exclusive arguments.
+/// Builds authorization sessions from a URI.
 ///
 /// # Errors
 ///
 /// Returns a `CliError` if authorization is not valid.
-pub fn session_from_args<C: TpmHeader>(
+pub fn session_from_uri<C: TpmHeader>(
     command: &C,
     handles: &[u32],
-    cli: &Cli,
+    session_uri: Option<&Uri>,
 ) -> Result<Vec<data::TpmsAuthCommand>, CliError> {
-    match (&cli.session, &cli.password) {
-        (Some(_), Some(_)) => Err(CommandError::MutualExclusionArgs {
-            arg1: "session",
-            arg2: "password",
-        }
-        .into()),
-        (Some(uri), None) => {
+    let Some(uri) = session_uri else {
+        return build_password_session("");
+    };
+
+    match uri.ast() {
+        Expression::Password(password) => build_password_session(password),
+        Expression::Session { .. } | Expression::Data { .. } | Expression::FilePath(_) => {
             let session = match uri.ast() {
                 Expression::Session { .. } => AuthSession::from_ast(uri.ast())?,
                 Expression::Data { .. } | Expression::FilePath(_) => {
@@ -112,13 +111,7 @@ pub fn session_from_args<C: TpmHeader>(
                     let ast = policy::parse(session_str, Parsing::AuthorizationPolicy)?;
                     AuthSession::from_ast(&ast)?
                 }
-                _ => {
-                    return Err(CommandError::InvalidUriScheme {
-                        expected: "file://, data://, or session://".to_string(),
-                        actual: uri.to_string(),
-                    }
-                    .into())
-                }
+                _ => unreachable!(),
             };
 
             let params = build_to_vec(command)?;
@@ -140,7 +133,9 @@ pub fn session_from_args<C: TpmHeader>(
                 &params,
             )?])
         }
-        (None, Some(password)) => build_password_session(password),
-        (None, None) => build_password_session(""),
+        _ => Err(CliError::Command(CommandError::InvalidUriScheme {
+            expected: "password://, file://, data://, or session://".to_string(),
+            actual: uri.to_string(),
+        })),
     }
 }

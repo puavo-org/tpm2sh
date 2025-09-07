@@ -3,12 +3,12 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{handle_help, required, DeviceCommand, Hierarchy, Subcommand},
+    cli::{handle_help, parse_session_option, required, DeviceCommand, Hierarchy, Subcommand},
     command::context::Context,
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
@@ -28,6 +28,7 @@ pub struct CreatePrimary {
     pub hierarchy: Hierarchy,
     pub algorithm: Alg,
     pub output: Option<Uri>,
+    pub session: Option<Uri>,
 }
 
 impl Subcommand for CreatePrimary {
@@ -37,15 +38,18 @@ impl Subcommand for CreatePrimary {
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
     const OPTION_OUTPUT: bool = true;
+    const OPTION_SESSION: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut hierarchy = Hierarchy::default();
         let mut algorithm = None;
         let mut output = None;
+        let mut session = None;
         while let Some(arg) = parser.next()? {
             match arg {
                 Arg::Long("hierarchy") | Arg::Short('H') => hierarchy = parser.value()?.parse()?,
                 Arg::Long("output") => output = Some(parser.value()?.parse()?),
+                Arg::Long("session") => parse_session_option(parser, &mut session)?,
                 Arg::Value(val) if algorithm.is_none() => algorithm = Some(val.parse()?),
                 _ => return handle_help(arg),
             }
@@ -54,6 +58,7 @@ impl Subcommand for CreatePrimary {
             hierarchy,
             algorithm: required(algorithm, "<ALGORITHM>")?,
             output,
+            session,
         })
     }
 }
@@ -142,7 +147,7 @@ impl DeviceCommand for CreatePrimary {
             outside_info: Tpm2bData::default(),
             creation_pcr: TpmlPcrSelection::default(),
         };
-        let sessions = session_from_args(&cmd, &handles, context.cli)?;
+        let sessions = session_from_uri(&cmd, &handles, self.session.as_ref())?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
@@ -152,6 +157,11 @@ impl DeviceCommand for CreatePrimary {
         let object_handle = resp.object_handle;
 
         context.track(object_handle)?;
-        context.finalize_object_output(device, object_handle, self.output.as_ref())
+        context.finalize_object_output(
+            device,
+            object_handle,
+            self.output.as_ref(),
+            self.session.as_ref(),
+        )
     }
 }

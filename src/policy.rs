@@ -9,7 +9,7 @@ use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while, take_while1},
-    character::complete::{char, space0},
+    character::complete::{anychar, char, space0},
     combinator::{map, map_res, opt, recognize},
     multi::{many0, many1, separated_list1},
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
@@ -52,6 +52,7 @@ pub enum Expression {
         key: Vec<u8>,
         alg: String,
     },
+    Password(String),
 }
 
 impl fmt::Display for Expression {
@@ -102,6 +103,7 @@ impl fmt::Display for Expression {
                     hex::encode(key)
                 )
             }
+            Expression::Password(password) => write!(f, "password://{password}"),
         }
     }
 }
@@ -402,6 +404,13 @@ fn session_uri(input: &str) -> IResult<&str, Expression> {
     preceded(tag("session://"), session_body)(input)
 }
 
+fn password_uri(input: &str) -> IResult<&str, Expression> {
+    map(
+        preceded(tag("password://"), recognize(many0(anychar))),
+        |s: &str| Expression::Password(s.to_string()),
+    )(input)
+}
+
 /// Parses any valid expression.
 fn parse_expression(input: &str) -> IResult<&str, Expression> {
     alt((
@@ -413,6 +422,7 @@ fn parse_expression(input: &str) -> IResult<&str, Expression> {
         data_uri,
         pcr_uri,
         session_uri,
+        password_uri,
     ))(input)
 }
 
@@ -444,7 +454,10 @@ pub fn parse(input: &str, mode: Parsing) -> Result<Expression, ParseError> {
         | (Parsing::Data, Expression::FilePath(_) | Expression::Data { .. })
         | (
             Parsing::Session,
-            Expression::Session { .. } | Expression::FilePath(_) | Expression::Data { .. },
+            Expression::Session { .. }
+            | Expression::FilePath(_)
+            | Expression::Data { .. }
+            | Expression::Password(_),
         ) => true,
         _ => false,
     };

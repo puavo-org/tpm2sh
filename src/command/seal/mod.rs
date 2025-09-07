@@ -3,14 +3,14 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, required, DeviceCommand, Subcommand},
+    cli::{handle_help, parse_session_option, required, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     crypto,
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::TpmKey,
     policy::Expression,
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
     util::build_to_vec,
 };
@@ -32,6 +32,7 @@ pub struct Seal {
     pub password: Option<String>,
     pub policy: Option<String>,
     pub output: Option<Uri>,
+    pub session: Option<Uri>,
 }
 
 impl Subcommand for Seal {
@@ -40,6 +41,7 @@ impl Subcommand for Seal {
     const ARGUMENTS: &'static str = include_str!("arguments.txt");
     const OPTIONS: &'static str = include_str!("options.txt");
     const SUMMARY: &'static str = include_str!("summary.txt");
+    const OPTION_SESSION: bool = true;
 
     fn parse(parser: &mut Parser) -> Result<Self, CliError> {
         let mut parent = None;
@@ -47,6 +49,7 @@ impl Subcommand for Seal {
         let mut password = None;
         let mut policy = None;
         let mut output = None;
+        let mut session = None;
         let mut positional_args = Vec::new();
 
         while let Some(arg) = parser.next()? {
@@ -54,6 +57,7 @@ impl Subcommand for Seal {
                 Arg::Long("password") => password = Some(parser.value()?.string()?),
                 Arg::Long("policy") => policy = Some(parser.value()?.string()?),
                 Arg::Long("output") => output = Some(parser.value()?.parse()?),
+                Arg::Long("session") => parse_session_option(parser, &mut session)?,
                 Arg::Value(val) => positional_args.push(val.parse()?),
                 _ => return handle_help(arg),
             }
@@ -71,6 +75,7 @@ impl Subcommand for Seal {
             password,
             policy,
             output,
+            session,
         })
     }
 }
@@ -125,7 +130,7 @@ impl DeviceCommand for Seal {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let handles = [parent_handle.into()];
-        let sessions = session_from_args(&create_cmd, &handles, context.cli)?;
+        let sessions = session_from_uri(&create_cmd, &handles, self.session.as_ref())?;
         let (_rc, resp, _) = device.execute(&create_cmd, &sessions)?;
 
         let create_resp = resp

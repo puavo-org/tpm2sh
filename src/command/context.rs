@@ -8,7 +8,7 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     policy::Expression,
-    session::session_from_args,
+    session::session_from_uri,
     uri::Uri,
     util::build_to_vec,
 };
@@ -155,12 +155,17 @@ impl<'a> Context<'a> {
     /// # Errors
     ///
     /// Returns a `CliError` if the handle is invalid or the delete operation fails.
-    pub fn delete(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<u32, CliError> {
+    pub fn delete(
+        &mut self,
+        device: &mut TpmDevice,
+        uri: &Uri,
+        session: Option<&Uri>,
+    ) -> Result<u32, CliError> {
         match uri.ast() {
             Expression::TpmHandle(handle) => {
                 let handle = *handle;
                 if handle >= TPM_RH_PERSISTENT_FIRST {
-                    self.delete_persistent(device, TpmPersistent(handle))?;
+                    self.delete_persistent(device, TpmPersistent(handle), session)?;
                 } else if handle >= TPM_RH_TRANSIENT_FIRST {
                     self.delete_transient(device, TpmTransient(handle))?;
                 } else {
@@ -186,6 +191,7 @@ impl<'a> Context<'a> {
         &mut self,
         device: &mut TpmDevice,
         handle: TpmPersistent,
+        session: Option<&Uri>,
     ) -> Result<(), CliError> {
         let auth_handle = TpmRh::Owner;
         let cmd = TpmEvictControlCommand {
@@ -194,7 +200,7 @@ impl<'a> Context<'a> {
             persistent_handle: handle,
         };
         let handles = [auth_handle as u32, handle.0];
-        let sessions = session_from_args(&cmd, &handles, self.cli)?;
+        let sessions = session_from_uri(&cmd, &handles, session)?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -237,6 +243,7 @@ impl<'a> Context<'a> {
         device: &mut TpmDevice,
         transient_handle: TpmTransient,
         persistent_handle: TpmPersistent,
+        session: Option<&Uri>,
     ) -> Result<(), CliError> {
         self.existence_invariant(transient_handle)?;
         let auth_handle = TpmRh::Owner;
@@ -246,7 +253,7 @@ impl<'a> Context<'a> {
             persistent_handle,
         };
         let handles = [auth_handle as u32, transient_handle.0];
-        let sessions = session_from_args(&cmd, &handles, self.cli)?;
+        let sessions = session_from_uri(&cmd, &handles, session)?;
         let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -324,11 +331,12 @@ impl<'a> Context<'a> {
         device: &mut TpmDevice,
         object_handle: TpmTransient,
         output_uri: Option<&Uri>,
+        session: Option<&Uri>,
     ) -> Result<(), CliError> {
         if let Some(uri) = output_uri {
             if let Expression::TpmHandle(handle) = uri.ast() {
                 let persistent_handle = TpmPersistent(*handle);
-                self.persist_transient(device, object_handle, persistent_handle)?;
+                self.persist_transient(device, object_handle, persistent_handle, session)?;
                 writeln!(self.writer, "tpm://{persistent_handle:#010x}")?;
                 return Ok(());
             }
