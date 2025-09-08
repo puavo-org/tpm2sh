@@ -12,6 +12,7 @@ use crate::{
     },
     device::TpmTransport,
     transport::{Endpoint, EndpointGuard, EndpointState, Transport},
+    util::{build_to_vec, TpmErrorKindExt},
 };
 use aes::Aes128;
 use cfb_mode::{Decryptor, Encryptor};
@@ -53,56 +54,13 @@ use tpm2_protocol::{
         TpmResponseBody, TpmStartAuthSessionCommand, TpmStartAuthSessionResponse,
         TpmTestParmsCommand, TpmTestParmsResponse, TpmUnsealCommand, TpmUnsealResponse,
     },
-    TpmBuffer, TpmBuild, TpmErrorKind, TpmParse, TpmSession, TpmTransient, TpmWriter,
-    TPM_MAX_COMMAND_SIZE,
+    TpmBuffer, TpmErrorKind, TpmParse, TpmSession, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 const TPM_HEADER_SIZE: usize = 10;
 const PCR_COUNT: usize = 24;
 
 type MockTpmResult = Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmRc>;
-
-/// Converts `TpmErrorKind` to `TpmRc`.
-trait TpmErrorKindExt {
-    fn to_tpm_rc(self) -> TpmRc;
-}
-
-/// The first approximation of mapping. This should really be revisited against
-/// TCG specifications some day.
-impl TpmErrorKindExt for TpmErrorKind {
-    fn to_tpm_rc(self) -> TpmRc {
-        let base = match self {
-            TpmErrorKind::AuthMissing => TpmRcBase::AuthMissing,
-            TpmErrorKind::InvalidMagic { .. } | TpmErrorKind::InvalidTag { .. } => {
-                TpmRcBase::BadTag
-            }
-            TpmErrorKind::BuildCapacity
-            | TpmErrorKind::ParseCapacity
-            | TpmErrorKind::InvalidValue
-            | TpmErrorKind::NotDiscriminant(..) => TpmRcBase::Value,
-            TpmErrorKind::BuildOverflow
-            | TpmErrorKind::ParseUnderflow
-            | TpmErrorKind::TrailingData => TpmRcBase::Size,
-            TpmErrorKind::Unreachable => TpmRcBase::Failure,
-        };
-        TpmRc::from(base)
-    }
-}
-
-/// A helper to build a `TpmBuild` type into a `Vec<u8>`.
-///
-/// # Errors
-///
-/// Returns a `TpmRc` if the object cannot be serialized.
-fn build_to_vec<T: TpmBuild>(obj: &T) -> Result<Vec<u8>, TpmRc> {
-    let mut buf = [0u8; TPM_MAX_COMMAND_SIZE];
-    let len = {
-        let mut writer = TpmWriter::new(&mut buf);
-        obj.build(&mut writer).map_err(TpmErrorKindExt::to_tpm_rc)?;
-        writer.len()
-    };
-    Ok(buf[..len].to_vec())
-}
 
 #[derive(Debug, Clone, Default)]
 struct MockSession {
@@ -121,7 +79,7 @@ impl MockTpmKey {
     /// Serializes the key to bytes for file storage.
     fn to_bytes(&self) -> Result<Vec<u8>, TpmRc> {
         let mut bytes = Vec::new();
-        let pub_bytes = build_to_vec(&self.public)?;
+        let pub_bytes = build_to_vec(&self.public).map_err(TpmErrorKindExt::to_tpm_rc)?;
         bytes.extend_from_slice(
             &u16::try_from(pub_bytes.len())
                 .map_err(|_| TpmRc::from(TpmRcBase::Memory))?
@@ -547,7 +505,7 @@ fn mocktpm_create_primary(
     let handle = tpm.next_transient_handle;
     tpm.next_transient_handle += 1;
 
-    let public_bytes = build_to_vec(&public)?;
+    let public_bytes = build_to_vec(&public).map_err(TpmErrorKindExt::to_tpm_rc)?;
     let seed_value = Sha256::digest(&public_bytes).to_vec();
 
     tpm.objects.insert(
@@ -870,7 +828,7 @@ fn mocktpm_import(
         integrity_key_bits,
     )?;
 
-    let sensitive_bytes = build_to_vec(&sensitive_struct)?;
+    let sensitive_bytes = build_to_vec(&sensitive_struct).map_err(TpmErrorKindExt::to_tpm_rc)?;
     let mut encrypted_sensitive_rewrap = sensitive_bytes;
     let cipher_rewrap = Encryptor::<Aes128>::new(sym_key_rewrap.as_slice().into(), &iv.into());
     cipher_rewrap.encrypt(&mut encrypted_sensitive_rewrap);

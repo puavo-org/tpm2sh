@@ -4,7 +4,7 @@
 
 //! This file contains cryptographic algorithms shared by tpm2sh and `MockTPM`.
 
-use crate::util;
+use crate::util::{self, TpmErrorKindExt};
 use aes::Aes128;
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
@@ -25,14 +25,10 @@ use rsa::{
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
-use tpm2_protocol::{
-    data::{
-        Tpm2bData, Tpm2bDigest, Tpm2bEccParameter, Tpm2bEncryptedSecret, Tpm2bPublicKeyRsa,
-        TpmAlgId, TpmEccCurve, TpmRc, TpmRcBase, TpmaObject, TpmsEccParms, TpmsEccPoint,
-        TpmsRsaParms, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject, TpmuPublicId,
-        TpmuPublicParms,
-    },
-    TpmErrorKind,
+use tpm2_protocol::data::{
+    Tpm2bData, Tpm2bDigest, Tpm2bEccParameter, Tpm2bEncryptedSecret, Tpm2bPublicKeyRsa, TpmAlgId,
+    TpmEccCurve, TpmRc, TpmRcBase, TpmaObject, TpmsEccParms, TpmsEccPoint, TpmsRsaParms,
+    TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDefObject, TpmuPublicId, TpmuPublicParms,
 };
 
 pub const ID_LOADABLE_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.23.133.10.1.3");
@@ -43,21 +39,6 @@ pub const UNCOMPRESSED_POINT_TAG: u8 = 0x04;
 pub const KDF_LABEL_DUPLICATE: &str = "DUPLICATE";
 pub const KDF_LABEL_INTEGRITY: &str = "INTEGRITY";
 pub const KDF_LABEL_STORAGE: &str = "STORAGE";
-
-/// Converts `TpmErrorKind` to `TpmRc`.
-trait TpmErrorKindExt {
-    fn to_tpm_rc(self) -> TpmRc;
-}
-
-impl TpmErrorKindExt for TpmErrorKind {
-    fn to_tpm_rc(self) -> TpmRc {
-        let base = match self {
-            TpmErrorKind::BuildCapacity | TpmErrorKind::ParseCapacity => TpmRcBase::Size,
-            _ => TpmRcBase::Value,
-        };
-        TpmRc::from(base)
-    }
-}
 
 /// Computes an HMAC digest over a series of data chunks.
 ///

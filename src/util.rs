@@ -5,7 +5,8 @@
 use crate::error::ProtocolError;
 use anyhow::{Context, Result};
 use tpm2_protocol::{
-    data::TpmRc, TpmBuild, TpmErrorKind, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    data::{TpmRc, TpmRcBase},
+    TpmBuild, TpmErrorKind, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 /// Parses a hex string (with or without a "0x" prefix) into a u32.
@@ -65,4 +66,29 @@ pub fn build_to_vec<T: TpmBuild>(obj: &T) -> Result<Vec<u8>, TpmErrorKind> {
         writer.len()
     };
     Ok(buf[..len].to_vec())
+}
+
+/// Converts `TpmErrorKind` to `TpmRc`.
+pub trait TpmErrorKindExt {
+    fn to_tpm_rc(self) -> TpmRc;
+}
+
+impl TpmErrorKindExt for TpmErrorKind {
+    fn to_tpm_rc(self) -> TpmRc {
+        let base = match self {
+            TpmErrorKind::AuthMissing => TpmRcBase::AuthMissing,
+            TpmErrorKind::InvalidMagic { .. } | TpmErrorKind::InvalidTag { .. } => {
+                TpmRcBase::BadTag
+            }
+            TpmErrorKind::BuildCapacity
+            | TpmErrorKind::ParseCapacity
+            | TpmErrorKind::InvalidValue
+            | TpmErrorKind::NotDiscriminant(..) => TpmRcBase::Value,
+            TpmErrorKind::BuildOverflow
+            | TpmErrorKind::ParseUnderflow
+            | TpmErrorKind::TrailingData => TpmRcBase::Size,
+            TpmErrorKind::Unreachable => TpmRcBase::Failure,
+        };
+        TpmRc::from(base)
+    }
 }
