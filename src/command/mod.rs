@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
+use crate::key::Tpm2shAlgId;
 use thiserror::Error;
 use tpm2_protocol::{TpmErrorKind, TpmTransient};
 
@@ -22,7 +23,6 @@ pub mod reset_lock;
 pub mod seal;
 #[path = "start-session/mod.rs"]
 pub mod start_session;
-pub mod unseal;
 
 #[derive(Debug, Error)]
 pub enum CommandError {
@@ -44,8 +44,11 @@ pub enum CommandError {
     #[error("Parent key is not a valid type: {reason}")]
     InvalidParentKeyType { reason: &'static str },
 
-    #[error("Unsupported algorithm: '{0}'")]
-    UnsupportedAlgorithm(String),
+    #[error("Invalid algorithm: {alg}")]
+    InvalidAlgorithm { alg: Tpm2shAlgId },
+
+    #[error("Invalid algorithm name: '{0}'")]
+    InvalidAlgorithmName(String),
 
     #[error("Invalid URI scheme: expected '{expected}', found '{actual}'")]
     InvalidUriScheme { expected: String, actual: String },

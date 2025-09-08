@@ -7,7 +7,6 @@ use cli::{
     command::{
         context::Context, create_primary::CreatePrimary, list::List, load::Load,
         pcr_event::PcrEvent, policy::Policy, seal::Seal, start_session::StartSession,
-        unseal::Unseal,
     },
     device::TpmDevice,
     error::{CliError, ParseError},
@@ -160,6 +159,7 @@ fn test_subcommand_load_import(test_context: TestFixture) {
             .unwrap(),
         output: None,
         session: None,
+        unseal: false,
     });
     let mut load_output_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut load_output_buf);
@@ -295,7 +295,6 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
     let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
     seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
-    eprintln!("{sealed_key_pem}");
 
     let key_dir = tempdir().unwrap();
     let sealed_key_path = key_dir.path().join("sealed.key");
@@ -304,10 +303,12 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
         .parse()
         .unwrap();
 
-    let unseal_cmd = Commands::Unseal(Unseal {
-        uri: sealed_key_uri,
-        parent: Some(parent_uri),
+    let unseal_cmd = Commands::Load(Load {
+        parent: parent_uri,
+        input: sealed_key_uri,
+        output: None,
         session: Some(format!("password://{password}").parse().unwrap()),
+        unseal: true,
     });
 
     let mut unsealed_data_buf = Vec::new();
@@ -392,10 +393,12 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         .unwrap()
         .execute(&policy_pcr_cmd, &sessions_for_policy_pcr)?;
 
-    let unseal_cmd = Commands::Unseal(Unseal {
-        uri: sealed_key_uri,
-        parent: Some(parent_uri.clone()),
+    let unseal_cmd = Commands::Load(Load {
+        parent: parent_uri.clone(),
+        input: sealed_key_uri,
+        output: None,
         session: Some(session_uri),
+        unseal: true,
     });
 
     let mut unsealed_data_buf = Vec::new();

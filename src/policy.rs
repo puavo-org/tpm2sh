@@ -8,7 +8,7 @@ use crate::{
     command::CommandError,
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    key::tpm_alg_id_from_str,
+    key::{tpm_alg_id_from_str, Tpm2shAlgId},
     pcr::{pcr_composite_digest, pcr_get_count},
     session::{session_from_uri, SessionType},
     uri::pcr_selection_to_list,
@@ -27,7 +27,8 @@ use rand::RngCore;
 use std::{fmt, path::Path};
 use tpm2_protocol::{
     data::{
-        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRh, TpmlDigest, TpmtSymDefObject,
+        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRh, TpmlDigest,
+        TpmtSymDefObject,
     },
     message::{
         TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
@@ -629,10 +630,8 @@ pub(crate) fn start_trial_session(
     session_type: SessionType,
     hash_alg: TpmAlgId,
 ) -> Result<TpmSession, CliError> {
-    let digest_len = tpm_hash_size(&hash_alg).ok_or_else(|| {
-        CommandError::UnsupportedAlgorithm(format!(
-            "Unsupported hash algorithm for session: {hash_alg}"
-        ))
+    let digest_len = tpm_hash_size(&hash_alg).ok_or(CommandError::InvalidAlgorithm {
+        alg: Tpm2shAlgId(hash_alg),
     })?;
     let mut nonce_bytes = vec![0; digest_len];
     rand::thread_rng().fill_bytes(&mut nonce_bytes);
@@ -700,8 +699,7 @@ pub fn fill_pcr_digests(ast: &mut Expression, device: &mut TpmDevice) -> Result<
                         .ok_or(CommandError::InvalidPcrSelection(format!(
                             "invalid PCR bank format in selection: '{selection}'"
                         )))?;
-                let alg_id =
-                    tpm_alg_id_from_str(alg_str).map_err(CommandError::UnsupportedAlgorithm)?;
+                let alg_id = tpm_alg_id_from_str(alg_str)?;
                 let composite_digest = pcr_composite_digest(&pcr_values, alg_id)?;
                 *digest = Some(hex::encode(composite_digest));
             }

@@ -1,2 +1,0 @@
-<URI>
-'tpm://', 'file://' or 'data://'

@@ -9,7 +9,7 @@ use crate::{
     session::AuthSession,
 };
 
-use std::{cmp::Ordering, str::FromStr};
+use std::{cmp::Ordering, fmt, str::FromStr};
 
 use p256::SecretKey;
 use pkcs8::{
@@ -58,7 +58,8 @@ impl FromStr for Alg {
                 let key_bits: u16 = key_bits_str
                     .parse()
                     .map_err(|_| format!("Invalid RSA key bits value: '{key_bits_str}'"))?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                    .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Rsa,
@@ -68,7 +69,8 @@ impl FromStr for Alg {
             }
             ["ecc", curve_id_str, name_alg_str] => {
                 let curve_id = tpm_ecc_curve_from_str(curve_id_str)?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                    .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::Ecc,
@@ -77,7 +79,8 @@ impl FromStr for Alg {
                 })
             }
             ["keyedhash", name_alg_str] => {
-                let name_alg = tpm_alg_id_from_str(name_alg_str)?;
+                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                    .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
                     object_type: TpmAlgId::KeyedHash,
@@ -102,12 +105,38 @@ impl PartialOrd for Alg {
     }
 }
 
+/// A newtype wrapper to provide a project-specific `Display` implementation for `TpmAlgId`.
+#[derive(Debug, Clone, Copy)]
+pub struct Tpm2shAlgId(pub TpmAlgId);
+
+impl fmt::Display for Tpm2shAlgId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self.0 {
+            TpmAlgId::Sha1 => "sha1",
+            TpmAlgId::Sha256 => "sha256",
+            TpmAlgId::Sha384 => "sha384",
+            TpmAlgId::Sha512 => "sha512",
+            TpmAlgId::Rsa => "rsa",
+            TpmAlgId::Hmac => "hmac",
+            TpmAlgId::Aes => "aes",
+            TpmAlgId::KeyedHash => "keyedhash",
+            TpmAlgId::Xor => "xor",
+            TpmAlgId::Null => "null",
+            TpmAlgId::Sm3_256 => "sm3_256",
+            TpmAlgId::Sm4 => "sm4",
+            TpmAlgId::Ecc => "ecc",
+            _ => "unknown",
+        };
+        write!(f, "{s}")
+    }
+}
+
 /// Converts a user-friendly string to a `TpmAlgId`.
 ///
 /// # Errors
 ///
-/// If the algorithm tag is unknown, `Err::String` will be returned.
-pub fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, String> {
+/// If the algorithm tag is unknown, `Err::CommandError` will be returned.
+pub fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, CommandError> {
     match s {
         "rsa" => Ok(TpmAlgId::Rsa),
         "sha1" => Ok(TpmAlgId::Sha1),
@@ -122,28 +151,27 @@ pub fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, String> {
         "sm3_256" => Ok(TpmAlgId::Sm3_256),
         "sm4" => Ok(TpmAlgId::Sm4),
         "ecc" => Ok(TpmAlgId::Ecc),
-        _ => Err(format!("Unsupported algorithm '{s}'")),
+        _ => Err(CommandError::InvalidAlgorithmName(s.to_string())),
     }
 }
 
-/// Converts a `TpmAlgId` to its user-friendly string representation.
-#[must_use]
-pub fn tpm_alg_id_to_str(alg: TpmAlgId) -> &'static str {
-    match alg {
-        TpmAlgId::Sha1 => "sha1",
-        TpmAlgId::Sha256 => "sha256",
-        TpmAlgId::Sha384 => "sha384",
-        TpmAlgId::Sha512 => "sha512",
-        TpmAlgId::Rsa => "rsa",
-        TpmAlgId::Hmac => "hmac",
-        TpmAlgId::Aes => "aes",
-        TpmAlgId::KeyedHash => "keyedhash",
-        TpmAlgId::Xor => "xor",
-        TpmAlgId::Null => "null",
-        TpmAlgId::Sm3_256 => "sm3_256",
-        TpmAlgId::Sm4 => "sm4",
-        TpmAlgId::Ecc => "ecc",
-        _ => "unknown",
+/// Converts a `TpmEccCurve` to its user-friendly string representation.
+pub(crate) fn tpm_ecc_curve_to_str(curve: TpmEccCurve) -> &'static str {
+    match curve {
+        TpmEccCurve::NistP192 => "nist-p192",
+        TpmEccCurve::NistP224 => "nist-p224",
+        TpmEccCurve::NistP256 => "nist-p256",
+        TpmEccCurve::NistP384 => "nist-p384",
+        TpmEccCurve::NistP521 => "nist-p521",
+        TpmEccCurve::BnP638 => "bn-p638",
+        TpmEccCurve::Sm2P256 => "sm2-p256",
+        TpmEccCurve::BpP256R1 => "bp-p256-r1",
+        TpmEccCurve::BpP384R1 => "bp-p384-r1",
+        TpmEccCurve::BpP512R1 => "bp-p512-r1",
+        TpmEccCurve::BnP256 => "bn-p256",
+        TpmEccCurve::Curve448 => "curve-448",
+        TpmEccCurve::Curve25519 => "curve-25519",
+        TpmEccCurve::None => "none",
     }
 }
 
@@ -165,26 +193,6 @@ pub(crate) fn tpm_ecc_curve_from_str(s: &str) -> Result<TpmEccCurve, String> {
         "curve-25519" => Ok(TpmEccCurve::Curve25519),
         "none" => Ok(TpmEccCurve::None),
         _ => Err(format!("unknown '{s}'")),
-    }
-}
-
-/// Converts a `TpmEccCurve` to its user-friendly string representation.
-pub(crate) fn tpm_ecc_curve_to_str(curve: TpmEccCurve) -> &'static str {
-    match curve {
-        TpmEccCurve::NistP192 => "nist-p192",
-        TpmEccCurve::NistP224 => "nist-p224",
-        TpmEccCurve::NistP256 => "nist-p256",
-        TpmEccCurve::NistP384 => "nist-p384",
-        TpmEccCurve::NistP521 => "nist-p521",
-        TpmEccCurve::BnP638 => "bn-p638",
-        TpmEccCurve::Sm2P256 => "sm2-p256",
-        TpmEccCurve::BpP256R1 => "bp-p256-r1",
-        TpmEccCurve::BpP384R1 => "bp-p384-r1",
-        TpmEccCurve::BpP512R1 => "bp-p512-r1",
-        TpmEccCurve::BnP256 => "bn-p256",
-        TpmEccCurve::Curve448 => "curve-448",
-        TpmEccCurve::Curve25519 => "curve-25519",
-        TpmEccCurve::None => "none",
     }
 }
 
@@ -361,9 +369,9 @@ pub fn create_auth(
         TpmAlgId::Sha384 => Sha384::digest(&cp_hash_payload).to_vec(),
         TpmAlgId::Sha512 => Sha512::digest(&cp_hash_payload).to_vec(),
         alg => {
-            return Err(CommandError::UnsupportedAlgorithm(format!(
-                "unsupported session hash algorithm: {alg}"
-            ))
+            return Err(CommandError::InvalidAlgorithm {
+                alg: Tpm2shAlgId(alg),
+            }
             .into())
         }
     };

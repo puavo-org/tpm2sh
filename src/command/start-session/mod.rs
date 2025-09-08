@@ -7,6 +7,7 @@ use crate::{
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
+    key::Tpm2shAlgId,
     session::{AuthSession, SessionType},
 };
 use lexopt::{Arg, Parser, ValueExt};
@@ -55,8 +56,8 @@ impl DeviceCommand for StartSession {
     /// Returns a `CliError` if the execution fails
     fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
         let auth_hash = TpmAlgId::Sha256;
-        let digest_len = tpm_hash_size(&auth_hash).ok_or_else(|| {
-            CommandError::UnsupportedAlgorithm("Unsupported hash algorithm".to_string())
+        let digest_len = tpm_hash_size(&auth_hash).ok_or(CommandError::InvalidAlgorithm {
+            alg: Tpm2shAlgId(auth_hash),
         })?;
         let mut nonce_bytes = vec![0; digest_len];
         thread_rng().fill_bytes(&mut nonce_bytes);

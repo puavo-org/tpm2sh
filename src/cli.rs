@@ -6,8 +6,7 @@ use crate::{
     command::{
         context::Context, convert::Convert, create_primary::CreatePrimary, delete::Delete,
         list::List, load::Load, pcr_event::PcrEvent, policy::Policy, print_error::PrintError,
-        reset_lock::ResetLock, seal::Seal, start_session::StartSession, unseal::Unseal,
-        CommandError,
+        reset_lock::ResetLock, seal::Seal, start_session::StartSession, CommandError,
     },
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
@@ -222,7 +221,6 @@ subcommand_registry!(
         (ResetLock, "reset-lock"),
         (Seal, "seal"),
         (StartSession, "start-session"),
-        (Unseal, "unseal"),
     ],
 );
 

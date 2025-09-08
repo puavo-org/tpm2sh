@@ -5,7 +5,7 @@
 use crate::{
     cli::LogFormat,
     error::ParseError,
-    key::{tpm_alg_id_to_str, tpm_ecc_curve_to_str},
+    key::{tpm_ecc_curve_to_str, Tpm2shAlgId},
     print::TpmPrint,
     TEARDOWN,
 };
@@ -272,7 +272,7 @@ impl TpmDevice {
                         for &name_alg in &name_algs {
                             supported_algs.push((
                                 TpmAlgId::Rsa,
-                                format!("rsa:{}:{}", key_bits, tpm_alg_id_to_str(name_alg)),
+                                format!("rsa:{}:{}", key_bits, Tpm2shAlgId(name_alg)),
                             ));
                         }
                     }
@@ -300,7 +300,7 @@ impl TpmDevice {
                         format!(
                             "ecc:{}:{}",
                             tpm_ecc_curve_to_str(curve_id),
-                            tpm_alg_id_to_str(name_alg)
+                            Tpm2shAlgId(name_alg)
                         ),
                     ));
                 }
@@ -311,7 +311,7 @@ impl TpmDevice {
             for &name_alg in &name_algs {
                 supported_algs.push((
                     TpmAlgId::KeyedHash,
-                    format!("keyedhash:{}", tpm_alg_id_to_str(name_alg)),
+                    format!("keyedhash:{}", Tpm2shAlgId(name_alg)),
                 ));
             }
         }

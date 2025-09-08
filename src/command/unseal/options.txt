@@ -1,2 +1,0 @@
---password <PASSWORD>
-password for the sealed object

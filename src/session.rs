@@ -5,7 +5,7 @@
 use crate::{
     command::CommandError,
     error::{CliError, ParseError},
-    key::{create_auth, tpm_alg_id_from_str, tpm_alg_id_to_str},
+    key::{create_auth, tpm_alg_id_from_str, Tpm2shAlgId},
     policy::{self, Expression, Parsing},
     uri::Uri,
     util::build_to_vec,
@@ -76,7 +76,8 @@ impl AuthSession {
                 attributes: TpmaSession::from_bits_truncate(*attrs),
                 hmac_key: Tpm2bAuth::try_from(key.as_slice())
                     .map_err(|e| ParseError::Custom(e.to_string()))?,
-                auth_hash: tpm_alg_id_from_str(alg).map_err(ParseError::Custom)?,
+                auth_hash: tpm_alg_id_from_str(alg)
+                    .map_err(|e| ParseError::Custom(e.to_string()))?,
             })
         } else {
             Err(ParseError::Custom(
@@ -95,7 +96,7 @@ impl fmt::Display for AuthSession {
             hex::encode(self.nonce_tpm),
             self.attributes.bits(),
             hex::encode(self.hmac_key),
-            tpm_alg_id_to_str(self.auth_hash)
+            Tpm2shAlgId(self.auth_hash)
         )
     }
 }
@@ -145,11 +146,10 @@ pub fn session_from_uri<C: TpmHeader>(
             };
 
             let params = build_to_vec(command)?;
-            let nonce_size = tpm_hash_size(&session.auth_hash).ok_or_else(|| {
-                CommandError::UnsupportedAlgorithm(format!(
-                    "'{}' is unknown algorithm",
-                    session.auth_hash
-                ))
+            let nonce_size = tpm_hash_size(&session.auth_hash).ok_or({
+                CommandError::InvalidAlgorithm {
+                    alg: Tpm2shAlgId(session.auth_hash),
+                }
             })?;
             let mut nonce_bytes = vec![0; nonce_size];
             rand::thread_rng().fill_bytes(&mut nonce_bytes);
