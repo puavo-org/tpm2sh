@@ -213,7 +213,7 @@ fn is_printable_utf8(data: &[u8]) -> bool {
 
 impl Load {
     /// Finishes the command by loading the object and optionally unsealing.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, clippy::large_types_passed_by_value)]
     fn run_load(
         &self,
         device: &mut TpmDevice,

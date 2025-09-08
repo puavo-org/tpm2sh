@@ -265,15 +265,13 @@ pub fn parse_parent_option(
 ///
 /// # Errors
 ///
-/// Returns a `CliError` if the option is duplicated or its value is invalid.
+/// Returns a `lexopt::Error` if the option is duplicated or its value is invalid.
 pub fn parse_session_option(
     parser: &mut Parser,
     session: &mut Option<Uri>,
-) -> Result<(), CliError> {
+) -> Result<(), lexopt::Error> {
     if session.is_some() {
-        return Err(CliError::Parse(ParseError::Custom(
-            "the '--session' option was provided more than once".to_string(),
-        )));
+        return Err("the '--session' option was provided more than once".into());
     }
     *session = Some(parser.value()?.parse()?);
     Ok(())
