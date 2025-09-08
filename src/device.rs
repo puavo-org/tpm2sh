@@ -12,13 +12,9 @@ use std::{
     collections::HashSet,
     fmt::Debug,
     io::{self, IsTerminal, Read, Write},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, RecvTimeoutError},
-        Arc,
-    },
+    sync::{atomic::Ordering, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use log::trace;
@@ -29,8 +25,8 @@ use tpm2_protocol::{
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmResponseBody,
-        TpmTestParmsCommand,
+        TpmFlushContextResponse, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
+        TpmResponseBody, TpmTestParmsCommand,
     },
     TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -45,6 +41,7 @@ pub enum TpmDeviceError {
     ResponseUnderflow,
     Tpm(TpmErrorKind),
     TpmRc(TpmRc),
+    ThreadPanic,
 }
 
 impl std::error::Error for TpmDeviceError {}
@@ -58,6 +55,7 @@ impl std::fmt::Display for TpmDeviceError {
             Self::ResponseUnderflow => write!(f, "response underflow"),
             Self::Tpm(err) => write!(f, "TPM: {err}"),
             Self::TpmRc(rc) => write!(f, "TPM RC: {rc}"),
+            Self::ThreadPanic => write!(f, "background I/O thread panicked"),
         }
     }
 }
@@ -84,6 +82,22 @@ pub trait TpmTransport: Read + Write + Send + Debug {}
 
 /// Blanket implementation to automatically apply `TpmTransport` to all valid types.
 impl<T: Read + Write + Send + Debug> TpmTransport for T {}
+
+#[derive(Debug)]
+struct EmptyTransport;
+impl Read for EmptyTransport {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Ok(0)
+    }
+}
+impl Write for EmptyTransport {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub struct TpmDevice {
@@ -150,38 +164,15 @@ impl TpmDevice {
         };
         let command_bytes = &command_buf[..len];
 
-        let (tx, rx) = mpsc::channel::<()>();
-        let spinner_started = Arc::new(AtomicBool::new(false));
-        if std::io::stderr().is_terminal() && C::COMMAND != TpmCc::FlushContext {
-            let spinner_started = spinner_started.clone();
-            thread::spawn(move || {
-                if let Err(RecvTimeoutError::Timeout) = rx.recv_timeout(Duration::from_secs(1)) {
-                    spinner_started.store(true, Ordering::Relaxed);
-                    let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-                    let message = "Waiting for TPM...";
-                    let mut stderr = io::stderr();
-
-                    let _ = write!(stderr, "\x1B[?25l");
-                    let _ = stderr.flush();
-
-                    let mut i = 0;
-                    while !TEARDOWN.load(Ordering::Relaxed)
-                        && rx.recv_timeout(Duration::from_millis(100)).is_err()
-                    {
-                        let frame = spinner_chars[i % spinner_chars.len()];
-                        let _ = write!(stderr, "\r\x1B[1m\x1B[36m{frame} {message}\x1B[0m");
-                        let _ = stderr.flush();
-                        i += 1;
-                    }
-                }
-            });
+        if !std::io::stderr().is_terminal() || C::COMMAND == TpmCc::FlushContext {
+            if let LogFormat::Plain = self.log_format {
+                trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
+            }
+            self.transport.write_all(command_bytes)?;
+            self.transport.flush()?;
+        } else {
+            return self.execute_interactive(command_bytes, C::COMMAND);
         }
-
-        if let LogFormat::Plain = self.log_format {
-            trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
-        }
-        self.transport.write_all(command_bytes)?;
-        self.transport.flush()?;
 
         let mut header = [0u8; 10];
         self.transport.read_exact(&mut header)?;
@@ -192,7 +183,6 @@ impl TpmDevice {
 
         let size = u32::from_be_bytes(size_bytes) as usize;
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
-            drop(tx);
             if size < header.len() {
                 return Err(TpmDeviceError::ResponseUnderflow);
             }
@@ -203,38 +193,116 @@ impl TpmDevice {
         resp_buf.resize(size, 0);
         self.transport.read_exact(&mut resp_buf[header.len()..])?;
 
-        drop(tx);
-
-        if spinner_started.load(Ordering::Relaxed) && !TEARDOWN.load(Ordering::Relaxed) {
-            let mut stderr = io::stderr();
-            let final_message = "✔ TPM operation complete.";
-            let _ = write!(stderr, "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h");
-            let _ = stderr.flush();
-        }
-
         if let LogFormat::Plain = self.log_format {
             trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
         }
+        self.parse_response(&resp_buf, C::COMMAND)
+    }
 
-        let result = tpm_parse_response(C::COMMAND, &resp_buf)?;
-        match &result {
-            Ok((response, _)) => {
-                if let LogFormat::Pretty = self.log_format {
+    fn parse_response(
+        &self,
+        resp_buf: &[u8],
+        cc: TpmCc,
+    ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError> {
+        let result = tpm_parse_response(cc, resp_buf)?;
+        if let LogFormat::Pretty = self.log_format {
+            match &result {
+                Ok((response, _)) => {
                     trace!(target: "cli::device", "Response");
                     response.print("", 1);
                 }
-            }
-            Err(_) => {
-                if let LogFormat::Pretty = self.log_format {
-                    trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
+                Err(_) => {
+                    trace!(target: "cli::device", "Response: {}", hex::encode(resp_buf));
                 }
             }
         }
+        result.map_err(TpmDeviceError::TpmRc)
+    }
 
-        match result {
-            Ok((response, auth)) => Ok((response, auth)),
-            Err(rc) => Err(TpmDeviceError::TpmRc(rc)),
+    fn execute_interactive(
+        &mut self,
+        command_bytes: &[u8],
+        cc: TpmCc,
+    ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError> {
+        let (io_tx, io_rx) = mpsc::channel();
+        let mut transport = std::mem::replace(&mut self.transport, Box::new(EmptyTransport));
+        let command_bytes_owned = command_bytes.to_vec();
+
+        thread::spawn(move || {
+            let res = (|| -> Result<Vec<u8>, TpmDeviceError> {
+                transport.write_all(&command_bytes_owned)?;
+                transport.flush()?;
+
+                let mut header = [0u8; 10];
+                transport.read_exact(&mut header)?;
+
+                let size_bytes: [u8; 4] = header[2..6].try_into().unwrap();
+                let size = u32::from_be_bytes(size_bytes) as usize;
+                if size < header.len() {
+                    return Err(TpmDeviceError::ResponseUnderflow);
+                }
+                if size > TPM_MAX_COMMAND_SIZE {
+                    return Err(TpmDeviceError::ResponseOverflow);
+                }
+
+                let mut resp_buf = header.to_vec();
+                resp_buf.resize(size, 0);
+                transport.read_exact(&mut resp_buf[header.len()..])?;
+                Ok(resp_buf)
+            })();
+            let _ = io_tx.send((res, transport));
+        });
+
+        let (spinner_tx, spinner_rx) = mpsc::channel();
+        thread::spawn(move || {
+            while spinner_tx.send(()).is_ok() {
+                thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        let start_time = Instant::now();
+        let mut spinner_active = false;
+        let stderr = io::stderr();
+        let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let mut i = 0;
+
+        loop {
+            if TEARDOWN.load(Ordering::Relaxed) {
+                break;
+            }
+            match io_rx.try_recv() {
+                Ok((io_result, transport_back)) => {
+                    self.transport = transport_back;
+                    if spinner_active {
+                        let final_message = "✔ TPM operation complete.";
+                        let _ = write!(
+                            stderr.lock(),
+                            "\r\x1B[1m\x1B[32m{final_message}\x1B[0m\n\x1B[?25h"
+                        );
+                    }
+                    return self.parse_response(&io_result?, cc);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => return Err(TpmDeviceError::ThreadPanic),
+                Err(mpsc::TryRecvError::Empty) => {
+                    if !spinner_active && start_time.elapsed() > Duration::from_secs(1) {
+                        spinner_active = true;
+                        let _ = write!(stderr.lock(), "\x1B[?25l");
+                    }
+                    if spinner_active {
+                        let frame = spinner_chars[i % spinner_chars.len()];
+                        let message = "Waiting for TPM...";
+                        let _ = write!(stderr.lock(), "\r\x1B[1m\x1B[36m{frame} {message}\x1B[0m");
+                        let _ = stderr.lock().flush();
+                        i += 1;
+                    }
+                    let _ = spinner_rx.recv_timeout(Duration::from_millis(100));
+                }
+            }
         }
+        Ok((
+            TpmResponseBody::FlushContext(TpmFlushContextResponse {}),
+            TpmAuthResponses::default(),
+        ))
     }
 
     /// Retrieves all supported algorithms from the TPM by probing its capabilities.
