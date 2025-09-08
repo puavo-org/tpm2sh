@@ -7,6 +7,7 @@
 use crate::{
     crypto::crypto_hmac,
     device::{TpmDevice, TpmDeviceError},
+    pcr::{self, PcrError},
     util::build_to_vec,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -24,16 +25,14 @@ use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::{fmt, ops::Deref, path::Path, str::FromStr};
 use tpm2_protocol::{
     data::{
-        Tpm2bAuth, Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCap, TpmCc, TpmRc,
-        TpmRh, TpmSe, TpmaSession, TpmlDigest, TpmlPcrSelection, TpmsAuthCommand, TpmsPcrSelection,
-        TpmtSymDefObject, TpmuCapabilities, TPM_PCR_SELECT_MAX,
+        Tpm2bAuth, Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRc, TpmRh,
+        TpmSe, TpmaSession, TpmlDigest, TpmsAuthCommand, TpmtSymDefObject,
     },
     message::{
-        TpmFlushContextCommand, TpmHeader, TpmPcrReadCommand, TpmPolicyGetDigestCommand,
-        TpmPolicyOrCommand, TpmPolicyPcrCommand, TpmPolicySecretCommand,
-        TpmStartAuthSessionCommand,
+        TpmFlushContextCommand, TpmHeader, TpmPolicyGetDigestCommand, TpmPolicyOrCommand,
+        TpmPolicyPcrCommand, TpmPolicySecretCommand, TpmStartAuthSessionCommand,
     },
-    tpm_hash_size, TpmBuffer, TpmErrorKind, TpmSession,
+    tpm_hash_size, TpmErrorKind, TpmSession,
 };
 
 #[derive(Debug)]
@@ -41,11 +40,10 @@ pub enum PolicyError {
     Device(TpmDeviceError),
     InvalidAlgorithm(TpmAlgId),
     InvalidAlgorithmName(String),
-    InvalidCapability,
-    InvalidPcrSelection(String),
     InvalidExpression(String),
     InvalidValue(String),
     Io(std::io::Error),
+    Pcr(PcrError),
     Tpm(TpmErrorKind),
     TpmRc(TpmRc),
 }
@@ -56,11 +54,10 @@ impl fmt::Display for PolicyError {
             Self::Device(e) => write!(f, "device: {e}"),
             Self::InvalidAlgorithm(alg) => write!(f, "invalid algorithm: {alg:?}"),
             Self::InvalidAlgorithmName(name) => write!(f, "invalid algorithm name: '{name}'"),
-            Self::InvalidPcrSelection(s) => write!(f, "invalid PCR selection: {s}"),
-            Self::InvalidCapability => write!(f, "invalid capability"),
             Self::InvalidExpression(s) => write!(f, "invalid expression: {s}"),
             Self::InvalidValue(s) => write!(f, "invalid value: {s}"),
             Self::Io(s) => write!(f, "I/O: {s}"),
+            Self::Pcr(e) => write!(f, "pcr: {e}"),
             Self::Tpm(err) => write!(f, "TPM: {err}"),
             Self::TpmRc(rc) => write!(f, "TPM RC: {rc}"),
         }
@@ -68,6 +65,12 @@ impl fmt::Display for PolicyError {
 }
 
 impl std::error::Error for PolicyError {}
+
+impl From<PcrError> for PolicyError {
+    fn from(err: PcrError) -> Self {
+        Self::Pcr(err)
+    }
+}
 
 impl From<hex::FromHexError> for PolicyError {
     fn from(err: hex::FromHexError) -> Self {
@@ -115,14 +118,6 @@ impl From<TpmDeviceError> for PolicyError {
     fn from(err: TpmDeviceError) -> Self {
         Self::Device(err)
     }
-}
-
-/// Represents the state of a single PCR register.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pcr {
-    pub bank: TpmAlgId,
-    pub index: u32,
-    pub value: Vec<u8>,
 }
 
 /// The Abstract Syntax Tree (AST) for the unified policy language.
@@ -597,15 +592,13 @@ pub fn parse(input: &str, mode: Parsing) -> Result<Expression, PolicyError> {
 }
 
 pub struct PolicyExecutor<'a> {
-    pcr_count: usize,
     device: &'a mut TpmDevice,
     session_hash_alg: TpmAlgId,
 }
 
 impl<'a> PolicyExecutor<'a> {
-    pub fn new(pcr_count: usize, device: &'a mut TpmDevice, session_hash_alg: TpmAlgId) -> Self {
+    pub fn new(device: &'a mut TpmDevice, session_hash_alg: TpmAlgId) -> Self {
         Self {
-            pcr_count,
             device,
             session_hash_alg,
         }
@@ -652,15 +645,18 @@ impl<'a> PolicyExecutor<'a> {
         digest: Option<&String>,
         _count: Option<&u32>,
     ) -> Result<(), PolicyError> {
+        let banks = pcr::pcr_get_bank_list(self.device)?;
+        let selections = pcr::pcr_selection_vec_from_str(selection_str)?;
+
         let pcr_digest_bytes = if let Some(digest_hex) = digest {
             hex::decode(digest_hex)?
         } else {
-            let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
-            let pcr_values = read(self.device, &pcr_selection_in)?;
-            pcr_composite_digest(&pcr_values, self.session_hash_alg)?
+            let pcr_selection_in = pcr::pcr_selection_vec_to_tpml(&selections, &banks)?;
+            let pcr_values = pcr::read(self.device, &pcr_selection_in)?;
+            pcr::pcr_composite_digest(&pcr_values, self.session_hash_alg)?
         };
 
-        let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;
+        let pcr_selection = pcr::pcr_selection_vec_to_tpml(&selections, &banks)?;
         let pcr_digest = Tpm2bDigest::try_from(pcr_digest_bytes.as_slice())?;
 
         let cmd = TpmPolicyPcrCommand {
@@ -787,17 +783,18 @@ pub fn fill_pcr_digests(ast: &mut Expression, device: &mut TpmDevice) -> Result<
             selection, digest, ..
         } => {
             if digest.is_none() {
-                let pcr_count = pcr_get_count(device)?;
-                let pcr_selection_in = pcr_selection_to_list(selection, pcr_count)?;
-                let pcr_values = read(device, &pcr_selection_in)?;
+                let banks = pcr::pcr_get_bank_list(device)?;
+                let selections = pcr::pcr_selection_vec_from_str(selection)?;
+                let pcr_selection_in = pcr::pcr_selection_vec_to_tpml(&selections, &banks)?;
+                let pcr_values = pcr::read(device, &pcr_selection_in)?;
                 let (alg_str, _) =
                     selection
                         .split_once(':')
-                        .ok_or(PolicyError::InvalidPcrSelection(format!(
+                        .ok_or(PcrError::InvalidPcrSelection(format!(
                             "invalid PCR bank format in selection: '{selection}'"
                         )))?;
                 let alg_id = alg_from_str(alg_str)?;
-                let composite_digest = pcr_composite_digest(&pcr_values, alg_id)?;
+                let composite_digest = pcr::pcr_composite_digest(&pcr_values, alg_id)?;
                 *digest = Some(hex::encode(composite_digest));
             }
         }
@@ -814,95 +811,6 @@ pub fn fill_pcr_digests(ast: &mut Expression, device: &mut TpmDevice) -> Result<
         _ => {}
     }
     Ok(())
-}
-
-/// Reads the selected PCRs and returns them in a structured format.
-///
-/// This function serves as the high-level API for reading PCRs, abstracting away
-/// the complexity of the raw TPM response.
-///
-/// # Errors
-///
-/// Returns a `PolicyError` if the TPM command fails or the response is inconsistent.
-pub fn read(
-    device: &mut TpmDevice,
-    pcr_selection_in: &TpmlPcrSelection,
-) -> Result<Vec<Pcr>, PolicyError> {
-    let cmd = TpmPcrReadCommand {
-        pcr_selection_in: *pcr_selection_in,
-    };
-    let (resp, _) = device.execute(&cmd, &[])?;
-    let pcr_read_resp = resp
-        .PcrRead()
-        .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::PcrRead))?;
-
-    let mut pcrs = Vec::new();
-    let mut digest_iter = pcr_read_resp.pcr_values.iter();
-
-    for selection in pcr_read_resp.pcr_selection_out.iter() {
-        for (byte_idx, &byte) in selection.pcr_select.iter().enumerate() {
-            if byte == 0 {
-                continue;
-            }
-            for bit_idx in 0..8 {
-                if (byte >> bit_idx) & 1 == 1 {
-                    let pcr_index = u32::try_from(byte_idx * 8 + bit_idx).map_err(|_| {
-                        PolicyError::InvalidPcrSelection("PCR index conversion failed".to_string())
-                    })?;
-                    let value = digest_iter.next().ok_or_else(|| {
-                        PolicyError::InvalidPcrSelection("PCR selection mismatch".to_string())
-                    })?;
-                    pcrs.push(Pcr {
-                        bank: selection.hash,
-                        index: pcr_index,
-                        value: value.to_vec(),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok(pcrs)
-}
-
-/// Gets the number of PCRs from the TPM.
-pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, PolicyError> {
-    let cap_data = device.get_capability(TpmCap::Pcrs, 0, crate::device::TPM_CAP_PROPERTY_MAX)?;
-    let Some(first_cap) = cap_data.into_iter().next() else {
-        return Err(PolicyError::InvalidPcrSelection(
-            "TPM reported no capabilities for PCRs.".to_string(),
-        ));
-    };
-
-    if let TpmuCapabilities::Pcrs(pcrs) = first_cap.data {
-        if let Some(first_bank) = pcrs.iter().next() {
-            Ok(first_bank.pcr_select.len() * 8)
-        } else {
-            Err(PolicyError::InvalidPcrSelection(
-                "TPM reported no active PCR banks.".to_string(),
-            ))
-        }
-    } else {
-        Err(PolicyError::InvalidCapability)
-    }
-}
-
-/// Computes a composite digest from a set of PCRs using a specified algorithm.
-///
-/// # Errors
-///
-/// Returns a `PolicyError` on failure.
-pub(crate) fn pcr_composite_digest(pcrs: &[Pcr], alg: TpmAlgId) -> Result<Vec<u8>, PolicyError> {
-    let mut composite = Vec::new();
-    for pcr in pcrs {
-        composite.extend_from_slice(&pcr.value);
-    }
-    match alg {
-        TpmAlgId::Sha256 => Ok(Sha256::digest(&composite).to_vec()),
-        TpmAlgId::Sha384 => Ok(Sha384::digest(&composite).to_vec()),
-        TpmAlgId::Sha512 => Ok(Sha512::digest(&composite).to_vec()),
-        _ => Err(PolicyError::InvalidAlgorithm(alg)),
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1097,53 +1005,6 @@ fn create_auth(
     })
 }
 
-/// Parses a PCR selection string (e.g., "sha256:0,7+sha1:1") into a TPM list.
-pub(crate) fn pcr_selection_to_list(
-    selection_str: &str,
-    pcr_count: usize,
-) -> Result<TpmlPcrSelection, PolicyError> {
-    let mut list = TpmlPcrSelection::new();
-    let pcr_select_size = pcr_count.div_ceil(8);
-    if pcr_select_size > TPM_PCR_SELECT_MAX {
-        return Err(PolicyError::InvalidPcrSelection(format!(
-            "invalid select size {pcr_select_size} (> {TPM_PCR_SELECT_MAX})"
-        )));
-    }
-
-    for bank_str in selection_str.split('+') {
-        let (alg_str, indices_str) = bank_str.split_once(':').ok_or_else(|| {
-            PolicyError::InvalidPcrSelection(format!("invalid bank format: '{bank_str}'"))
-        })?;
-        let alg = alg_from_str(alg_str)?;
-        match alg {
-            TpmAlgId::Sha1 | TpmAlgId::Sha256 | TpmAlgId::Sha384 | TpmAlgId::Sha512 => {}
-            _ => {
-                return Err(PolicyError::InvalidPcrSelection(format!(
-                    "unsupported hash algorithm: {alg_str}"
-                )));
-            }
-        }
-
-        let mut pcr_select_bytes = vec![0u8; pcr_select_size];
-        for index_str in indices_str.split(',') {
-            let pcr_index: usize = index_str.parse()?;
-
-            if pcr_index >= pcr_count {
-                return Err(PolicyError::InvalidPcrSelection(format!(
-                    "invalid index {pcr_index} (> {})",
-                    pcr_count - 1
-                )));
-            }
-            pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
-        }
-        list.try_push(TpmsPcrSelection {
-            hash: alg,
-            pcr_select: TpmBuffer::try_from(pcr_select_bytes.as_slice())?,
-        })?;
-    }
-    Ok(list)
-}
-
 /// URI data type used for the input data. The input is fully validated,
 /// and only legit URIs get passed to the subcommands.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -1195,20 +1056,5 @@ impl Uri {
     /// Returns a `PolicyError` if the URI is not a `tpm://` URI.
     pub fn to_tpm_handle(&self) -> Result<u32, PolicyError> {
         self.1.to_tpm_handle()
-    }
-
-    /// Parses a PCR selection from a `pcr://` URI string.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `PolicyError` if the URI is not a `pcr://` URI.
-    pub fn to_pcr_selection(&self, pcr_count: usize) -> Result<TpmlPcrSelection, PolicyError> {
-        match &self.1 {
-            Expression::Pcr { selection, .. } => pcr_selection_to_list(selection, pcr_count),
-            _ => Err(PolicyError::InvalidExpression(format!(
-                "Not a PCR URI: '{}'",
-                self.0
-            ))),
-        }
     }
 }

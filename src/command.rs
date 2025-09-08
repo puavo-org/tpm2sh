@@ -12,10 +12,11 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{ProtocolError, ReturnCode},
     key::{parse_any_key, Alg, AlgInfo, AnyKey, Tpm2shAlgId, TpmKey},
+    pcr,
     policy::{
-        fill_pcr_digests, flush_session, get_policy_digest, parse as policy_parse, pcr_get_count,
-        pcr_selection_to_list, session_from_uri, start_trial_session, AuthSession, Parsing,
-        PolicyExecutor, SessionType, Uri,
+        fill_pcr_digests, flush_session, get_policy_digest, parse as policy_parse,
+        session_from_uri, start_trial_session, AuthSession, Parsing, PolicyExecutor, SessionType,
+        Uri,
     },
     util::{build_to_vec, parse_tpm_rc},
 };
@@ -636,36 +637,17 @@ pub struct PcrEvent {
 impl SubCommand for PcrEvent {
     fn run(&self, device: Option<&mut TpmDevice>, _context: &mut Context) -> Result<()> {
         let device = device.ok_or(CommandError::NotProvided)?;
-        let pcr_count = pcr_get_count(device)?;
-        let selection = pcr_selection_to_list(&self.pcr_selection, pcr_count)?;
+        let selections =
+            pcr::pcr_selection_vec_from_str(&self.pcr_selection).map_err(anyhow::Error::from)?;
 
-        if selection.len() != 1 {
-            bail!(CommandError::InvalidPcrSelection);
-        }
-        let pcr_selection = &selection[0];
-
-        let set_bits_count: u32 = pcr_selection
-            .pcr_select
-            .iter()
-            .map(|b| b.count_ones())
-            .sum();
-        if set_bits_count != 1 {
+        let total_indices: usize = selections.iter().map(|s| s.indices.len()).sum();
+        if total_indices != 1 {
             bail!(CommandError::InvalidPcrSelection);
         }
 
-        let pcr_index = pcr_selection
-            .pcr_select
+        let pcr_index = selections
             .iter()
-            .enumerate()
-            .find_map(|(byte_idx, &byte)| {
-                if byte != 0 {
-                    let base =
-                        u32::try_from(byte_idx * 8).expect("PCR index calculation overflowed");
-                    Some(base + byte.trailing_zeros())
-                } else {
-                    None
-                }
-            })
+            .find_map(|s| s.indices.first().copied())
             .ok_or(CommandError::InvalidPcrSelection)?;
 
         let handles = [pcr_index];
@@ -707,10 +689,9 @@ impl SubCommand for Policy {
         fill_pcr_digests(&mut ast, device)?;
 
         if self.compose {
-            let pcr_count = pcr_get_count(device)?;
             let session_hash_alg = TpmAlgId::Sha256;
             let session_handle = start_trial_session(device, SessionType::Trial, session_hash_alg)?;
-            let mut executor = PolicyExecutor::new(pcr_count, device, session_hash_alg);
+            let mut executor = PolicyExecutor::new(device, session_hash_alg);
             executor.execute_policy_ast(session_handle, &ast)?;
             let final_digest = get_policy_digest(executor.device(), session_handle)?;
             flush_session(executor.device(), session_handle)?;
