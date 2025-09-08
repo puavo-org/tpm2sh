@@ -11,7 +11,7 @@ use crate::{
     },
     device::{TpmDevice, TpmDeviceError},
     error::{ProtocolError, ReturnCode},
-    key::{private_key_from_der_bytes, Alg, AlgInfo, Tpm2shAlgId, TpmKey},
+    key::{parse_any_key, Alg, AlgInfo, AnyKey, Tpm2shAlgId, TpmKey},
     policy::{
         fill_pcr_digests, flush_session, get_policy_digest, parse as policy_parse, pcr_get_count,
         pcr_selection_to_list, session_from_uri, start_trial_session, AuthSession, Parsing,
@@ -601,34 +601,18 @@ impl SubCommand for Load {
         let parent_handle = context.load(device, &self.parent)?;
         let input_bytes = self.input.to_bytes()?;
 
-        if let Ok(pem) = pem::parse(&input_bytes) {
-            if pem.tag() == "TSS2 PRIVATE KEY" {
-                let tpm_key = TpmKey::from_der(pem.contents())?;
+        match parse_any_key(&input_bytes)? {
+            AnyKey::Tpm(tpm_key) => {
                 let (in_public, _) =
                     Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ProtocolError)?;
                 let (in_private, _) =
                     Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ProtocolError)?;
-                return self.run_load(device, context, parent_handle, in_public, in_private);
-            } else if pem.tag() == "PRIVATE KEY" {
-                let private_key = private_key_from_der_bytes(pem.contents())?;
-                return self.run_import(device, context, parent_handle, &private_key);
+                self.run_load(device, context, parent_handle, in_public, in_private)
             }
-            bail!("unknown PEM tag '{}'", pem.tag());
+            AnyKey::External(private_key) => {
+                self.run_import(device, context, parent_handle, &private_key)
+            }
         }
-
-        if let Ok(tpm_key) = TpmKey::from_der(&input_bytes) {
-            let (in_public, _) =
-                Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ProtocolError)?;
-            let (in_private, _) =
-                Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ProtocolError)?;
-            return self.run_load(device, context, parent_handle, in_public, in_private);
-        }
-
-        if let Ok(private_key) = private_key_from_der_bytes(&input_bytes) {
-            return self.run_import(device, context, parent_handle, &private_key);
-        }
-
-        bail!("key parsing failed");
     }
 }
 

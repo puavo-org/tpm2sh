@@ -19,6 +19,67 @@ use tpm2_protocol::{
     TpmErrorKind,
 };
 
+/// Represents any of the supported key types for parsing.
+pub enum AnyKey {
+    Tpm(TpmKey),
+    External(PrivateKey),
+}
+
+/// A trait for attempting to parse a key from bytes, returning None on failure.
+trait TryParse: Sized {
+    fn try_from_der(bytes: &[u8]) -> Option<Self>;
+    fn try_from_pem(bytes: &[u8]) -> Option<Self>;
+}
+
+impl TryParse for TpmKey {
+    fn try_from_der(bytes: &[u8]) -> Option<Self> {
+        Self::from_der(bytes).ok()
+    }
+    fn try_from_pem(bytes: &[u8]) -> Option<Self> {
+        let pem = pem::parse(bytes).ok()?;
+        if pem.tag() == "TSS2 PRIVATE KEY" {
+            Self::from_der(pem.contents()).ok()
+        } else {
+            None
+        }
+    }
+}
+
+impl TryParse for PrivateKey {
+    fn try_from_der(bytes: &[u8]) -> Option<Self> {
+        private_key_from_der_bytes(bytes).ok()
+    }
+    fn try_from_pem(bytes: &[u8]) -> Option<Self> {
+        let pem = pem::parse(bytes).ok()?;
+        if pem.tag() == "PRIVATE KEY" {
+            private_key_from_der_bytes(pem.contents()).ok()
+        } else {
+            None
+        }
+    }
+}
+
+/// Parses a key from a byte slice, trying all supported PEM and DER formats.
+///
+/// # Errors
+///
+/// Returns an error if the bytes cannot be parsed into any known key format.
+pub fn parse_any_key(bytes: &[u8]) -> Result<AnyKey> {
+    if let Some(key) = TpmKey::try_from_pem(bytes) {
+        return Ok(AnyKey::Tpm(key));
+    }
+    if let Some(key) = PrivateKey::try_from_pem(bytes) {
+        return Ok(AnyKey::External(key));
+    }
+    if let Some(key) = TpmKey::try_from_der(bytes) {
+        return Ok(AnyKey::Tpm(key));
+    }
+    if let Some(key) = PrivateKey::try_from_der(bytes) {
+        return Ok(AnyKey::External(key));
+    }
+    bail!("unsupported or invalid key format")
+}
+
 #[derive(Debug)]
 pub enum AuthError {
     Build(TpmErrorKind),
