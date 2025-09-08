@@ -75,6 +75,11 @@ pub struct PcrSelection {
 }
 
 /// Discovers the list of available PCR banks and their sizes from the TPM.
+///
+/// # Errors
+///
+/// Returns a `PcrError` if the TPM capability query fails or if the TPM reports
+/// no active PCR banks.
 pub fn pcr_get_bank_list(device: &mut TpmDevice) -> Result<Vec<PcrBank>, PcrError> {
     let cap_data = device.get_capability(TpmCap::Pcrs, 0, TPM_CAP_PROPERTY_MAX)?;
     let mut banks = Vec::new();
@@ -98,6 +103,11 @@ pub fn pcr_get_bank_list(device: &mut TpmDevice) -> Result<Vec<PcrBank>, PcrErro
 
 /// Parses a PCR selection string (e.g., "sha256:0,7+sha1:1") into a vector of
 /// `PcrSelection`.
+///
+/// # Errors
+///
+/// Returns a `PcrError` if the selection string is malformed, contains an
+/// invalid algorithm name, or has non-numeric PCR indices.
 pub fn pcr_selection_vec_from_str(selection_str: &str) -> Result<Vec<PcrSelection>, PcrError> {
     let mut selections = Vec::new();
     for bank_str in selection_str.split('+') {
@@ -118,6 +128,11 @@ pub fn pcr_selection_vec_from_str(selection_str: &str) -> Result<Vec<PcrSelectio
 
 /// Converts a vector of `PcrSelection` into the low-level `TpmlPcrSelection`
 /// format.
+///
+/// # Errors
+///
+/// Returns a `PcrError` if a selected algorithm is not present in the provided
+/// list of banks, or if a selected PCR index is out of bounds for its bank.
 pub fn pcr_selection_vec_to_tpml(
     selections: &[PcrSelection],
     banks: &[PcrBank],
@@ -160,6 +175,11 @@ pub fn pcr_selection_vec_to_tpml(
 }
 
 /// Reads the selected PCRs and returns them in a structured format.
+///
+/// # Errors
+///
+/// Returns a `PcrError` if the `TPM2_PcrRead` command fails or if the TPM's
+/// response does not contain the expected number of digests for the selection.
 pub fn read(
     device: &mut TpmDevice,
     pcr_selection_in: &TpmlPcrSelection,
@@ -198,6 +218,11 @@ pub fn read(
 }
 
 /// Computes a composite digest from a set of PCRs using a specified algorithm.
+///
+/// # Errors
+///
+/// Returns a `PcrError` if the provided hash algorithm is not supported for
+/// creating a composite digest (must be SHA-256, SHA-384, or SHA-512).
 pub fn pcr_composite_digest(pcrs: &[Pcr], alg: TpmAlgId) -> Result<Vec<u8>, PcrError> {
     let mut composite = Vec::new();
     for pcr in pcrs {
