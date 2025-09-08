@@ -4,7 +4,15 @@
 
 //! This module contains the parser and executor for the unified policy language.
 
-use crate::error::ParseError;
+use crate::{
+    command::CommandError,
+    device::{TpmDevice, TpmDeviceError},
+    error::{CliError, ParseError},
+    key::tpm_alg_id_from_str,
+    pcr::{pcr_composite_digest, pcr_get_count},
+    session::{session_from_uri, SessionType},
+    uri::pcr_selection_to_list,
+};
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use nom::{
     branch::alt,
@@ -15,8 +23,18 @@ use nom::{
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
+use rand::RngCore;
 use std::{fmt, path::Path};
-use tpm2_protocol::data::TpmAlgId;
+use tpm2_protocol::{
+    data::{
+        Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bNonce, TpmAlgId, TpmCc, TpmRh, TpmlDigest, TpmtSymDefObject,
+    },
+    message::{
+        TpmFlushContextCommand, TpmPolicyGetDigestCommand, TpmPolicyOrCommand, TpmPolicyPcrCommand,
+        TpmPolicySecretCommand, TpmStartAuthSessionCommand,
+    },
+    tpm_hash_size, TpmSession,
+};
 
 /// Represents the state of a single PCR register.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -469,4 +487,236 @@ pub fn parse(input: &str, mode: Parsing) -> Result<Expression, ParseError> {
             "expression '{input}' is not valid for the expected mode '{mode:?}'"
         )))
     }
+}
+
+pub struct PolicyExecutor<'a> {
+    pcr_count: usize,
+    device: &'a mut TpmDevice,
+    session_hash_alg: TpmAlgId,
+}
+
+impl<'a> PolicyExecutor<'a> {
+    pub fn new(pcr_count: usize, device: &'a mut TpmDevice, session_hash_alg: TpmAlgId) -> Self {
+        Self {
+            pcr_count,
+            device,
+            session_hash_alg,
+        }
+    }
+
+    pub fn device(&mut self) -> &mut TpmDevice {
+        self.device
+    }
+
+    /// Executes a policy AST against a given trial session handle.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if any underlying TPM command fails or if the policy
+    /// expression is malformed or invalid for execution.
+    pub fn execute_policy_ast(
+        &mut self,
+        session_handle: TpmSession,
+        ast: &Expression,
+    ) -> Result<(), CliError> {
+        match ast {
+            Expression::Pcr {
+                selection,
+                digest,
+                count,
+            } => {
+                self.execute_pcr_policy(session_handle, selection, digest.as_ref(), count.as_ref())
+            }
+            Expression::Secret {
+                auth_handle_uri,
+                password,
+            } => self.execute_secret_policy(session_handle, auth_handle_uri, password.as_ref()),
+            Expression::Or(branches) => self.execute_or_policy(session_handle, branches),
+            _ => Err(
+                ParseError::Custom("unsupported expression for policy command".to_string()).into(),
+            ),
+        }
+    }
+
+    fn execute_pcr_policy(
+        &mut self,
+        session_handle: TpmSession,
+        selection_str: &str,
+        digest: Option<&String>,
+        _count: Option<&u32>,
+    ) -> Result<(), CliError> {
+        let pcr_digest_bytes = if let Some(digest_hex) = digest {
+            hex::decode(digest_hex).map_err(ParseError::from)?
+        } else {
+            let pcr_selection_in = pcr_selection_to_list(selection_str, self.pcr_count)?;
+            let pcr_values = crate::pcr::read(self.device, &pcr_selection_in)?;
+            pcr_composite_digest(&pcr_values, self.session_hash_alg)?
+        };
+
+        let pcr_selection = pcr_selection_to_list(selection_str, self.pcr_count)?;
+        let pcr_digest =
+            Tpm2bDigest::try_from(pcr_digest_bytes.as_slice()).map_err(CommandError::from)?;
+
+        let cmd = TpmPolicyPcrCommand {
+            policy_session: session_handle.0.into(),
+            pcr_digest,
+            pcrs: pcr_selection,
+        };
+        let (_rc, _, _) = self.device.execute(&cmd, &[])?;
+        Ok(())
+    }
+
+    fn execute_secret_policy(
+        &mut self,
+        session_handle: TpmSession,
+        auth_handle_uri: &Expression,
+        password: Option<&String>,
+    ) -> Result<(), CliError> {
+        let auth_handle = match auth_handle_uri {
+            Expression::TpmHandle(handle) => Ok(*handle),
+            _ => Err(ParseError::Custom(
+                "secret policy requires a tpm:// handle".to_string(),
+            )),
+        }?;
+        let cmd = TpmPolicySecretCommand {
+            auth_handle: auth_handle.into(),
+            policy_session: session_handle.0.into(),
+            nonce_tpm: Tpm2bNonce::default(),
+            cp_hash_a: Tpm2bDigest::default(),
+            policy_ref: Tpm2bNonce::default(),
+            expiration: 0,
+        };
+        let handles = [auth_handle, session_handle.into()];
+        let mut temp_uri_storage = None;
+        if let Some(p) = password {
+            temp_uri_storage = Some(format!("password://{p}").parse()?);
+        }
+        let sessions = session_from_uri(&cmd, &handles, temp_uri_storage.as_ref())?;
+        let (_rc, _, _) = self.device.execute(&cmd, &sessions)?;
+        Ok(())
+    }
+
+    fn execute_or_policy(
+        &mut self,
+        session_handle: TpmSession,
+        branches: &[Expression],
+    ) -> Result<(), CliError> {
+        let mut branch_digests = TpmlDigest::new();
+        for branch_ast in branches {
+            let branch_handle =
+                start_trial_session(self.device, SessionType::Trial, self.session_hash_alg)?;
+            self.execute_policy_ast(branch_handle, branch_ast)?;
+
+            let digest = get_policy_digest(self.device, branch_handle)?;
+            branch_digests
+                .try_push(digest)
+                .map_err(CommandError::from)?;
+
+            flush_session(self.device, branch_handle)?;
+        }
+
+        let cmd = TpmPolicyOrCommand {
+            policy_session: session_handle.0.into(),
+            p_hash_list: branch_digests,
+        };
+        let (_rc, _, _) = self.device.execute(&cmd, &[])?;
+        Ok(())
+    }
+}
+
+pub(crate) fn start_trial_session(
+    device: &mut TpmDevice,
+    session_type: SessionType,
+    hash_alg: TpmAlgId,
+) -> Result<TpmSession, CliError> {
+    let digest_len = tpm_hash_size(&hash_alg).ok_or_else(|| {
+        CommandError::UnsupportedAlgorithm(format!(
+            "Unsupported hash algorithm for session: {hash_alg}"
+        ))
+    })?;
+    let mut nonce_bytes = vec![0; digest_len];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+
+    let cmd = TpmStartAuthSessionCommand {
+        tpm_key: (TpmRh::Null as u32).into(),
+        bind: (TpmRh::Null as u32).into(),
+        nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice()).map_err(CommandError::from)?,
+        encrypted_salt: Tpm2bEncryptedSecret::default(),
+        session_type: session_type.into(),
+        symmetric: TpmtSymDefObject::default(),
+        auth_hash: hash_alg,
+    };
+    let (_rc, resp, _) = device.execute(&cmd, &[])?;
+    let start_resp = resp
+        .StartAuthSession()
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::StartAuthSession,
+        })?;
+    Ok(start_resp.session_handle)
+}
+
+pub(crate) fn flush_session(device: &mut TpmDevice, handle: TpmSession) -> Result<(), CliError> {
+    let cmd = TpmFlushContextCommand {
+        flush_handle: handle.into(),
+    };
+    let (_rc, _, _) = device.execute(&cmd, &[])?;
+    Ok(())
+}
+
+pub(crate) fn get_policy_digest(
+    device: &mut TpmDevice,
+    session_handle: TpmSession,
+) -> Result<Tpm2bDigest, CliError> {
+    let cmd = TpmPolicyGetDigestCommand {
+        policy_session: session_handle.0.into(),
+    };
+    let (_rc, resp, _) = device.execute(&cmd, &[])?;
+    let digest_resp = resp
+        .PolicyGetDigest()
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::PolicyGetDigest,
+        })?;
+    Ok(digest_resp.policy_digest)
+}
+
+/// Recursively traverses a policy AST and fills in any missing PCR digests by reading from the TPM.
+///
+/// # Errors
+///
+/// Returns a `CliError` if reading PCR values from the TPM fails or if a
+/// PCR selection string is malformed.
+pub fn fill_pcr_digests(ast: &mut Expression, device: &mut TpmDevice) -> Result<(), CliError> {
+    match ast {
+        Expression::Pcr {
+            selection, digest, ..
+        } => {
+            if digest.is_none() {
+                let pcr_count = pcr_get_count(device)?;
+                let pcr_selection_in = pcr_selection_to_list(selection, pcr_count)?;
+                let pcr_values = crate::pcr::read(device, &pcr_selection_in)?;
+                let (alg_str, _) =
+                    selection
+                        .split_once(':')
+                        .ok_or(CommandError::InvalidPcrSelection(format!(
+                            "invalid PCR bank format in selection: '{selection}'"
+                        )))?;
+                let alg_id =
+                    tpm_alg_id_from_str(alg_str).map_err(CommandError::UnsupportedAlgorithm)?;
+                let composite_digest = pcr_composite_digest(&pcr_values, alg_id)?;
+                *digest = Some(hex::encode(composite_digest));
+            }
+        }
+        Expression::Or(branches) => {
+            for branch in branches {
+                fill_pcr_digests(branch, device)?;
+            }
+        }
+        Expression::Secret {
+            auth_handle_uri, ..
+        } => {
+            fill_pcr_digests(auth_handle_uri, device)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }

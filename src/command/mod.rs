@@ -14,8 +14,6 @@ pub mod list;
 pub mod load;
 #[path = "pcr-event/mod.rs"]
 pub mod pcr_event;
-#[path = "pcr-read/mod.rs"]
-pub mod pcr_read;
 pub mod policy;
 #[path = "print-error/mod.rs"]
 pub mod print_error;

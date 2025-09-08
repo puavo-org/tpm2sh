@@ -5,9 +5,9 @@
 use crate::{
     command::{
         context::Context, convert::Convert, create_primary::CreatePrimary, delete::Delete,
-        list::List, load::Load, pcr_event::PcrEvent, pcr_read::PcrRead, policy::Policy,
-        print_error::PrintError, reset_lock::ResetLock, seal::Seal, start_session::StartSession,
-        unseal::Unseal, CommandError,
+        list::List, load::Load, pcr_event::PcrEvent, policy::Policy, print_error::PrintError,
+        reset_lock::ResetLock, seal::Seal, start_session::StartSession, unseal::Unseal,
+        CommandError,
     },
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
@@ -20,7 +20,7 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex},
 };
-use tpm2_protocol::data::{TpmRh, TpmSe};
+use tpm2_protocol::data::TpmRh;
 
 const PARENT_OPTION_HELP: &str = "--parent <URI>\n'data://', 'file://' or 'tpm://'";
 const OUTPUT_OPTION_HELP: &str = "--output <URI>\n'tpm://' or 'file://'";
@@ -122,36 +122,6 @@ impl From<Hierarchy> for TpmRh {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum SessionType {
-    #[default]
-    Hmac,
-    Policy,
-    Trial,
-}
-
-impl FromStr for SessionType {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "hmac" => Ok(Self::Hmac),
-            "policy" => Ok(Self::Policy),
-            "trial" => Ok(Self::Trial),
-            _ => Err("invalid session type".to_string()),
-        }
-    }
-}
-
-impl From<SessionType> for TpmSe {
-    fn from(val: SessionType) -> Self {
-        match val {
-            SessionType::Hmac => Self::Hmac,
-            SessionType::Policy => Self::Policy,
-            SessionType::Trial => Self::Trial,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KeyFormat {
     #[default]
     Pem,
@@ -248,7 +218,6 @@ subcommand_registry!(
         (List, "list"),
         (Load, "load"),
         (PcrEvent, "pcr-event"),
-        (PcrRead, "pcr-read"),
         (Policy, "policy"),
         (ResetLock, "reset-lock"),
         (Seal, "seal"),

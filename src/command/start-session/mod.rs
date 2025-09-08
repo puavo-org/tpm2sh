@@ -3,11 +3,11 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, DeviceCommand, SessionType, Subcommand},
+    cli::{handle_help, DeviceCommand, Subcommand},
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
-    session::AuthSession,
+    session::{AuthSession, SessionType},
 };
 use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};

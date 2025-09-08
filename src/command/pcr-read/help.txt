@@ -1,3 +1,0 @@
-A PCR policy expression defines the PCR registers and bank to be read, for example 'pcr(sha256:0,1,2)'.
-
-Usage: tpm2sh pcr-read <EXPRESSION>

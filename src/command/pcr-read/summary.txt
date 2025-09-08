@@ -1,1 +1,0 @@
-Reads PCRs and outputs a policy with the composite digest

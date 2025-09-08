@@ -6,7 +6,7 @@ use cli::{
     cli::{Cli, Commands},
     command::{
         context::Context, create_primary::CreatePrimary, list::List, load::Load,
-        pcr_event::PcrEvent, pcr_read::PcrRead, seal::Seal, start_session::StartSession,
+        pcr_event::PcrEvent, policy::Policy, seal::Seal, start_session::StartSession,
         unseal::Unseal,
     },
     device::TpmDevice,
@@ -231,12 +231,13 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
     let new_pcr_value = pcr_hasher.finalize();
 
     let expected_composite_digest = Sha256::digest(&new_pcr_value);
-    let pcr_read_cmd = Commands::PcrRead(PcrRead {
+    let pcr_policy_cmd = Commands::Policy(Policy {
         expression: "pcr(sha256:7)".to_string(),
+        compose: false,
     });
     let mut out_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut out_buf);
-    pcr_read_cmd
+    pcr_policy_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
 
@@ -246,13 +247,14 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_pcr_read(test_context: TestFixture) {
-    let pcr_read_cmd = Commands::PcrRead(PcrRead {
+fn test_subcommand_policy_default_is_pcr_read(test_context: TestFixture) {
+    let policy_cmd = Commands::Policy(Policy {
         expression: "pcr(sha256:0,7)".to_string(),
+        compose: false,
     });
     let mut out_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut out_buf);
-    pcr_read_cmd
+    policy_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
 

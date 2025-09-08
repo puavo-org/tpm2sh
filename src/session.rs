@@ -12,12 +12,42 @@ use crate::{
 };
 use log::debug;
 use rand::RngCore;
-use std::fmt;
+use std::{fmt, str::FromStr};
 use tpm2_protocol::{
-    data::{self, Tpm2bAuth, Tpm2bNonce, TpmRh, TpmaSession},
+    data::{self, Tpm2bAuth, Tpm2bNonce, TpmRh, TpmSe, TpmaSession},
     message::TpmHeader,
     tpm_hash_size, TpmSession,
 };
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SessionType {
+    #[default]
+    Hmac,
+    Policy,
+    Trial,
+}
+
+impl FromStr for SessionType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "hmac" => Ok(Self::Hmac),
+            "policy" => Ok(Self::Policy),
+            "trial" => Ok(Self::Trial),
+            _ => Err("invalid session type".to_string()),
+        }
+    }
+}
+
+impl From<SessionType> for TpmSe {
+    fn from(val: SessionType) -> Self {
+        match val {
+            SessionType::Hmac => Self::Hmac,
+            SessionType::Policy => Self::Policy,
+            SessionType::Trial => Self::Trial,
+        }
+    }
+}
 
 /// Manages the state of an active authorization session.
 #[derive(Debug, Clone)]
