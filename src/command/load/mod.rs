@@ -7,10 +7,13 @@ use crate::{
         handle_help, parse_parent_option, parse_session_option, required, DeviceCommand, Subcommand,
     },
     command::{context::Context, CommandError},
-    crypto::{self, crypto_hmac, crypto_kdfa, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE},
+    crypto::{
+        crypto_hmac, crypto_kdfa, crypto_make_name, protect_seed_with_ecc, protect_seed_with_rsa,
+        PrivateKey, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
+    },
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    key::{private_key_from_bytes, Tpm2shAlgId, TpmKey},
+    key::{private_key_from_der_bytes, Tpm2shAlgId, TpmKey},
     session::session_from_uri,
     uri::Uri,
     util::build_to_vec,
@@ -21,13 +24,12 @@ use cipher::{AsyncStreamCipher, KeyIvInit};
 use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
-    self,
     data::{
         Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmCc, TpmtPublic,
         TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{TpmImportCommand, TpmLoadCommand, TpmReadPublicCommand, TpmUnsealCommand},
-    TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 #[derive(Debug)]
@@ -104,8 +106,8 @@ fn create_import_blob(
     let parent_name_alg = parent_public.name_alg;
 
     let (in_sym_seed, encryption_key) = match parent_public.object_type {
-        TpmAlgId::Rsa => crypto::protect_seed_with_rsa(parent_public, &seed)?,
-        TpmAlgId::Ecc => crypto::protect_seed_with_ecc(parent_public, &seed)?,
+        TpmAlgId::Rsa => protect_seed_with_rsa(parent_public, &seed)?,
+        TpmAlgId::Ecc => protect_seed_with_ecc(parent_public, &seed)?,
         _ => {
             return Err(CommandError::InvalidParentKeyType {
                 reason: "parent key must be RSA or ECC",
@@ -114,7 +116,7 @@ fn create_import_blob(
         }
     };
 
-    let object_name = crypto::crypto_make_name(object_public).map_err(CliError::from)?;
+    let object_name = crypto_make_name(object_public).map_err(CliError::from)?;
 
     let sym_key = crypto_kdfa(
         parent_name_alg,
@@ -127,7 +129,7 @@ fn create_import_blob(
     .map_err(CliError::from)?;
 
     let integrity_key_bits = u16::try_from(
-        tpm2_protocol::tpm_hash_size(&parent_name_alg).ok_or({
+        tpm_hash_size(&parent_name_alg).ok_or({
             CommandError::InvalidAlgorithm {
                 alg: Tpm2shAlgId(parent_name_alg),
             }
@@ -180,22 +182,6 @@ fn create_import_blob(
         in_sym_seed,
         encryption_key,
     ))
-}
-
-/// Parses an external key from a URI and prepares it for TPM import.
-fn prepare_key_for_import(
-    key: &Uri,
-    parent_name_alg: TpmAlgId,
-) -> Result<(crypto::PrivateKey, TpmtPublic, Vec<u8>), CliError> {
-    let key_bytes = key.to_bytes()?;
-    let private_key = private_key_from_bytes(&key_bytes)?;
-
-    let public = private_key
-        .to_public(parent_name_alg)
-        .map_err(CliError::from)?;
-    let sensitive_blob = private_key.sensitive_blob();
-
-    Ok((private_key, public, sensitive_blob))
 }
 
 /// Checks if a byte slice contains valid, printable UTF-8.
@@ -295,10 +281,16 @@ impl Load {
         device: &mut TpmDevice,
         context: &mut Context,
         parent_handle: TpmTransient,
+        private_key: &PrivateKey,
     ) -> Result<(), CliError> {
         let (_rc, parent_public, parent_name) = device.read_public(parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
-        let (_, public, sensitive_blob) = prepare_key_for_import(&self.input, parent_name_alg)?;
+
+        let public = private_key
+            .to_public(parent_name_alg)
+            .map_err(CliError::from)?;
+        let sensitive_blob = private_key.sensitive_blob();
+
         let in_public = Tpm2bPublic {
             inner: public.clone(),
         };
@@ -350,16 +342,38 @@ impl DeviceCommand for Load {
         let parent_handle = context.load(device, &self.parent)?;
         let input_bytes = self.input.to_bytes()?;
 
-        if let Ok(tpm_key) =
-            TpmKey::from_pem(&input_bytes).or_else(|_| TpmKey::from_der(&input_bytes))
-        {
+        if let Ok(pem) = pem::parse(&input_bytes) {
+            if pem.tag() == "TSS2 PRIVATE KEY" {
+                let tpm_key = TpmKey::from_der(pem.contents())?;
+                let (in_public, _) =
+                    Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ParseError::from)?;
+                let (in_private, _) =
+                    Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ParseError::from)?;
+                return self.run_load(device, context, parent_handle, in_public, in_private);
+            } else if pem.tag() == "PRIVATE KEY" {
+                let private_key = private_key_from_der_bytes(pem.contents())?;
+                return self.run_import(device, context, parent_handle, &private_key);
+            }
+            return Err(CliError::Parse(ParseError::Custom(format!(
+                "unsupported PEM tag '{}', expected 'TSS2 PRIVATE KEY' or 'PRIVATE KEY'",
+                pem.tag()
+            ))));
+        }
+
+        if let Ok(tpm_key) = TpmKey::from_der(&input_bytes) {
             let (in_public, _) =
                 Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ParseError::from)?;
             let (in_private, _) =
                 Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ParseError::from)?;
-            self.run_load(device, context, parent_handle, in_public, in_private)
-        } else {
-            self.run_import(device, context, parent_handle)
+            return self.run_load(device, context, parent_handle, in_public, in_private);
         }
+
+        if let Ok(private_key) = private_key_from_der_bytes(&input_bytes) {
+            return self.run_import(device, context, parent_handle, &private_key);
+        }
+
+        Err(CliError::Parse(ParseError::Custom(
+            "failed to parse input key. Expected a PEM-encoded 'TSS2 PRIVATE KEY' or 'PRIVATE KEY', or a corresponding DER blob.".to_string(),
+        )))
     }
 }
