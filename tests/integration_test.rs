@@ -4,10 +4,8 @@
 
 use cli::{
     cli::{Commands, LogFormat},
-    command::{
-        context::Context, create_primary::CreatePrimary, list::List, load::Load,
-        pcr_event::PcrEvent, policy::Policy, seal::Seal, start_session::StartSession,
-    },
+    command::{CreatePrimary, List, Load, PcrEvent, Policy, Seal, StartSession},
+    context::Context,
     device::TpmDevice,
     error::{CliError, ParseError},
     mocktpm,

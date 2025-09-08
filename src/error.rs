@@ -1,10 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3-0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    command::{context::ContextError, CommandError},
-    device::TpmDeviceError,
-    policy::PolicyError,
+    command::CommandError, context::ContextError, device::TpmDeviceError, policy::PolicyError,
 };
 use std::io::Error as IoError;
 use thiserror::Error;

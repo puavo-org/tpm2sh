@@ -4,10 +4,10 @@
 
 use crate::{
     command::{
-        context::Context, convert::Convert, create_primary::CreatePrimary, delete::Delete,
-        list::List, load::Load, pcr_event::PcrEvent, policy::Policy, print_error::PrintError,
-        reset_lock::ResetLock, seal::Seal, start_session::StartSession,
+        Convert, CreatePrimary, Delete, List, Load, PcrEvent, Policy, PrintError, ResetLock, Seal,
+        StartSession,
     },
+    context::Context,
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     Command,
@@ -98,72 +98,30 @@ impl Command for Commands {
         device: Option<Arc<Mutex<TpmDevice>>>,
         context: &mut Context,
     ) -> Result<(), CliError> {
+        if self.is_local() {
+            return match self {
+                Self::Convert(args) => args.run(context),
+                Self::PrintError(args) => args.run(context),
+                _ => unreachable!(),
+            };
+        }
+
+        let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
+        let mut guard = device_arc
+            .lock()
+            .map_err(|_| TpmDeviceError::LockPoisoned)?;
+
         match self {
-            Self::Convert(args) => args.run(context),
-            Self::PrintError(args) => args.run(context),
-            Self::CreatePrimary(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::Delete(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::List(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::Load(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::PcrEvent(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::Policy(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::ResetLock(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::Seal(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
-            Self::StartSession(args) => {
-                let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-                let mut guard = device_arc
-                    .lock()
-                    .map_err(|_| TpmDeviceError::LockPoisoned)?;
-                args.run(&mut guard, context)
-            }
+            Self::CreatePrimary(args) => args.run(&mut guard, context),
+            Self::Delete(args) => args.run(&mut guard, context),
+            Self::List(args) => args.run(&mut guard, context),
+            Self::Load(args) => args.run(&mut guard, context),
+            Self::PcrEvent(args) => args.run(&mut guard, context),
+            Self::Policy(args) => args.run(&mut guard, context),
+            Self::ResetLock(args) => args.run(&mut guard, context),
+            Self::Seal(args) => args.run(&mut guard, context),
+            Self::StartSession(args) => args.run(&mut guard, context),
+            _ => unreachable!(),
         }
     }
 }

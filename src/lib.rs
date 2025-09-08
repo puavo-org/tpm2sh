@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod cli;
 pub mod command;
+pub mod context;
 pub mod crypto;
 pub mod device;
 pub mod error;
@@ -43,7 +44,7 @@ pub trait Command {
     fn run(
         &self,
         device: Option<std::sync::Arc<std::sync::Mutex<crate::device::TpmDevice>>>,
-        context: &mut crate::command::context::Context,
+        context: &mut crate::context::Context,
     ) -> Result<(), crate::error::CliError>;
 }
 
@@ -69,7 +70,7 @@ pub fn execute_cli() -> Result<(), crate::error::CliError> {
     };
 
     let mut stdout = std::io::stdout();
-    let mut context = crate::command::context::Context::new(&mut stdout);
+    let mut context = crate::context::Context::new(&mut stdout);
     let result = command.run(device_arc.clone(), &mut context);
 
     context.flush(device_arc)?;
