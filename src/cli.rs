@@ -83,6 +83,22 @@ impl Command {
         matches!(self, Self::Convert(_) | Self::PrintError(_))
     }
 
+    fn as_subcommand(&self) -> &dyn SubCommand {
+        match self {
+            Self::Convert(args) => args,
+            Self::CreatePrimary(args) => args,
+            Self::Delete(args) => args,
+            Self::List(args) => args,
+            Self::Load(args) => args,
+            Self::PcrEvent(args) => args,
+            Self::Policy(args) => args,
+            Self::PrintError(args) => args,
+            Self::ResetLock(args) => args,
+            Self::Seal(args) => args,
+            Self::StartSession(args) => args,
+        }
+    }
+
     /// Runs the command.
     ///
     /// # Errors
@@ -93,21 +109,7 @@ impl Command {
             .map(|d| d.lock().map_err(|_| CommandError::LockPoisoned))
             .transpose()?;
 
-        let maybe_device = guard.as_deref_mut();
-
-        match self {
-            Self::Convert(args) => args.run(maybe_device, context),
-            Self::CreatePrimary(args) => args.run(maybe_device, context),
-            Self::Delete(args) => args.run(maybe_device, context),
-            Self::List(args) => args.run(maybe_device, context),
-            Self::Load(args) => args.run(maybe_device, context),
-            Self::PcrEvent(args) => args.run(maybe_device, context),
-            Self::Policy(args) => args.run(maybe_device, context),
-            Self::PrintError(args) => args.run(maybe_device, context),
-            Self::ResetLock(args) => args.run(maybe_device, context),
-            Self::Seal(args) => args.run(maybe_device, context),
-            Self::StartSession(args) => args.run(maybe_device, context),
-        }
+        self.as_subcommand().run(guard.as_deref_mut(), context)
     }
 }
 

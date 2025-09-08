@@ -3,7 +3,7 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{crypto::PrivateKey, policy::alg_from_str};
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::{fmt, str::FromStr};
 
 use p256::SecretKey;
@@ -311,7 +311,7 @@ impl TpmKey {
     ///
     /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
     pub fn to_der(&self) -> Result<Vec<u8>> {
-        Encode::to_der(self).with_context(|| "DER encode error")
+        Encode::to_der(self).map_err(Into::into)
     }
 
     /// Parse TPM key from PEM bytes.
@@ -337,17 +337,6 @@ impl TpmKey {
     }
 }
 
-/// Load and parse a PKCS#8 private key from a byte slice, trying DER then PEM.
-///
-/// # Errors
-///
-/// Returns `CliError` on parsing failure.
-pub fn private_key_from_bytes(bytes: &[u8]) -> Result<PrivateKey> {
-    private_key_from_der_bytes(bytes)
-        .or_else(|_| private_key_from_pem_bytes(bytes))
-        .with_context(|| "failed to parse key: not a valid PKCS#8 DER or PEM encoded key")
-}
-
 /// Load and parse a DER-encoded PKCS#8 private key from a byte slice.
 ///
 /// # Errors
@@ -368,19 +357,4 @@ pub fn private_key_from_der_bytes(der_bytes: &[u8]) -> Result<PrivateKey> {
     };
 
     Ok(key)
-}
-
-/// Load and parse a PEM-encoded PKCS#8 private key from a byte slice.
-///
-/// # Errors
-///
-/// Returns `CliError` on parsing failure.
-pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey> {
-    let pem_str = std::str::from_utf8(pem_bytes)?;
-    let pem_block = pem::parse(pem_str)?;
-
-    if pem_block.tag() != "PRIVATE KEY" {
-        bail!("invalid PEM tag: {}", pem_block.tag());
-    }
-    private_key_from_der_bytes(pem_block.contents())
 }
