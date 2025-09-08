@@ -23,6 +23,7 @@ pub enum ContextError {
     AlreadyTracked(TpmTransient),
     CapacityExceeded(usize),
     Device(TpmDeviceError),
+    FlushFailed(Vec<TpmDeviceError>),
     InvalidHandle(u32),
     InvalidUri(Uri),
     Io(std::io::Error),
@@ -41,6 +42,13 @@ impl std::fmt::Display for ContextError {
             Self::AlreadyTracked(h) => write!(f, "already tracked: {h}"),
             Self::CapacityExceeded(s) => write!(f, "capacity exceeded: {s}"),
             Self::Device(e) => write!(f, "device: {e}"),
+            Self::FlushFailed(errs) => {
+                write!(f, "{} error(s) occurred during context flush:", errs.len())?;
+                for err in errs {
+                    write!(f, "\n  - {err}")?;
+                }
+                Ok(())
+            }
             Self::InvalidHandle(h) => write!(f, "invalid handle: {h}"),
             Self::InvalidUri(u) => write!(f, "invalid URI: {u}"),
             Self::Io(s) => write!(f, "I/O: {s}"),
@@ -318,7 +326,7 @@ impl<'a> Context<'a> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
                 let mut guard = device.lock().map_err(|_| ContextError::LockPoisoned)?;
-                let mut first_err = None;
+                let mut errors: Vec<TpmDeviceError> = Vec::new();
 
                 for handle in self.handles.into_iter().flatten() {
                     let cmd = TpmFlushContextCommand {
@@ -326,14 +334,12 @@ impl<'a> Context<'a> {
                     };
                     if let Err(err) = guard.execute(&cmd, &[]) {
                         log::warn!(target: "cli::device", "tpm://{handle:#010x}: {err}");
-                        if first_err.is_none() {
-                            first_err = Some(err.into());
-                        }
+                        errors.push(err);
                     }
                 }
 
-                if let Some(err) = first_err {
-                    return Err(err);
+                if !errors.is_empty() {
+                    return Err(ContextError::FlushFailed(errors));
                 }
             }
         }
