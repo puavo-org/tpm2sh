@@ -33,6 +33,42 @@ use tpm2_protocol::{
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
+/// A type-erased object safe TPM command object
+pub trait TpmCommandObject: TpmPrint {
+    fn tpm_cc(&self) -> TpmCc;
+
+    /// Build the command.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TpmErrorKind` on failure analogous to `tpm_build_command`
+    /// behavior.
+    fn build(
+        &self,
+        tag: TpmSt,
+        sessions: &[TpmsAuthCommand],
+        writer: &mut TpmWriter,
+    ) -> Result<(), TpmErrorKind>;
+}
+
+impl<T> TpmCommandObject for T
+where
+    T: TpmHeader + TpmCommandBuild + TpmPrint,
+{
+    fn tpm_cc(&self) -> TpmCc {
+        TpmHeader::tpm_cc(self)
+    }
+
+    fn build(
+        &self,
+        tag: TpmSt,
+        sessions: &[TpmsAuthCommand],
+        writer: &mut TpmWriter,
+    ) -> Result<(), TpmErrorKind> {
+        tpm_build_command(self, tag, sessions, writer)
+    }
+}
+
 #[derive(Debug)]
 pub enum TpmDeviceError {
     Io(std::io::Error),
@@ -116,16 +152,14 @@ impl TpmDevice {
     ///
     /// This function will return an error if building the command fails, I/O
     /// with the device fails, or the TPM itself returns an error.
-    pub fn execute<C>(
+    pub fn execute(
         &mut self,
-        command: &C,
+        command: &dyn TpmCommandObject,
         sessions: &[TpmsAuthCommand],
-    ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError>
-    where
-        C: TpmHeader + TpmCommandBuild + TpmPrint,
-    {
+    ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError> {
+        let cc = command.tpm_cc();
         if let LogFormat::Pretty = self.log_format {
-            trace!(target: "cli::device", "{}", C::COMMAND);
+            trace!(target: "cli::device", "{cc}");
             command.print("", 1);
         }
 
@@ -137,18 +171,18 @@ impl TpmDevice {
             } else {
                 TpmSt::Sessions
             };
-            tpm_build_command(command, tag, sessions, &mut writer)?;
+            command.build(tag, sessions, &mut writer)?;
             writer.len()
         };
         let command_bytes = &command_buf[..len];
 
-        if !std::io::stderr().is_terminal() || C::COMMAND == TpmCc::FlushContext {
+        if !std::io::stderr().is_terminal() || cc == TpmCc::FlushContext {
             if let LogFormat::Plain = self.log_format {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
             }
             self.transport.send(command_bytes)?;
         } else {
-            return self.execute_interactive(command_bytes, C::COMMAND);
+            return self.execute_interactive(command_bytes, cc);
         }
 
         let resp_buf = self.transport.receive()?;
@@ -156,7 +190,7 @@ impl TpmDevice {
         if let LogFormat::Plain = self.log_format {
             trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
         }
-        self.parse_response(&resp_buf, C::COMMAND)
+        self.parse_response(&resp_buf, cc)
     }
 
     fn parse_response(
