@@ -3,7 +3,6 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::Cli,
     command::CommandError,
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
@@ -22,7 +21,6 @@ use tpm2_protocol::{
 };
 
 pub struct Context<'a> {
-    pub cli: &'a crate::cli::Cli,
     pub handles: [Option<TpmTransient>; MAX_HANDLES],
     pub max_handles: Option<usize>,
     pub writer: &'a mut dyn std::io::Write,
@@ -36,7 +34,6 @@ impl std::fmt::Debug for Context<'_> {
             .filter_map(|h| h.map(|t| format!("tpm://{t:#010x}")))
             .collect();
         f.debug_struct("Context")
-            .field("cli", &self.cli)
             .field("handles", &handles)
             .field("max_handles", &self.max_handles)
             .field("writer", &"<dyn Write>")
@@ -46,9 +43,8 @@ impl std::fmt::Debug for Context<'_> {
 
 impl<'a> Context<'a> {
     #[must_use]
-    pub fn new(cli: &'a Cli, writer: &'a mut dyn std::io::Write) -> Context<'a> {
+    pub fn new(writer: &'a mut dyn std::io::Write) -> Context<'a> {
         Self {
-            cli,
             handles: [None; MAX_HANDLES],
             max_handles: None,
             writer,

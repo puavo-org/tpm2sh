@@ -1,3 +1,0 @@
-Creates a primary key from a chosen hierachy and algorithm. The command creates and loads the object, then returns its saved context.
-
-The final argument is an optional URI to specify an output file for the saved context. If omitted, the saved context is printed to standard output as a 'data://' URI.

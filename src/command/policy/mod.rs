@@ -3,44 +3,30 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{handle_help, required, DeviceCommand, Subcommand},
+    cli::DeviceCommand,
     command::context::Context,
     device::TpmDevice,
     error::CliError,
     policy::SessionType,
     policy::{self, fill_pcr_digests, PolicyExecutor},
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use tpm2_protocol::data::TpmAlgId;
 
-#[derive(Debug, Default)]
+/// Builds authorization policies.
+///
+/// A policy expression defines a condition that must be met, for example,
+/// 'pcr(sha256:0,...)' or 'secret(tpm://...)'.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "policy")]
 pub struct Policy {
-    pub expression: String,
+    /// compose the policy and output only the final digest
+    #[argh(switch)]
     pub compose: bool,
-}
 
-impl Subcommand for Policy {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut expression = None;
-        let mut compose = false;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("compose") => compose = true,
-                Arg::Value(val) if expression.is_none() => expression = Some(val.string()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(Policy {
-            expression: required(expression, "<EXPRESSION>")?,
-            compose,
-        })
-    }
+    /// policy expression
+    #[argh(positional)]
+    pub expression: String,
 }
 
 impl DeviceCommand for Policy {

@@ -3,14 +3,14 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{handle_help, parse_session_option, required, DeviceCommand, Hierarchy, Subcommand},
+    cli::{DeviceCommand, Hierarchy},
     command::context::Context,
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
     policy::{session_from_uri, Uri},
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use tpm2_protocol::{
     self,
     data::{
@@ -22,44 +22,30 @@ use tpm2_protocol::{
     message::TpmCreatePrimaryCommand,
 };
 
-#[derive(Debug, Default)]
+/// Creates a primary key.
+///
+/// Creates a primary key from a chosen hierarchy and algorithm. The command creates
+/// and loads the object, then returns its saved context. The output can be an
+/// output file URI for the saved context. If omitted, the saved context is printed
+/// to standard output as a 'data://' URI.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "create-primary")]
 pub struct CreatePrimary {
+    /// hierarchy to create the key in (owner, platform, or endorsement)
+    #[argh(option, short = 'H', default = "Default::default()")]
     pub hierarchy: Hierarchy,
-    pub algorithm: Alg,
-    pub output: Option<Uri>,
+
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
-}
 
-impl Subcommand for CreatePrimary {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_OUTPUT: bool = true;
-    const OPTION_SESSION: bool = true;
+    /// output destination: 'tpm://' or 'file://'
+    #[argh(option)]
+    pub output: Option<Uri>,
 
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut hierarchy = Hierarchy::default();
-        let mut algorithm = None;
-        let mut output = None;
-        let mut session = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("hierarchy") | Arg::Short('H') => hierarchy = parser.value()?.parse()?,
-                Arg::Long("output") => output = Some(parser.value()?.parse()?),
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                Arg::Value(val) if algorithm.is_none() => algorithm = Some(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(CreatePrimary {
-            hierarchy,
-            algorithm: required(algorithm, "<ALGORITHM>")?,
-            output,
-            session,
-        })
-    }
+    /// algorithm descriptor string
+    #[argh(positional)]
+    pub algorithm: Alg,
 }
 
 fn build_public_template(alg_desc: &Alg) -> TpmtPublic {

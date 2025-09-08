@@ -1,1 +1,0 @@
-Deletes a transient or persistent object

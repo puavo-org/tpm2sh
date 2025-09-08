@@ -1,2 +1,0 @@
-<TYPE>
-algorithm, persistent or transient

@@ -1,2 +1,0 @@
-
-Usage: tpm2sh start-session [OPTIONS]

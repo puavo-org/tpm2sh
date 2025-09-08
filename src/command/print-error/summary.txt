@@ -1,1 +1,0 @@
-Prints a TPM error code

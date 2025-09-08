@@ -1,2 +1,0 @@
--H, --hierarchy <HIERARCHY>
-owner (default), platform or endorsement

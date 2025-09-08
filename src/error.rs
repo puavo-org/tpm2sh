@@ -18,8 +18,6 @@ pub enum ParseError {
     Hex(#[from] hex::FromHexError),
     #[error("integer parsing failed: {0}")]
     Int(#[from] std::num::ParseIntError),
-    #[error("command line argument error: {0}")]
-    Lexopt(#[from] lexopt::Error),
     #[error("invalid PEM data: {0}")]
     Pem(#[from] pem::PemError),
     #[error("PKCS#8 parsing failed: {0}")]
@@ -69,11 +67,5 @@ impl From<TpmErrorKind> for CliError {
 impl From<TpmRc> for CliError {
     fn from(rc: TpmRc) -> Self {
         Self::Tpm(rc)
-    }
-}
-
-impl From<lexopt::Error> for CliError {
-    fn from(err: lexopt::Error) -> Self {
-        Self::Parse(ParseError::Lexopt(err))
     }
 }

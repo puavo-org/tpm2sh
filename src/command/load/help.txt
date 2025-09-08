@@ -1,5 +1,0 @@
-Loads a TPM-native key or imports an external key under a parent object.
-
-The command auto-detects the key type from the single <KEY_URI> argument.
-- If the input is a PEM/DER external key, it is imported using TPM2_Import.
-- If the input is a TSS2 PRIVATE KEY, it is loaded using TPM2_Load.

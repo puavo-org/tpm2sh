@@ -3,13 +3,14 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use cli::{
-    cli::{Cli, Commands},
+    cli::{Commands, LogFormat},
     command::{
         context::Context, create_primary::CreatePrimary, list::List, load::Load,
         pcr_event::PcrEvent, policy::Policy, seal::Seal, start_session::StartSession,
     },
     device::TpmDevice,
     error::{CliError, ParseError},
+    mocktpm,
     policy::session_from_uri,
     policy::Expression,
     policy::Uri,
@@ -33,7 +34,6 @@ use tpm2_protocol::{
 struct TestFixture {
     _handle: JoinHandle<()>,
     device: Arc<Mutex<TpmDevice>>,
-    cli: Cli,
     _temp_dir: TempDir,
 }
 
@@ -42,17 +42,13 @@ fn test_context() -> TestFixture {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
         .format_timestamp_micros()
         .try_init();
-    let temp_dir = tempdir().unwrap();
-    let (handle, transport) = cli::mocktpm::mocktpm_start(Some(temp_dir.path()));
-    let cli = Cli::default();
-
-    let device = Arc::new(Mutex::new(TpmDevice::new(transport, cli.log_format)));
-
+    let _temp_dir = tempdir().unwrap();
+    let (_handle, transport) = mocktpm::start(Some(_temp_dir.path()));
+    let device = Arc::new(Mutex::new(TpmDevice::new(transport, LogFormat::Plain)));
     TestFixture {
-        _handle: handle,
+        _handle,
         device,
-        cli,
-        _temp_dir: temp_dir,
+        _temp_dir,
     }
 }
 
@@ -62,7 +58,7 @@ fn test_subcommand_list_algorithms(test_context: TestFixture) {
         list_type: "algorithm".parse().unwrap(),
     });
     let mut out_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    let mut context = Context::new(&mut out_buf);
     list_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -100,7 +96,7 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
         ..Default::default()
     });
     let mut context_uri_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut context_uri_buf);
+    let mut context = Context::new(&mut context_uri_buf);
     create_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -108,7 +104,7 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
     let context_uri: Uri = context_uri_str.trim().parse().unwrap();
     let mut device = test_context.device.lock().unwrap();
     let mut dummy_writer = Vec::new();
-    let mut verification_context = Context::new(&test_context.cli, &mut dummy_writer);
+    let mut verification_context = Context::new(&mut dummy_writer);
     let handle = verification_context
         .load(&mut device, &context_uri)
         .unwrap();
@@ -136,7 +132,7 @@ fn test_subcommand_load_import(test_context: TestFixture) {
     });
 
     let mut parent_context_uri_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut parent_context_uri_buf);
+    let mut context = Context::new(&mut parent_context_uri_buf);
     create_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -162,7 +158,7 @@ fn test_subcommand_load_import(test_context: TestFixture) {
         unseal: false,
     });
     let mut load_output_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut load_output_buf);
+    let mut context = Context::new(&mut load_output_buf);
     load_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -182,7 +178,7 @@ fn test_subcommand_list_objects(test_context: TestFixture) {
     });
 
     let mut dummy_writer = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut dummy_writer);
+    let mut context = Context::new(&mut dummy_writer);
     create_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -194,7 +190,7 @@ fn test_subcommand_list_objects(test_context: TestFixture) {
         list_type: "transient".parse().unwrap(),
     });
     let mut out_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    let mut context = Context::new(&mut out_buf);
     list_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -219,7 +215,7 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
         session: None,
     });
     let mut out_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    let mut context = Context::new(&mut out_buf);
     pcr_event_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -236,7 +232,7 @@ fn test_subcommand_pcr_event(test_context: TestFixture) {
         compose: false,
     });
     let mut out_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    let mut context = Context::new(&mut out_buf);
     pcr_policy_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -253,7 +249,7 @@ fn test_subcommand_policy_default_is_pcr_read(test_context: TestFixture) {
         compose: false,
     });
     let mut out_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut out_buf);
+    let mut context = Context::new(&mut out_buf);
     policy_cmd
         .run(Some(test_context.device.clone()), &mut context)
         .unwrap();
@@ -273,7 +269,7 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
         ..Default::default()
     });
     let mut parent_context_uri_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut parent_context_uri_buf);
+    let mut context = Context::new(&mut parent_context_uri_buf);
     create_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let parent_uri: Uri = String::from_utf8(parent_context_uri_buf)
         .unwrap()
@@ -292,7 +288,7 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
         session: None,
     });
     let mut sealed_key_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
+    let mut context = Context::new(&mut sealed_key_buf);
     seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
 
@@ -312,7 +308,7 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
     });
 
     let mut unsealed_data_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut unsealed_data_buf);
+    let mut context = Context::new(&mut unsealed_data_buf);
     unseal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let unsealed_output = String::from_utf8(unsealed_data_buf).unwrap();
     let expected_output = format!("data://utf8,{secret}");
@@ -329,7 +325,7 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         ..Default::default()
     });
     let mut parent_context_uri_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut parent_context_uri_buf);
+    let mut context = Context::new(&mut parent_context_uri_buf);
     create_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let parent_uri: Uri = String::from_utf8(parent_context_uri_buf)
         .unwrap()
@@ -349,7 +345,7 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         session: None,
     });
     let mut sealed_key_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut sealed_key_buf);
+    let mut context = Context::new(&mut sealed_key_buf);
     seal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let sealed_key_pem = String::from_utf8(sealed_key_buf).unwrap();
 
@@ -362,7 +358,7 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
 
     let start_session_cmd = Commands::StartSession(StartSession::default());
     let mut session_uri_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut session_uri_buf);
+    let mut context = Context::new(&mut session_uri_buf);
     start_session_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let session_uri: Uri = String::from_utf8(session_uri_buf)
         .unwrap()
@@ -402,7 +398,7 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
     });
 
     let mut unsealed_data_buf = Vec::new();
-    let mut context = Context::new(&test_context.cli, &mut unsealed_data_buf);
+    let mut context = Context::new(&mut unsealed_data_buf);
     unseal_cmd.run(Some(test_context.device.clone()), &mut context)?;
     let unsealed_output = String::from_utf8(unsealed_data_buf).unwrap();
     let expected_output = format!("data://utf8,{secret}");

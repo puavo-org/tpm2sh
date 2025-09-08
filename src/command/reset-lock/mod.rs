@@ -3,39 +3,23 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_session_option, DeviceCommand, Subcommand},
+    cli::DeviceCommand,
     command::context::Context,
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     policy::session_from_uri,
     policy::Uri,
 };
-use lexopt::{Arg, Parser};
+use argh::FromArgs;
 use tpm2_protocol::{data::TpmCc, data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
 
-#[derive(Debug, Default)]
+/// Resets the dictionary attack lockout timer.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "reset-lock")]
 pub struct ResetLock {
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
-}
-
-impl Subcommand for ResetLock {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_SESSION: bool = true;
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut session = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(ResetLock { session })
-    }
 }
 
 impl DeviceCommand for ResetLock {

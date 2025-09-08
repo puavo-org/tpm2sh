@@ -40,6 +40,7 @@ harness = true
 
 [dependencies]
 aes = "0.8"
+argh = "0.1"
 base64 = "0.22"
 cfb-mode = "0.8"
 cipher = "0.4"
@@ -49,7 +50,6 @@ directories = "6.0"
 env_logger = "0.11"
 hex = "0.4"
 hmac = "0.12"
-lexopt = "0.3"
 log = "0.4"
 nom = "7.1"
 num-traits = "0.2"

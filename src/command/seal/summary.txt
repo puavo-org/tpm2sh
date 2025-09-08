@@ -1,1 +1,0 @@
-Seals a keyedhash object

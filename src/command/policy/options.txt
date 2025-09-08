@@ -1,2 +1,0 @@
---compose
-Compose the policy and output only the final digest

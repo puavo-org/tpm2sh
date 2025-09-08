@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_session_option, required, DeviceCommand, Subcommand},
+    cli::DeviceCommand,
     command::{context::Context, CommandError},
     crypto,
     device::{TpmDevice, TpmDeviceError},
@@ -13,7 +13,7 @@ use crate::{
     policy::Uri,
     util::build_to_vec,
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use pkcs8::der::asn1::OctetString;
 use tpm2_protocol::{
     data::{
@@ -24,59 +24,33 @@ use tpm2_protocol::{
     message::TpmCreateCommand,
 };
 
-#[derive(Debug, Default, Clone)]
+/// Seals a keyedhash object. The object is returned in the ASN.1 format.
+#[derive(FromArgs, Debug, Clone, Default)]
+#[argh(subcommand, name = "seal")]
 pub struct Seal {
-    pub parent: Uri,
-    pub data: Uri,
+    /// password for the new sealed object
+    #[argh(option)]
     pub password: Option<String>,
+
+    /// authorization policy digest
+    #[argh(option)]
     pub policy: Option<String>,
+
+    /// output destination ('file://')
+    #[argh(option)]
     pub output: Option<Uri>,
+
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
-}
 
-impl Subcommand for Seal {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_SESSION: bool = true;
+    /// parent object URI ('tpm://', 'file://', or 'data://')
+    #[argh(positional)]
+    pub parent: Uri,
 
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut parent = None;
-        let mut data = None;
-        let mut password = None;
-        let mut policy = None;
-        let mut output = None;
-        let mut session = None;
-        let mut positional_args = Vec::new();
-
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("password") => password = Some(parser.value()?.string()?),
-                Arg::Long("policy") => policy = Some(parser.value()?.string()?),
-                Arg::Long("output") => output = Some(parser.value()?.parse()?),
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                Arg::Value(val) => positional_args.push(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-
-        if positional_args.len() == 2 {
-            let mut iter = positional_args.into_iter();
-            parent = iter.next();
-            data = iter.next();
-        }
-
-        Ok(Seal {
-            parent: required(parent, "<PARENT>")?,
-            data: required(data, "<DATA>")?,
-            password,
-            policy,
-            output,
-            session,
-        })
-    }
+    /// data URI to seal ('file://' or 'data://')
+    #[argh(positional)]
+    pub data: Uri,
 }
 
 impl DeviceCommand for Seal {

@@ -2,43 +2,25 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_session_option, required, DeviceCommand, Subcommand},
-    command::context::Context,
-    device::TpmDevice,
-    error::CliError,
-    policy::Uri,
+    cli::DeviceCommand, command::context::Context, device::TpmDevice, error::CliError, policy::Uri,
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 
-#[derive(Debug, Default)]
+/// Deletes a transient or persistent object.
+///
+/// If a 'tpm://' URI is provided for a persistent handle, the object is evicted
+/// from NV memory. If the URI points to a transient handle (either 'tpm://',
+/// 'file://', or 'data://'), the object's context is flushed from the TPM.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "delete")]
 pub struct Delete {
-    pub handle: Uri,
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
-}
 
-impl Subcommand for Delete {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_SESSION: bool = true;
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut handle = None;
-        let mut session = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                Arg::Value(val) if handle.is_none() => handle = Some(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(Delete {
-            handle: required(handle, "<URI>")?,
-            session,
-        })
-    }
+    /// URI of the object to delete ('tpm://', 'file://', or 'data://')
+    #[argh(positional)]
+    pub handle: Uri,
 }
 
 impl DeviceCommand for Delete {

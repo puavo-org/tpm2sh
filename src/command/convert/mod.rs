@@ -3,42 +3,26 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    cli::{handle_help, required, LocalCommand, Subcommand},
+    cli::LocalCommand,
     command::{context::Context, CommandError},
     error::CliError,
     key::TpmKey,
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use std::{fs, path::PathBuf};
 
-#[derive(Debug, Default)]
+/// Converts keys between ASN.1 formats.
+/// Detects the format (PEM or DER) from the file extensions, and converts the key.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "convert")]
 pub struct Convert {
+    /// input file path
+    #[argh(positional)]
     pub input: PathBuf,
+
+    /// output file path
+    #[argh(positional)]
     pub output: PathBuf,
-}
-
-impl Subcommand for Convert {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut input = None;
-        let mut output = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Value(val) if input.is_none() => input = Some(val.parse()?),
-                Arg::Value(val) if output.is_none() => output = Some(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(Convert {
-            input: required(input, "<INPUT>")?,
-            output: required(output, "<OUTPUT>")?,
-        })
-    }
 }
 
 impl LocalCommand for Convert {

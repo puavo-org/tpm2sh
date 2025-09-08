@@ -1,3 +1,0 @@
-Detects the format (PEM or DER) from the file extensions, and converts the key.
-
-Usage: tpm2sh convert <INPUT> <OUTPUT>

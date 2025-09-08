@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, parse_session_option, required, DeviceCommand, Subcommand},
+    cli::DeviceCommand,
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
@@ -11,42 +11,24 @@ use crate::{
     policy::session_from_uri,
     policy::{pcr_selection_to_list, Uri},
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
 
-#[derive(Debug, Default)]
+/// Extends a PCR with an event.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "pcr-event")]
 pub struct PcrEvent {
-    pub pcr_selection: String,
-    pub data: crate::policy::Uri,
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
-}
 
-impl Subcommand for PcrEvent {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_SESSION: bool = true;
+    /// PCR selection to extend (e.g., "sha256:7")
+    #[argh(positional)]
+    pub pcr_selection: String,
 
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut pcr_selection = None;
-        let mut data = None;
-        let mut session = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                Arg::Value(val) if pcr_selection.is_none() => pcr_selection = Some(val.string()?),
-                Arg::Value(val) if data.is_none() => data = Some(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(PcrEvent {
-            pcr_selection: required(pcr_selection, "<PCR>")?,
-            data: required(data, "<DATA>")?,
-            session,
-        })
-    }
+    /// data URI for the event ('file://' or 'data://')
+    #[argh(positional)]
+    pub data: crate::policy::Uri,
 }
 
 impl DeviceCommand for PcrEvent {

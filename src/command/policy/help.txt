@@ -1,3 +1,0 @@
-A policy expression defines a condition that must be met, for example, 'pcr(sha256:0,...)' or 'secret(tpm://...)'.
-
-Usage: tpm2sh policy <EXPRESSION>

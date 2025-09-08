@@ -3,14 +3,14 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{handle_help, DeviceCommand, Subcommand},
+    cli::DeviceCommand,
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::Tpm2shAlgId,
     policy::{AuthSession, SessionType},
 };
-use lexopt::{Arg, Parser, ValueExt};
+use argh::FromArgs;
 use rand::{thread_rng, RngCore};
 
 use tpm2_protocol::{
@@ -22,30 +22,13 @@ use tpm2_protocol::{
     tpm_hash_size,
 };
 
-#[derive(Debug, Default)]
+/// Starts an authorization session.
+#[derive(FromArgs, Debug, Default)]
+#[argh(subcommand, name = "start-session")]
 pub struct StartSession {
+    /// session type (hmac, policy, or trial)
+    #[argh(option, short = 's', default = "Default::default()")]
     pub session_type: SessionType,
-}
-
-impl Subcommand for StartSession {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut session_type = SessionType::default();
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("session-type") | Arg::Short('s') => {
-                    session_type = parser.value()?.parse()?;
-                }
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(StartSession { session_type })
-    }
 }
 
 impl DeviceCommand for StartSession {

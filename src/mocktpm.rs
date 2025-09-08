@@ -355,9 +355,7 @@ impl MockTpm {
 }
 
 #[must_use]
-pub fn mocktpm_start(
-    nvram_path: Option<&Path>,
-) -> (std::thread::JoinHandle<()>, impl TpmTransport) {
+pub fn start(nvram_path: Option<&Path>) -> (std::thread::JoinHandle<()>, impl TpmTransport) {
     let from_server = Arc::new(EndpointGuard {
         state: Mutex::new(EndpointState {
             buffer: VecDeque::new(),

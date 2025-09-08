@@ -1,5 +1,0 @@
-TPM 2.0 shell
-
-Usage: tpm2sh [OPTIONS] [COMMAND]
-
-For more information, try '--help'.

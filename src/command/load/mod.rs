@@ -3,9 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{
-        handle_help, parse_parent_option, parse_session_option, required, DeviceCommand, Subcommand,
-    },
+    cli::DeviceCommand,
     command::{context::Context, CommandError},
     crypto::{
         crypto_hmac, crypto_kdfa, crypto_make_name, protect_seed_with_ecc, protect_seed_with_rsa,
@@ -18,9 +16,9 @@ use crate::{
     util::build_to_vec,
 };
 use aes::Aes128;
+use argh::FromArgs;
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
-use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
     data::{
@@ -31,58 +29,34 @@ use tpm2_protocol::{
     tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
-#[derive(Debug)]
+/// Loads a TPM object or imports an external key.
+///
+/// Loads a TPM-native key or imports an external key under a parent object.
+/// The command auto-detects the key type from the <`KEY_URI`> argument.
+/// - If the input is a PEM/DER external key, it is imported using `TPM2_Import`.
+/// - If the input is a TSS2 PRIVATE KEY, it is loaded using `TPM2_Load`.
+#[derive(FromArgs, Debug)]
+#[argh(subcommand, name = "load")]
 pub struct Load {
+    /// parent object URI ('data://', 'file://' or 'tpm://')
+    #[argh(option)]
     pub parent: Uri,
-    pub input: Uri,
-    pub output: Option<Uri>,
+
+    /// session URI or 'password://<PASS>'
+    #[argh(option)]
     pub session: Option<Uri>,
+
+    /// output destination ('tpm://' or 'file://')
+    #[argh(option)]
+    pub output: Option<Uri>,
+
+    /// unseal the object after loading and print the secret data
+    #[argh(switch)]
     pub unseal: bool,
-}
 
-impl Subcommand for Load {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-    const OPTION_PARENT: bool = true;
-    const OPTION_OUTPUT: bool = true;
-    const OPTION_SESSION: bool = true;
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut parent = None;
-        let mut output = None;
-        let mut session = None;
-        let mut unseal = false;
-        let mut positional_args = Vec::new();
-
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Long("parent") => parse_parent_option(parser, &mut parent)?,
-                Arg::Long("output") => output = Some(parser.value()?.parse()?),
-                Arg::Long("session") => parse_session_option(parser, &mut session)?,
-                Arg::Long("unseal") => unseal = true,
-                Arg::Value(val) => positional_args.push(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-
-        if positional_args.len() != 1 {
-            return Err(CliError::Parse(ParseError::Custom(format!(
-                "expected 1 positional argument, found {}",
-                positional_args.len()
-            ))));
-        }
-
-        Ok(Load {
-            parent: required(parent, "--parent")?,
-            input: positional_args.remove(0),
-            output,
-            session,
-            unseal,
-        })
-    }
+    /// key URI ('file://' or 'data://')
+    #[argh(positional)]
+    pub input: Uri,
 }
 
 /// Creates the encrypted blobs needed for `TPM2_Import`.
@@ -128,10 +102,8 @@ fn create_import_blob(
     .map_err(CliError::from)?;
 
     let integrity_key_bits = u16::try_from(
-        tpm_hash_size(&parent_name_alg).ok_or({
-            CommandError::InvalidAlgorithm {
-                alg: Tpm2shAlgId(parent_name_alg),
-            }
+        tpm_hash_size(&parent_name_alg).ok_or(CommandError::InvalidAlgorithm {
+            alg: Tpm2shAlgId(parent_name_alg),
         })? * 8,
     )
     .map_err(|_| CommandError::InvalidKey("hash size conversion error".to_string()))?;
@@ -185,7 +157,7 @@ fn create_import_blob(
 
 /// Checks if a byte slice contains valid, printable UTF-8.
 ///
-/// "Printable" is defined as not containing any control characters except for
+/// \"Printable\" is defined as not containing any control characters except for
 /// common whitespace (newline, carriage return, tab).
 fn is_printable_utf8(data: &[u8]) -> bool {
     if let Ok(s) = std::str::from_utf8(data) {
@@ -240,7 +212,7 @@ impl Load {
         context.track(resp.object_handle)?;
 
         if self.unseal {
-            let (public_area, _) = read_public(device, parent_handle)?;
+            let (public_area, _) = read_public(device, resp.object_handle)?;
 
             if public_area.object_type == TpmAlgId::KeyedHash {
                 let unseal_cmd = TpmUnsealCommand {

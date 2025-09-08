@@ -1,1 +1,0 @@
-Creates a keyedhash object. The object is returned in the ASN.1 format.

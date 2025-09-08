@@ -1,3 +1,0 @@
-Usage: tpm2sh delete <URI>
-
-If a 'tpm://' URI is provided for a persistent handle, the object is evicted from NV memory. If the URI points to a transient handle (either 'tpm://', 'file://', or 'data://'), the object's context is flushed from the TPM.

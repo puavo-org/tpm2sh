@@ -2,44 +2,21 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::{
-    cli::{handle_help, required, LocalCommand, Subcommand},
-    command::context::Context,
-    error::CliError,
-    util::parse_tpm_rc,
-};
-use lexopt::{Arg, Parser};
+use crate::{cli::LocalCommand, command::context::Context, error::CliError, util::parse_tpm_rc};
+use argh::FromArgs;
 use tpm2_protocol::data::TpmRc;
 
-#[derive(Debug)]
-pub struct PrintError {
-    pub rc: TpmRc,
+fn parse_rc_from_str(value: &str) -> Result<TpmRc, String> {
+    parse_tpm_rc(value).map_err(|e| e.to_string())
 }
 
-impl Subcommand for PrintError {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut rc = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Value(val) if rc.is_none() => {
-                    let rc_str = val.to_string_lossy();
-                    let rc_val =
-                        parse_tpm_rc(&rc_str).map_err(|e| lexopt::Error::from(e.to_string()))?;
-                    rc = Some(rc_val);
-                }
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(PrintError {
-            rc: required(rc, "<RC>")?,
-        })
-    }
+/// Prints a human-readable description of a TPM error code.
+#[derive(FromArgs, Debug)]
+#[argh(subcommand, name = "print-error")]
+pub struct PrintError {
+    /// TPM error code in decimal or hex format
+    #[argh(positional, from_str_fn(parse_rc_from_str))]
+    pub rc: TpmRc,
 }
 
 impl LocalCommand for PrintError {

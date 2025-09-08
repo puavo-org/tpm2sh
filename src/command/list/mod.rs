@@ -2,13 +2,8 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{
-    cli::{handle_help, required, DeviceCommand, Subcommand},
-    command::context::Context,
-    device::TpmDevice,
-    error::CliError,
-};
-use lexopt::{Arg, Parser, ValueExt};
+use crate::{cli::DeviceCommand, command::context::Context, device::TpmDevice, error::CliError};
+use argh::FromArgs;
 use std::str::FromStr;
 use tpm2_protocol::data::{TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST};
 
@@ -23,7 +18,7 @@ impl FromStr for ListType {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "algorithm" => Ok(Self::Algorithm),
+            "algorithm" | "algorithms" => Ok(Self::Algorithm),
             "persistent" => Ok(Self::Persistent),
             "transient" => Ok(Self::Transient),
             _ => Err(format!("invalid list type: '{s}'")),
@@ -31,30 +26,13 @@ impl FromStr for ListType {
     }
 }
 
-#[derive(Debug)]
+/// Lists TPM capabilities and objects.
+#[derive(FromArgs, Debug)]
+#[argh(subcommand, name = "list")]
 pub struct List {
+    /// type of items to list (algorithm, persistent, or transient)
+    #[argh(positional)]
     pub list_type: ListType,
-}
-
-impl Subcommand for List {
-    const USAGE: &'static str = include_str!("usage.txt");
-    const HELP: &'static str = include_str!("help.txt");
-    const ARGUMENTS: &'static str = include_str!("arguments.txt");
-    const OPTIONS: &'static str = include_str!("options.txt");
-    const SUMMARY: &'static str = include_str!("summary.txt");
-
-    fn parse(parser: &mut Parser) -> Result<Self, CliError> {
-        let mut list_type = None;
-        while let Some(arg) = parser.next()? {
-            match arg {
-                Arg::Value(val) if list_type.is_none() => list_type = Some(val.parse()?),
-                _ => return handle_help(arg),
-            }
-        }
-        Ok(List {
-            list_type: required(list_type, "<TYPE>")?,
-        })
-    }
 }
 
 impl DeviceCommand for List {

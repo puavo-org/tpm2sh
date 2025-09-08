@@ -1,8 +1,0 @@
--d, --device <DEVICE>
-device path (default: '/dev/tpmrm0')
---log-format <LOG_FORMAT>
-plain (default) or pretty
--h, --help
-print help
--V, --version
-print version
