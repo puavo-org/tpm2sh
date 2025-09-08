@@ -126,28 +126,7 @@ impl<'a> Context<'a> {
             })?;
         let context_bytes = build_to_vec(&save_resp.context)?;
 
-        if let Some(uri) = output_uri {
-            match uri.ast() {
-                Expression::FilePath(path) => {
-                    std::fs::write(path, context_bytes)
-                        .map_err(|e| CliError::File(path.clone(), e))?;
-                    writeln!(self.writer, "file://{path}")?;
-                }
-                _ => {
-                    return Err(CliError::Command(CommandError::InvalidUriScheme {
-                        expected: "file://".to_string(),
-                        actual: uri.to_string(),
-                    }));
-                }
-            }
-        } else {
-            writeln!(
-                self.writer,
-                "data://base64,{}",
-                base64_engine.encode(context_bytes)
-            )?;
-        }
-        Ok(())
+        self.handle_data_output(output_uri, &context_bytes)
     }
 
     /// Deletes a persistent or transient object by URI.
@@ -342,6 +321,38 @@ impl<'a> Context<'a> {
             }
         }
         self.save_context(device, object_handle, output_uri)
+    }
+
+    /// Handles writing data to an output file or stdout.
+    ///
+    /// Depending on the `output_uri`, this either writes the data to a file
+    /// or to stdout as a `data://` URI.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `CliError` if writing fails or the URI scheme is unsupported.
+    pub fn handle_data_output(
+        &mut self,
+        output_uri: Option<&Uri>,
+        data: &[u8],
+    ) -> Result<(), CliError> {
+        if let Some(uri) = output_uri {
+            match uri.ast() {
+                Expression::FilePath(path) => {
+                    std::fs::write(path, data).map_err(|e| CliError::File(path.clone(), e))?;
+                    writeln!(self.writer, "file://{path}")?;
+                }
+                _ => {
+                    return Err(CliError::Command(CommandError::InvalidUriScheme {
+                        expected: "file://".to_string(),
+                        actual: uri.to_string(),
+                    }));
+                }
+            }
+        } else {
+            writeln!(self.writer, "data://base64,{}", base64_engine.encode(data))?;
+        }
+        Ok(())
     }
 
     fn capacity_invariant(&self) -> Result<(), CommandError> {

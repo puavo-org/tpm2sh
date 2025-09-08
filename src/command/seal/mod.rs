@@ -9,7 +9,6 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::TpmKey,
-    policy::Expression,
     session::session_from_uri,
     uri::Uri,
     util::build_to_vec,
@@ -149,20 +148,6 @@ impl DeviceCommand for Seal {
         };
 
         let pem_output = tpm_key.to_pem()?;
-        if let Some(uri) = &self.output {
-            if let Expression::FilePath(path) = uri.ast() {
-                std::fs::write(path, pem_output.as_bytes())
-                    .map_err(|e| CliError::File(path.clone(), e))?;
-            } else {
-                return Err(CliError::Command(CommandError::InvalidUriScheme {
-                    expected: "file://".to_string(),
-                    actual: uri.to_string(),
-                }));
-            }
-        } else {
-            writeln!(context.writer, "{pem_output}")?;
-        }
-
-        Ok(())
+        context.handle_data_output(self.output.as_ref(), pem_output.as_bytes())
     }
 }
