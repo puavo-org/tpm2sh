@@ -3,22 +3,77 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    command::CommandError,
     device::{TpmDevice, TpmDeviceError},
-    error::{CliError, ParseError},
-    policy::{session_from_uri, Expression, Uri},
+    policy::{session_from_uri, Expression, PolicyError, Uri},
     util::build_to_vec,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
-    data::{TpmCc, TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
+    data::{TpmCc, TpmRc, TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     message::{
         TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
         TpmFlushContextCommand, MAX_HANDLES,
     },
-    TpmParse, TpmPersistent, TpmTransient,
+    TpmErrorKind, TpmParse, TpmPersistent, TpmTransient,
 };
+
+#[derive(Debug)]
+pub enum ContextError {
+    AlreadyTracked(TpmTransient),
+    CapacityExceeded(usize),
+    Device(TpmDeviceError),
+    InvalidHandle(u32),
+    InvalidUri(Uri),
+    Io(std::io::Error),
+    NotTracked(TpmTransient),
+    Policy(PolicyError),
+    Tpm(TpmErrorKind),
+    TpmRc(TpmRc),
+}
+
+impl std::error::Error for ContextError {}
+
+impl std::fmt::Display for ContextError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::AlreadyTracked(h) => write!(f, "already tracked: {h}"),
+            Self::CapacityExceeded(s) => write!(f, "capacity exceeded: {s}"),
+            Self::Device(e) => write!(f, "device: {e}"),
+            Self::InvalidHandle(h) => write!(f, "invalid handle: {h}"),
+            Self::InvalidUri(u) => write!(f, "invalid URI: {u}"),
+            Self::Io(s) => write!(f, "I/O: {s}"),
+            Self::NotTracked(h) => write!(f, "not tracked: {h}"),
+            Self::Policy(p) => write!(f, "policy: {p}"),
+            Self::Tpm(err) => write!(f, "TPM: {err}"),
+            Self::TpmRc(rc) => write!(f, "TPM RC: {rc}"),
+        }
+    }
+}
+
+impl From<PolicyError> for ContextError {
+    fn from(err: PolicyError) -> Self {
+        Self::Policy(err)
+    }
+}
+
+impl From<TpmDeviceError> for ContextError {
+    fn from(err: TpmDeviceError) -> Self {
+        Self::Device(err)
+    }
+}
+
+impl From<TpmErrorKind> for ContextError {
+    fn from(err: TpmErrorKind) -> Self {
+        Self::Tpm(err)
+    }
+}
+
+impl From<std::io::Error> for ContextError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
+}
 
 pub struct Context<'a> {
     pub handles: [Option<TpmTransient>; MAX_HANDLES],
@@ -70,18 +125,18 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` on parsing or TPM command failure.
-    pub fn load(&mut self, device: &mut TpmDevice, uri: &Uri) -> Result<TpmTransient, CliError> {
+    /// Returns a `ContextError` on parsing or TPM command failure.
+    pub fn load(
+        &mut self,
+        device: &mut TpmDevice,
+        uri: &Uri,
+    ) -> Result<TpmTransient, ContextError> {
         self.capacity_invariant()?;
         match uri.ast() {
             Expression::TpmHandle(handle) => Ok(TpmTransient(*handle)),
             Expression::Data { .. } | Expression::FilePath(_) => {
                 let context_blob = uri.to_bytes()?;
-                let (context, remainder) =
-                    TpmsContext::parse(&context_blob).map_err(ParseError::from)?;
-                if !remainder.is_empty() {
-                    return Err(ParseError::Custom("trailing data".to_string()).into());
-                }
+                let (context, _) = TpmsContext::parse(&context_blob)?;
                 let cmd = TpmContextLoadCommand { context };
                 let (resp, _) = device.execute(&cmd, &[])?;
                 let resp = resp
@@ -92,7 +147,7 @@ impl<'a> Context<'a> {
                 self.track(resp.loaded_handle)?;
                 Ok(resp.loaded_handle)
             }
-            _ => Err(ParseError::Custom(format!("{uri}")).into()),
+            _ => Err(ContextError::InvalidUri(uri.clone())),
         }
     }
 
@@ -100,14 +155,14 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the handle is not tracked, or if TPM command or
+    /// Returns a `ContextError` if the handle is not tracked, or if TPM command or
     /// I/O operations fail.
     pub fn save_context(
         &mut self,
         device: &mut TpmDevice,
         handle_to_save: TpmTransient,
         output_uri: Option<&Uri>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         self.existence_invariant(handle_to_save)?;
         let save_cmd = TpmContextSaveCommand {
             save_handle: handle_to_save,
@@ -127,13 +182,13 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the handle is invalid or the delete operation fails.
+    /// Returns a `ContextError` if the handle is invalid or the delete operation fails.
     pub fn delete(
         &mut self,
         device: &mut TpmDevice,
         uri: &Uri,
         session: Option<&Uri>,
-    ) -> Result<u32, CliError> {
+    ) -> Result<u32, ContextError> {
         match uri.ast() {
             Expression::TpmHandle(handle) => {
                 let handle = *handle;
@@ -142,7 +197,7 @@ impl<'a> Context<'a> {
                 } else if handle >= TPM_RH_TRANSIENT_FIRST {
                     self.delete_transient(device, TpmTransient(handle))?;
                 } else {
-                    return Err(CommandError::InvalidHandleType { handle }.into());
+                    return Err(ContextError::InvalidHandle(handle));
                 }
                 Ok(handle)
             }
@@ -151,7 +206,7 @@ impl<'a> Context<'a> {
                 self.delete_transient(device, transient_handle)?;
                 Ok(transient_handle.0)
             }
-            _ => Err(ParseError::Custom(format!("invalid URI scheme for delete: {uri}")).into()),
+            _ => Err(ContextError::InvalidUri(uri.clone())),
         }
     }
 
@@ -159,13 +214,13 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `CliError` if the `EvictControl` command fails.
+    /// Returns `ContextError` if the `EvictControl` command fails.
     pub fn delete_persistent(
         &mut self,
         device: &mut TpmDevice,
         handle: TpmPersistent,
         session: Option<&Uri>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         let auth_handle = TpmRh::Owner;
         let cmd = TpmEvictControlCommand {
             auth: (auth_handle as u32).into(),
@@ -186,12 +241,12 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `CliError` if the `FlushContext` command fails.
+    /// Returns `ContextError` if the `FlushContext` command fails.
     pub fn delete_transient(
         &mut self,
         device: &mut TpmDevice,
         handle: TpmTransient,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         let cmd = TpmFlushContextCommand {
             flush_handle: handle.into(),
         };
@@ -209,7 +264,7 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the handle is not a tracked transient handle,
+    /// Returns a `ContextError` if the handle is not a tracked transient handle,
     /// or if the `EvictControl` command fails.
     pub fn persist_transient(
         &mut self,
@@ -217,7 +272,7 @@ impl<'a> Context<'a> {
         transient_handle: TpmTransient,
         persistent_handle: TpmPersistent,
         session: Option<&Uri>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         self.existence_invariant(transient_handle)?;
         let auth_handle = TpmRh::Owner;
         let cmd = TpmEvictControlCommand {
@@ -246,12 +301,12 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the handle is invalid or does not exist.
-    pub fn track(&mut self, handle: TpmTransient) -> Result<(), CliError> {
+    /// Returns a `ContextError` if the handle is invalid or does not exist.
+    pub fn track(&mut self, handle: TpmTransient) -> Result<(), ContextError> {
         self.non_existence_invariant(handle)?;
         self.capacity_invariant()?;
         if handle.0 < TPM_RH_TRANSIENT_FIRST {
-            return Err(CommandError::InvalidHandleType { handle: handle.0 }.into());
+            return Err(ContextError::InvalidHandle(handle.0));
         }
         if let Some(h) = self.handles.iter_mut().find(|h| h.is_none()) {
             *h = Some(handle);
@@ -263,9 +318,9 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns `CliError` if the device mutex is poisoned or if flushing a
+    /// Returns `ContextError` if the device mutex is poisoned or if flushing a
     /// handle fails. It returns the first error encountered.
-    pub fn flush(self, device: Option<Arc<Mutex<TpmDevice>>>) -> Result<(), CliError> {
+    pub fn flush(self, device: Option<Arc<Mutex<TpmDevice>>>) -> Result<(), ContextError> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
                 let mut guard = device.lock().map_err(|_| TpmDeviceError::LockPoisoned)?;
@@ -298,14 +353,14 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if persisting or saving fails.
+    /// Returns a `ContextError` if persisting or saving fails.
     pub fn finalize_object_output(
         &mut self,
         device: &mut TpmDevice,
         object_handle: TpmTransient,
         output_uri: Option<&Uri>,
         session: Option<&Uri>,
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         if let Some(uri) = output_uri {
             if let Expression::TpmHandle(handle) = uri.ast() {
                 let persistent_handle = TpmPersistent(*handle);
@@ -324,24 +379,19 @@ impl<'a> Context<'a> {
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if writing fails or the URI scheme is unsupported.
+    /// Returns a `ContextError` if writing fails or the URI scheme is unsupported.
     pub fn handle_data_output(
         &mut self,
         output_uri: Option<&Uri>,
         data: &[u8],
-    ) -> Result<(), CliError> {
+    ) -> Result<(), ContextError> {
         if let Some(uri) = output_uri {
             match uri.ast() {
                 Expression::FilePath(path) => {
-                    std::fs::write(path, data).map_err(|e| CliError::File(path.clone(), e))?;
+                    std::fs::write(path, data)?;
                     writeln!(self.writer, "file://{path}")?;
                 }
-                _ => {
-                    return Err(CliError::Command(CommandError::InvalidUriScheme {
-                        expected: "file://".to_string(),
-                        actual: uri.to_string(),
-                    }));
-                }
+                _ => return Err(ContextError::InvalidUri(uri.clone())),
             }
         } else {
             writeln!(self.writer, "data://base64,{}", base64_engine.encode(data))?;
@@ -349,27 +399,25 @@ impl<'a> Context<'a> {
         Ok(())
     }
 
-    fn capacity_invariant(&self) -> Result<(), CommandError> {
+    fn capacity_invariant(&self) -> Result<(), ContextError> {
         if self.handles_len() == MAX_HANDLES {
-            Err(CommandError::HandleCapacityExceeded {
-                capacity: MAX_HANDLES,
-            })
+            Err(ContextError::CapacityExceeded(MAX_HANDLES))
         } else {
             Ok(())
         }
     }
 
-    fn existence_invariant(&self, handle: TpmTransient) -> Result<(), CommandError> {
+    fn existence_invariant(&self, handle: TpmTransient) -> Result<(), ContextError> {
         if self.handles.contains(&Some(handle)) {
             Ok(())
         } else {
-            Err(CommandError::HandleNotTracked { handle })
+            Err(ContextError::NotTracked(handle))
         }
     }
 
-    fn non_existence_invariant(&self, handle: TpmTransient) -> Result<(), CommandError> {
+    fn non_existence_invariant(&self, handle: TpmTransient) -> Result<(), ContextError> {
         if self.handles.contains(&Some(handle)) {
-            Err(CommandError::HandleAlreadyTracked { handle })
+            Err(ContextError::AlreadyTracked(handle))
         } else {
             Ok(())
         }

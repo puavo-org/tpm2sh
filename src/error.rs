@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::{command::CommandError, device::TpmDeviceError, policy::PolicyError};
+use crate::{
+    command::{context::ContextError, CommandError},
+    device::TpmDeviceError,
+    policy::PolicyError,
+};
 use std::io::Error as IoError;
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
@@ -36,26 +40,35 @@ impl From<TpmErrorKind> for ParseError {
 
 #[derive(Debug, Error)]
 pub enum CliError {
-    #[error("Command error: {0}")]
+    #[error("Command: {0}")]
     Command(#[from] CommandError),
 
-    #[error("Device error: {0}")]
+    #[error("Context: {0}")]
+    Context(ContextError),
+
+    #[error("Device: {0}")]
     Device(#[from] TpmDeviceError),
 
     #[error("'{0}': {1}")]
     File(String, #[source] IoError),
 
-    #[error("I/O error: {0}")]
+    #[error("I/O: {0}")]
     Io(#[from] IoError),
 
-    #[error("Parsing error: {0}")]
+    #[error("Parsing: {0}")]
     Parse(#[from] ParseError),
 
-    #[error("Policy engine error: {0}")]
+    #[error("Policy: {0}")]
     Policy(#[from] PolicyError),
 
-    #[error("TPM returned an error code: {0}")]
+    #[error("TPM RC: {0}")]
     Tpm(TpmRc),
+}
+
+impl From<ContextError> for CliError {
+    fn from(err: ContextError) -> Self {
+        Self::Context(err)
+    }
 }
 
 impl From<TpmErrorKind> for CliError {

@@ -122,6 +122,6 @@ impl DeviceCommand for Seal {
         };
 
         let pem_output = tpm_key.to_pem()?;
-        context.handle_data_output(self.output.as_ref(), pem_output.as_bytes())
+        Ok(context.handle_data_output(self.output.as_ref(), pem_output.as_bytes())?)
     }
 }

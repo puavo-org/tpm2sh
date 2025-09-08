@@ -142,11 +142,11 @@ impl DeviceCommand for CreatePrimary {
         let object_handle = resp.object_handle;
 
         context.track(object_handle)?;
-        context.finalize_object_output(
+        Ok(context.finalize_object_output(
             device,
             object_handle,
             self.output.as_ref(),
             self.session.as_ref(),
-        )
+        )?)
     }
 }

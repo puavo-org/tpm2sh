@@ -72,21 +72,25 @@ impl From<hex::FromHexError> for PolicyError {
         Self::InvalidValue(err.to_string())
     }
 }
+
 impl From<base64::DecodeError> for PolicyError {
     fn from(err: base64::DecodeError) -> Self {
         Self::InvalidValue(err.to_string())
     }
 }
+
 impl From<std::num::ParseIntError> for PolicyError {
     fn from(err: std::num::ParseIntError) -> Self {
         Self::InvalidValue(err.to_string())
     }
 }
+
 impl From<std::str::Utf8Error> for PolicyError {
     fn from(err: std::str::Utf8Error) -> Self {
         Self::InvalidValue(err.to_string())
     }
 }
+
 impl From<std::io::Error> for PolicyError {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err)
