@@ -9,7 +9,6 @@ use crate::{
     },
     context::Context,
     device::TpmDevice,
-    Command,
 };
 use anyhow::Result;
 use argh::FromArgs;
@@ -19,24 +18,14 @@ use std::{
 };
 use tpm2_protocol::data::TpmRh;
 
-/// Subcommand not requiring TPM device access.
-pub trait LocalCommand {
+/// A subcommand of the main CLI application.
+pub trait SubCommand {
     /// Runs a command.
     ///
     /// # Errors
     ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, context: &mut Context) -> Result<()>;
-}
-
-/// Subcommand requiring TPM device access.
-pub trait DeviceCommand {
-    /// Runs a command.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()>;
+    /// Returns an error if the execution fails.
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()>;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -69,12 +58,12 @@ pub struct Cli {
     pub log_format: LogFormat,
 
     #[argh(subcommand)]
-    pub command: Commands,
+    pub command: Command,
 }
 
 #[derive(FromArgs, Debug)]
 #[argh(subcommand)]
-pub enum Commands {
+pub enum Command {
     Convert(Convert),
     CreatePrimary(CreatePrimary),
     Delete(Delete),
@@ -88,34 +77,36 @@ pub enum Commands {
     StartSession(StartSession),
 }
 
-impl Command for Commands {
-    fn is_local(&self) -> bool {
+impl Command {
+    #[must_use]
+    pub fn is_local(&self) -> bool {
         matches!(self, Self::Convert(_) | Self::PrintError(_))
     }
 
-    fn run(&self, device: Option<Arc<Mutex<TpmDevice>>>, context: &mut Context) -> Result<()> {
-        if self.is_local() {
-            return match self {
-                Self::Convert(args) => args.run(context),
-                Self::PrintError(args) => args.run(context),
-                _ => unreachable!(),
-            };
-        }
+    /// Runs the command.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the device lock cannot be acquired or if the subcommand fails.
+    pub fn run(&self, device: Option<&Arc<Mutex<TpmDevice>>>, context: &mut Context) -> Result<()> {
+        let mut guard = device
+            .map(|d| d.lock().map_err(|_| CommandError::LockPoisoned))
+            .transpose()?;
 
-        let device_arc = device.ok_or(CommandError::NotProvided)?;
-        let mut guard = device_arc.lock().map_err(|_| CommandError::LockPoisoned)?;
+        let maybe_device = guard.as_deref_mut();
 
         match self {
-            Self::CreatePrimary(args) => args.run(&mut guard, context),
-            Self::Delete(args) => args.run(&mut guard, context),
-            Self::List(args) => args.run(&mut guard, context),
-            Self::Load(args) => args.run(&mut guard, context),
-            Self::PcrEvent(args) => args.run(&mut guard, context),
-            Self::Policy(args) => args.run(&mut guard, context),
-            Self::ResetLock(args) => args.run(&mut guard, context),
-            Self::Seal(args) => args.run(&mut guard, context),
-            Self::StartSession(args) => args.run(&mut guard, context),
-            _ => unreachable!(),
+            Self::Convert(args) => args.run(maybe_device, context),
+            Self::CreatePrimary(args) => args.run(maybe_device, context),
+            Self::Delete(args) => args.run(maybe_device, context),
+            Self::List(args) => args.run(maybe_device, context),
+            Self::Load(args) => args.run(maybe_device, context),
+            Self::PcrEvent(args) => args.run(maybe_device, context),
+            Self::Policy(args) => args.run(maybe_device, context),
+            Self::PrintError(args) => args.run(maybe_device, context),
+            Self::ResetLock(args) => args.run(maybe_device, context),
+            Self::Seal(args) => args.run(maybe_device, context),
+            Self::StartSession(args) => args.run(maybe_device, context),
         }
     }
 }

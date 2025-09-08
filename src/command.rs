@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use crate::{
-    cli::{DeviceCommand, Hierarchy, LocalCommand},
+    cli::{Hierarchy, SubCommand},
     context::Context,
     crypto::{
         crypto_hmac, crypto_kdfa, crypto_make_name, protect_seed_with_ecc, protect_seed_with_rsa,
@@ -87,13 +87,8 @@ pub struct Convert {
     pub output: std::path::PathBuf,
 }
 
-impl LocalCommand for Convert {
-    /// Runs `convert`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, _context: &mut Context) -> Result<()> {
+impl SubCommand for Convert {
+    fn run(&self, _device: Option<&mut TpmDevice>, _context: &mut Context) -> Result<()> {
         let input_ext = self
             .input
             .extension()
@@ -216,13 +211,9 @@ fn build_public_template(alg_desc: &Alg) -> TpmtPublic {
     }
 }
 
-impl DeviceCommand for CreatePrimary {
-    /// Runs `create-primary`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for CreatePrimary {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -274,13 +265,9 @@ pub struct Delete {
     pub handle: Uri,
 }
 
-impl DeviceCommand for Delete {
-    /// Runs `delete`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for Delete {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let handle = context.delete(device, &self.handle, self.session.as_ref())?;
         writeln!(context.writer, "tpm://{handle:#010x}")?;
         Ok(())
@@ -315,13 +302,9 @@ pub struct List {
     pub list_type: ListType,
 }
 
-impl DeviceCommand for List {
-    /// Runs `list`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for List {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         match self.list_type {
             ListType::Algorithm => {
                 let mut algorithms = device.get_all_algorithms()?;
@@ -612,13 +595,9 @@ impl Load {
     }
 }
 
-impl DeviceCommand for Load {
-    /// Runs `load`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for Load {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let parent_handle = context.load(device, &self.parent)?;
         let input_bytes = self.input.to_bytes()?;
 
@@ -670,13 +649,9 @@ pub struct PcrEvent {
     pub data: Uri,
 }
 
-impl DeviceCommand for PcrEvent {
-    /// Runs `pcr-event`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<()> {
+impl SubCommand for PcrEvent {
+    fn run(&self, device: Option<&mut TpmDevice>, _context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let pcr_count = pcr_get_count(device)?;
         let selection = pcr_selection_to_list(&self.pcr_selection, pcr_count)?;
 
@@ -740,13 +715,9 @@ pub struct Policy {
     pub expression: String,
 }
 
-impl DeviceCommand for Policy {
-    /// Run 'policy'.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` on failure.
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for Policy {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let mut ast = policy_parse(&self.expression, Parsing::AuthorizationPolicy)?;
 
         fill_pcr_digests(&mut ast, device)?;
@@ -780,8 +751,8 @@ pub struct PrintError {
     pub rc: TpmRc,
 }
 
-impl LocalCommand for PrintError {
-    fn run(&self, context: &mut Context) -> Result<()> {
+impl SubCommand for PrintError {
+    fn run(&self, _device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
         writeln!(context.writer, "{}", self.rc)?;
         Ok(())
     }
@@ -796,13 +767,9 @@ pub struct ResetLock {
     pub session: Option<Uri>,
 }
 
-impl DeviceCommand for ResetLock {
-    /// Runs `reset-lock`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<()> {
+impl SubCommand for ResetLock {
+    fn run(&self, device: Option<&mut TpmDevice>, _context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
@@ -844,13 +811,9 @@ pub struct Seal {
     pub data: Uri,
 }
 
-impl DeviceCommand for Seal {
-    /// Runs `seal`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for Seal {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let parent_handle = context.load(device, &self.parent)?;
         let data_to_seal = self.data.to_bytes()?;
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
@@ -927,13 +890,9 @@ pub struct StartSession {
     pub session_type: SessionType,
 }
 
-impl DeviceCommand for StartSession {
-    /// Runs `start-session`.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
+impl SubCommand for StartSession {
+    fn run(&self, device: Option<&mut TpmDevice>, context: &mut Context) -> Result<()> {
+        let device = device.ok_or(CommandError::NotProvided)?;
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or(CommandError::InvalidAlgorithm(Tpm2shAlgId(auth_hash)))?;

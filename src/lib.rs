@@ -32,23 +32,6 @@ pub use device::TpmDeviceError;
 /// before exiting.
 pub static TEARDOWN: AtomicBool = AtomicBool::new(false);
 
-/// A trait for executing the top-level Commands enum.
-pub trait Command {
-    /// Returns `true` if the command does not require TPM device access.
-    fn is_local(&self) -> bool;
-
-    /// Runs a command.
-    ///
-    /// # Errors
-    ///
-    /// Returns a `crate::error::CliError` if the command fails.
-    fn run(
-        &self,
-        device: Option<std::sync::Arc<std::sync::Mutex<crate::device::TpmDevice>>>,
-        context: &mut crate::context::Context,
-    ) -> Result<()>;
-}
-
 /// Parses command-line arguments and executes the corresponding command.
 ///
 /// # Errors
@@ -72,7 +55,7 @@ pub fn execute_cli() -> Result<()> {
 
     let mut stdout = std::io::stdout();
     let mut context = crate::context::Context::new(&mut stdout);
-    let result = command.run(device_arc.clone(), &mut context);
+    let result = command.run(device_arc.as_ref(), &mut context);
 
     context.flush(device_arc)?;
 
