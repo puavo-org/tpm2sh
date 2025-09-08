@@ -50,7 +50,8 @@ pub fn execute_cli() -> Result<()> {
             .write(true)
             .open(&cli.device)
             .with_context(|| format!("Failed to open '{}'", &cli.device))?;
-        let device = crate::device::TpmDevice::new(file, cli.log_format);
+        let transport = crate::transport::FileTransport(file);
+        let device = crate::device::TpmDevice::new(transport, cli.log_format);
         Some(std::sync::Arc::new(std::sync::Mutex::new(device)))
     };
 

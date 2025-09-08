@@ -10,8 +10,7 @@ use crate::{
         crypto_hmac, crypto_hmac_verify, crypto_kdfa, crypto_make_name, PrivateKey,
         KDF_LABEL_DUPLICATE, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
     },
-    device::TpmTransport,
-    transport::{Endpoint, EndpointGuard, EndpointState, Transport},
+    transport::{Endpoint, EndpointGuard, EndpointState, PipeTransport},
     util::{build_to_vec, TpmErrorKindExt},
 };
 use aes::Aes128;
@@ -313,7 +312,7 @@ impl MockTpm {
 }
 
 #[must_use]
-pub fn start(nvram_path: Option<&Path>) -> (std::thread::JoinHandle<()>, impl TpmTransport) {
+pub fn start(nvram_path: Option<&Path>) -> (std::thread::JoinHandle<()>, PipeTransport) {
     let from_server = Arc::new(EndpointGuard {
         state: Mutex::new(EndpointState {
             buffer: VecDeque::new(),
@@ -329,8 +328,8 @@ pub fn start(nvram_path: Option<&Path>) -> (std::thread::JoinHandle<()>, impl Tp
         cvar: Condvar::new(),
     });
 
-    let server = Transport(Endpoint(from_client.clone()), Endpoint(from_server.clone()));
-    let client = Transport(Endpoint(from_server), Endpoint(from_client));
+    let server = PipeTransport(Endpoint(from_client.clone()), Endpoint(from_server.clone()));
+    let client = PipeTransport(Endpoint(from_server), Endpoint(from_client));
 
     let path_buf = nvram_path.map(PathBuf::from);
     let handle = std::thread::spawn(move || {

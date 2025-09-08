@@ -6,12 +6,12 @@ use crate::{
     cli::LogFormat,
     key::{tpm_ecc_curve_to_str, Tpm2shAlgId},
     print::TpmPrint,
+    transport::Transport,
     TEARDOWN,
 };
 use std::{
     collections::HashSet,
-    fmt::Debug,
-    io::{self, IsTerminal, Read, Write},
+    io::{self, IsTerminal, Write},
     sync::{atomic::Ordering, mpsc},
     thread,
     time::{Duration, Instant},
@@ -77,31 +77,9 @@ impl From<TpmRc> for TpmDeviceError {
     }
 }
 
-/// A trait combining the I/O and safety traits required for a TPM transport.
-pub trait TpmTransport: Read + Write + Send + Debug {}
-
-/// Blanket implementation to automatically apply `TpmTransport` to all valid types.
-impl<T: Read + Write + Send + Debug> TpmTransport for T {}
-
-#[derive(Debug)]
-struct EmptyTransport;
-impl Read for EmptyTransport {
-    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-        Ok(0)
-    }
-}
-impl Write for EmptyTransport {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 #[derive(Debug)]
 pub struct TpmDevice {
-    transport: Box<dyn TpmTransport>,
+    transport: Box<dyn Transport>,
     log_format: LogFormat,
 }
 
@@ -123,7 +101,7 @@ fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<TpmRc, TpmDev
 
 impl TpmDevice {
     /// Creates a new TPM device from an owned transport.
-    pub fn new<T: TpmTransport + 'static>(transport: T, log_format: LogFormat) -> Self {
+    pub fn new(transport: impl Transport + 'static, log_format: LogFormat) -> Self {
         Self {
             transport: Box::new(transport),
             log_format,
@@ -168,30 +146,12 @@ impl TpmDevice {
             if let LogFormat::Plain = self.log_format {
                 trace!(target: "cli::device", "Command: {}", hex::encode(command_bytes));
             }
-            self.transport.write_all(command_bytes)?;
-            self.transport.flush()?;
+            self.transport.send(command_bytes)?;
         } else {
             return self.execute_interactive(command_bytes, C::COMMAND);
         }
 
-        let mut header = [0u8; 10];
-        self.transport.read_exact(&mut header)?;
-
-        let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            return Err(TpmDeviceError::ResponseUnderflow);
-        };
-
-        let size = u32::from_be_bytes(size_bytes) as usize;
-        if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
-            if size < header.len() {
-                return Err(TpmDeviceError::ResponseUnderflow);
-            }
-            return Err(TpmDeviceError::ResponseOverflow);
-        }
-
-        let mut resp_buf = header.to_vec();
-        resp_buf.resize(size, 0);
-        self.transport.read_exact(&mut resp_buf[header.len()..])?;
+        let resp_buf = self.transport.receive()?;
 
         if let LogFormat::Plain = self.log_format {
             trace!(target: "cli::device", "Response: {}", hex::encode(&resp_buf));
@@ -225,30 +185,16 @@ impl TpmDevice {
         cc: TpmCc,
     ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError> {
         let (io_tx, io_rx) = mpsc::channel();
-        let mut transport = std::mem::replace(&mut self.transport, Box::new(EmptyTransport));
+        let mut transport = std::mem::replace(
+            &mut self.transport,
+            Box::new(crate::transport::PipeTransport::new()),
+        );
         let command_bytes_owned = command_bytes.to_vec();
 
         thread::spawn(move || {
             let res = (|| -> Result<Vec<u8>, TpmDeviceError> {
-                transport.write_all(&command_bytes_owned)?;
-                transport.flush()?;
-
-                let mut header = [0u8; 10];
-                transport.read_exact(&mut header)?;
-
-                let size_bytes: [u8; 4] = header[2..6].try_into().unwrap();
-                let size = u32::from_be_bytes(size_bytes) as usize;
-                if size < header.len() {
-                    return Err(TpmDeviceError::ResponseUnderflow);
-                }
-                if size > TPM_MAX_COMMAND_SIZE {
-                    return Err(TpmDeviceError::ResponseOverflow);
-                }
-
-                let mut resp_buf = header.to_vec();
-                resp_buf.resize(size, 0);
-                transport.read_exact(&mut resp_buf[header.len()..])?;
-                Ok(resp_buf)
+                transport.send(&command_bytes_owned)?;
+                transport.receive()
             })();
             let _ = io_tx.send((res, transport));
         });
