@@ -1106,7 +1106,7 @@ pub(crate) fn pcr_selection_to_list(
     let pcr_select_size = pcr_count.div_ceil(8);
     if pcr_select_size > TPM_PCR_SELECT_MAX {
         return Err(PolicyError::InvalidPcrSelection(format!(
-            "required pcr select size {pcr_select_size} exceeds maximum {TPM_PCR_SELECT_MAX}"
+            "invalid select size {pcr_select_size} (> {TPM_PCR_SELECT_MAX})"
         )));
     }
 
@@ -1114,11 +1114,15 @@ pub(crate) fn pcr_selection_to_list(
         let (alg_str, indices_str) = bank_str.split_once(':').ok_or_else(|| {
             PolicyError::InvalidPcrSelection(format!("invalid bank format: '{bank_str}'"))
         })?;
-        let alg = PcrAlgId::from_str(alg_str)
-            .map_err(|()| {
-                PolicyError::InvalidPcrSelection(format!("invalid algorithm: {alg_str}"))
-            })?
-            .0;
+        let alg = alg_from_str(alg_str)?;
+        match alg {
+            TpmAlgId::Sha1 | TpmAlgId::Sha256 | TpmAlgId::Sha384 | TpmAlgId::Sha512 => {}
+            _ => {
+                return Err(PolicyError::InvalidPcrSelection(format!(
+                    "unsupported hash algorithm: {alg_str}"
+                )));
+            }
+        }
 
         let mut pcr_select_bytes = vec![0u8; pcr_select_size];
         for index_str in indices_str.split(',') {
@@ -1126,7 +1130,8 @@ pub(crate) fn pcr_selection_to_list(
 
             if pcr_index >= pcr_count {
                 return Err(PolicyError::InvalidPcrSelection(format!(
-                    "pcr index {pcr_index} is out of range for a TPM with {pcr_count} PCRs"
+                    "invalid index {pcr_index} (> {})",
+                    pcr_count - 1
                 )));
             }
             pcr_select_bytes[pcr_index / 8] |= 1 << (pcr_index % 8);
@@ -1137,22 +1142,6 @@ pub(crate) fn pcr_selection_to_list(
         })?;
     }
     Ok(list)
-}
-
-struct PcrAlgId(TpmAlgId);
-
-impl FromStr for PcrAlgId {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "sha1" => Ok(Self(TpmAlgId::Sha1)),
-            "sha256" => Ok(Self(TpmAlgId::Sha256)),
-            "sha384" => Ok(Self(TpmAlgId::Sha384)),
-            "sha512" => Ok(Self(TpmAlgId::Sha512)),
-            _ => Err(()),
-        }
-    }
 }
 
 /// URI data type used for the input data. The input is fully validated,
