@@ -7,9 +7,7 @@ use crate::{
     command::CommandError,
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    policy::Expression,
-    session::session_from_uri,
-    uri::Uri,
+    policy::{session_from_uri, Expression, Uri},
     util::build_to_vec,
 };
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
@@ -89,7 +87,7 @@ impl<'a> Context<'a> {
                     return Err(ParseError::Custom("trailing data".to_string()).into());
                 }
                 let cmd = TpmContextLoadCommand { context };
-                let (_rc, resp, _) = device.execute(&cmd, &[])?;
+                let (resp, _) = device.execute(&cmd, &[])?;
                 let resp = resp
                     .ContextLoad()
                     .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -118,7 +116,7 @@ impl<'a> Context<'a> {
         let save_cmd = TpmContextSaveCommand {
             save_handle: handle_to_save,
         };
-        let (_rc, resp, _) = device.execute(&save_cmd, &[])?;
+        let (resp, _) = device.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -180,7 +178,7 @@ impl<'a> Context<'a> {
         };
         let handles = [auth_handle as u32, handle.0];
         let sessions = session_from_uri(&cmd, &handles, session)?;
-        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
+        let (resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
                 command: TpmCc::EvictControl,
@@ -201,7 +199,7 @@ impl<'a> Context<'a> {
         let cmd = TpmFlushContextCommand {
             flush_handle: handle.into(),
         };
-        let (_rc, _, _) = device.execute(&cmd, &[])?;
+        let (_, _) = device.execute(&cmd, &[])?;
         if let Some(slot) = self.handles.iter_mut().find(|slot| **slot == Some(handle)) {
             *slot = None;
         }
@@ -233,7 +231,7 @@ impl<'a> Context<'a> {
         };
         let handles = [auth_handle as u32, transient_handle.0];
         let sessions = session_from_uri(&cmd, &handles, session)?;
-        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
+        let (resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
                 command: TpmCc::EvictControl,

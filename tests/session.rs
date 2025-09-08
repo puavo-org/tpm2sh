@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use cli::{policy::Expression, session::AuthSession, uri::Uri};
+use cli::{policy::AuthSession, policy::Expression, policy::Uri};
 use rstest::rstest;
 use std::str::FromStr;
 use tpm2_protocol::{
@@ -50,7 +50,7 @@ fn test_session_content_parser_valid(
         assert_eq!(n, nonce);
         assert_eq!(TpmaSession::from_bits_truncate(*a), attrs);
         assert_eq!(k, key);
-        assert_eq!(cli::key::tpm_alg_id_from_str(al).unwrap(), alg);
+        assert_eq!(cli::policy::alg_from_str(al).unwrap(), alg);
     } else {
         panic!("Parsed AST is not a session expression");
     }
@@ -98,10 +98,7 @@ fn test_session_roundtrip() {
         assert_eq!(**nonce, *session.nonce_tpm);
         assert_eq!(TpmaSession::from_bits_truncate(*attrs), session.attributes);
         assert_eq!(**key, *session.hmac_key);
-        assert_eq!(
-            cli::key::tpm_alg_id_from_str(alg).unwrap(),
-            session.auth_hash
-        );
+        assert_eq!(cli::policy::alg_from_str(alg).unwrap(), session.auth_hash);
     } else {
         panic!("Parsed AST is not a session expression");
     }

@@ -26,16 +26,15 @@ use thiserror::Error;
 use log::trace;
 use tpm2_protocol::{
     data::{
-        Tpm2bName, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmSt, TpmaCc,
-        TpmsAuthCommand, TpmsCapabilityData, TpmsRsaParms, TpmtPublic, TpmtPublicParms,
-        TpmuCapabilities, TpmuPublicParms,
+        TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmSt, TpmaCc, TpmsAuthCommand,
+        TpmsCapabilityData, TpmsRsaParms, TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
     },
     message::{
         tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
-        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmReadPublicCommand,
-        TpmResponseBody, TpmTestParmsCommand,
+        TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader, TpmResponseBody,
+        TpmTestParmsCommand,
     },
-    TpmErrorKind, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
@@ -102,7 +101,9 @@ fn test_rsa_parms(device: &mut TpmDevice, key_bits: u16) -> Result<TpmRc, TpmDev
             }),
         },
     };
-    device.execute(&cmd, &[]).map(|(rc, _, _)| rc)
+    device
+        .execute(&cmd, &[])
+        .map(|(_, _)| TpmRcBase::Success.into())
 }
 
 impl TpmDevice {
@@ -126,7 +127,7 @@ impl TpmDevice {
         &mut self,
         command: &C,
         sessions: &[TpmsAuthCommand],
-    ) -> Result<(TpmRc, TpmResponseBody, TpmAuthResponses), TpmDeviceError>
+    ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError>
     where
         C: TpmHeader + TpmCommandBuild + TpmPrint,
     {
@@ -231,10 +232,7 @@ impl TpmDevice {
         }
 
         match result {
-            Ok((response, auth)) => {
-                let rc = TpmRc::from(TpmRcBase::Success);
-                Ok((rc, response, auth))
-            }
+            Ok((response, auth)) => Ok((response, auth)),
             Err(rc) => Err(TpmDeviceError::Tpm(rc)),
         }
     }
@@ -360,7 +358,7 @@ impl TpmDevice {
                 property_count: count,
             };
 
-            let (_rc, resp, _) = self.execute(&cmd, &[])?;
+            let (resp, _) = self.execute(&cmd, &[])?;
             let TpmGetCapabilityResponse {
                 more_data,
                 capability_data,
@@ -396,26 +394,5 @@ impl TpmDevice {
             }
         }
         Ok(all_caps)
-    }
-
-    /// Reads the public area and name of a TPM object.
-    ///
-    /// # Errors
-    ///
-    /// Returns `TpmDeviceError` if the `ReadPublic` command fails.
-    pub fn read_public(
-        &mut self,
-        handle: TpmTransient,
-    ) -> Result<(TpmRc, TpmtPublic, Tpm2bName), TpmDeviceError> {
-        let cmd = TpmReadPublicCommand {
-            object_handle: handle.0.into(),
-        };
-        let (rc, resp, _) = self.execute(&cmd, &[])?;
-        let read_public_resp =
-            resp.ReadPublic()
-                .map_err(|_| TpmDeviceError::MismatchedResponse {
-                    command: TpmCc::ReadPublic,
-                })?;
-        Ok((rc, read_public_resp.out_public.inner, read_public_resp.name))
     }
 }

@@ -9,8 +9,8 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::TpmKey,
-    session::session_from_uri,
-    uri::Uri,
+    policy::session_from_uri,
+    policy::Uri,
     util::build_to_vec,
 };
 use lexopt::{Arg, Parser, ValueExt};
@@ -130,7 +130,7 @@ impl DeviceCommand for Seal {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_uri(&create_cmd, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&create_cmd, &sessions)?;
+        let (resp, _) = device.execute(&create_cmd, &sessions)?;
 
         let create_resp = resp
             .Create()

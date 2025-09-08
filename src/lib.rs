@@ -14,12 +14,9 @@ pub mod device;
 pub mod error;
 pub mod key;
 pub mod mocktpm;
-pub mod pcr;
 pub mod policy;
 pub mod print;
-pub mod session;
 pub mod transport;
-pub mod uri;
 pub mod util;
 
 pub use command::CommandError;

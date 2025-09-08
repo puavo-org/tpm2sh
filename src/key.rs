@@ -3,13 +3,11 @@
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
 use crate::{
-    command::CommandError,
-    crypto::{crypto_hmac, PrivateKey},
+    crypto::PrivateKey,
     error::{CliError, ParseError},
-    session::AuthSession,
+    policy::alg_from_str,
 };
-
-use std::{cmp::Ordering, fmt, str::FromStr};
+use std::{fmt, str::FromStr};
 
 use p256::SecretKey;
 use pkcs8::{
@@ -19,8 +17,29 @@ use pkcs8::{
     DecodePrivateKey, ObjectIdentifier, PrivateKeyInfo,
 };
 use rsa::RsaPrivateKey;
-use sha2::{Digest, Sha256, Sha384, Sha512};
-use tpm2_protocol::data::{TpmAlgId, TpmCc, TpmEccCurve, TpmsAuthCommand};
+use tpm2_protocol::{
+    data::{TpmAlgId, TpmEccCurve, TpmRc},
+    TpmErrorKind,
+};
+
+#[derive(Debug)]
+pub enum AuthError {
+    Build(TpmErrorKind),
+    Hmac(TpmRc),
+    InvalidAlgorithm(TpmAlgId),
+}
+
+impl fmt::Display for AuthError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Build(e) => write!(f, "TPM protocol error: {e}"),
+            Self::Hmac(rc) => write!(f, "HMAC failure: {rc}"),
+            Self::InvalidAlgorithm(alg) => write!(f, "Invalid algorithm: {alg:?}"),
+        }
+    }
+}
+
+impl std::error::Error for AuthError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlgInfo {
@@ -58,7 +77,7 @@ impl FromStr for Alg {
                 let key_bits: u16 = key_bits_str
                     .parse()
                     .map_err(|_| format!("Invalid RSA key bits value: '{key_bits_str}'"))?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                let name_alg = alg_from_str(name_alg_str)
                     .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
@@ -69,7 +88,7 @@ impl FromStr for Alg {
             }
             ["ecc", curve_id_str, name_alg_str] => {
                 let curve_id = tpm_ecc_curve_from_str(curve_id_str)?;
-                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                let name_alg = alg_from_str(name_alg_str)
                     .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
@@ -79,7 +98,7 @@ impl FromStr for Alg {
                 })
             }
             ["keyedhash", name_alg_str] => {
-                let name_alg = tpm_alg_id_from_str(name_alg_str)
+                let name_alg = alg_from_str(name_alg_str)
                     .map_err(|e| format!("Invalid algorithm name: {e}"))?;
                 Ok(Self {
                     name: s.to_string(),
@@ -93,14 +112,14 @@ impl FromStr for Alg {
     }
 }
 
-impl Ord for Alg {
-    fn cmp(&self, other: &Self) -> Ordering {
+impl std::cmp::Ord for Alg {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.name.cmp(&other.name)
     }
 }
 
-impl PartialOrd for Alg {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl std::cmp::PartialOrd for Alg {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -128,30 +147,6 @@ impl fmt::Display for Tpm2shAlgId {
             _ => "unknown",
         };
         write!(f, "{s}")
-    }
-}
-
-/// Converts a user-friendly string to a `TpmAlgId`.
-///
-/// # Errors
-///
-/// If the algorithm tag is unknown, `Err::CommandError` will be returned.
-pub fn tpm_alg_id_from_str(s: &str) -> Result<TpmAlgId, CommandError> {
-    match s {
-        "rsa" => Ok(TpmAlgId::Rsa),
-        "sha1" => Ok(TpmAlgId::Sha1),
-        "hmac" => Ok(TpmAlgId::Hmac),
-        "aes" => Ok(TpmAlgId::Aes),
-        "keyedhash" => Ok(TpmAlgId::KeyedHash),
-        "xor" => Ok(TpmAlgId::Xor),
-        "sha256" => Ok(TpmAlgId::Sha256),
-        "sha384" => Ok(TpmAlgId::Sha384),
-        "sha512" => Ok(TpmAlgId::Sha512),
-        "null" => Ok(TpmAlgId::Null),
-        "sm3_256" => Ok(TpmAlgId::Sm3_256),
-        "sm4" => Ok(TpmAlgId::Sm4),
-        "ecc" => Ok(TpmAlgId::Ecc),
-        _ => Err(CommandError::InvalidAlgorithmName(s.to_string())),
     }
 }
 
@@ -339,60 +334,4 @@ pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliErr
         return Err(ParseError::Custom(format!("invalid PEM tag: {}", pem_block.tag())).into());
     }
     private_key_from_der_bytes(pem_block.contents())
-}
-
-/// Computes the authorization HMAC for a command session.
-///
-/// # Errors
-///
-/// Returns a `CliError` if the session's hash algorithm is not
-/// supported, or if an HMAC operation fails.
-pub fn create_auth(
-    session: &AuthSession,
-    nonce_caller: &tpm2_protocol::data::Tpm2bNonce,
-    command_code: TpmCc,
-    handles: &[u32],
-    parameters: &[u8],
-) -> Result<TpmsAuthCommand, CliError> {
-    let cp_hash_payload = {
-        let mut payload = Vec::new();
-        payload.extend_from_slice(&(command_code as u32).to_be_bytes());
-        for handle in handles {
-            payload.extend_from_slice(&handle.to_be_bytes());
-        }
-        payload.extend_from_slice(parameters);
-        payload
-    };
-
-    let cp_hash = match session.auth_hash {
-        TpmAlgId::Sha256 => Sha256::digest(&cp_hash_payload).to_vec(),
-        TpmAlgId::Sha384 => Sha384::digest(&cp_hash_payload).to_vec(),
-        TpmAlgId::Sha512 => Sha512::digest(&cp_hash_payload).to_vec(),
-        alg => {
-            return Err(CommandError::InvalidAlgorithm {
-                alg: Tpm2shAlgId(alg),
-            }
-            .into())
-        }
-    };
-
-    let hmac_bytes = crypto_hmac(
-        session.auth_hash,
-        &session.hmac_key,
-        &[
-            &cp_hash,
-            &session.nonce_tpm,
-            nonce_caller,
-            &[session.attributes.bits()],
-        ],
-    )
-    .map_err(CliError::from)?;
-
-    Ok(TpmsAuthCommand {
-        session_handle: session.handle,
-        nonce: *nonce_caller,
-        session_attributes: session.attributes,
-        hmac: tpm2_protocol::data::Tpm2bAuth::try_from(hmac_bytes.as_slice())
-            .map_err(CommandError::from)?,
-    })
 }

@@ -7,8 +7,8 @@ use crate::{
     command::context::Context,
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
-    session::session_from_uri,
-    uri::Uri,
+    policy::session_from_uri,
+    policy::Uri,
 };
 use lexopt::{Arg, Parser};
 use tpm2_protocol::{data::TpmCc, data::TpmRh, message::TpmDictionaryAttackLockResetCommand};
@@ -50,7 +50,7 @@ impl DeviceCommand for ResetLock {
         };
         let handles = [TpmRh::Lockout as u32];
         let sessions = session_from_uri(&command, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&command, &sessions)?;
+        let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
                 command: TpmCc::DictionaryAttackLockReset,

@@ -8,7 +8,7 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::Tpm2shAlgId,
-    session::{AuthSession, SessionType},
+    policy::{AuthSession, SessionType},
 };
 use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
@@ -75,7 +75,7 @@ impl DeviceCommand for StartSession {
             },
             auth_hash,
         };
-        let (_rc, response, _) = device.execute(&cmd, &[])?;
+        let (response, _) = device.execute(&cmd, &[])?;
         let start_auth_session_resp =
             response
                 .StartAuthSession()

@@ -10,7 +10,7 @@ use crate::{
     },
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
-    uri::Uri,
+    policy::Uri,
     Command, ParseResult,
 };
 use lexopt::{Arg, Parser, ValueExt};

@@ -6,7 +6,7 @@ use crate::{
     command::context::Context,
     device::TpmDevice,
     error::CliError,
-    uri::Uri,
+    policy::Uri,
 };
 use lexopt::{Arg, Parser, ValueExt};
 

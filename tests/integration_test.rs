@@ -10,9 +10,9 @@ use cli::{
     },
     device::TpmDevice,
     error::{CliError, ParseError},
+    policy::session_from_uri,
     policy::Expression,
-    session::session_from_uri,
-    uri::Uri,
+    policy::Uri,
     Command,
 };
 use sha2::{Digest, Sha256};
@@ -26,7 +26,7 @@ use rstest::{fixture, rstest};
 use tempfile::{tempdir, TempDir};
 use tpm2_protocol::{
     data::{Tpm2bDigest, TpmlPcrSelection},
-    message::TpmPolicyPcrCommand,
+    message::{TpmPolicyPcrCommand, TpmReadPublicCommand},
     TpmSession,
 };
 
@@ -99,7 +99,6 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
     });
-
     let mut context_uri_buf = Vec::new();
     let mut context = Context::new(&test_context.cli, &mut context_uri_buf);
     create_cmd
@@ -107,16 +106,17 @@ fn test_subcommand_create_primary(test_context: TestFixture) {
         .unwrap();
     let context_uri_str = String::from_utf8(context_uri_buf).unwrap();
     let context_uri: Uri = context_uri_str.trim().parse().unwrap();
-
     let mut device = test_context.device.lock().unwrap();
     let mut dummy_writer = Vec::new();
     let mut verification_context = Context::new(&test_context.cli, &mut dummy_writer);
-
     let handle = verification_context
         .load(&mut device, &context_uri)
         .unwrap();
-    let (_rc, public, _name) = device.read_public(handle).unwrap();
-
+    let cmd = TpmReadPublicCommand {
+        object_handle: handle.0.into(),
+    };
+    let (resp, _) = device.execute(&cmd, &[]).unwrap();
+    let public = resp.ReadPublic().unwrap().out_public.inner;
     assert!(
         public
             .object_attributes

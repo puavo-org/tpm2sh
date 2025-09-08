@@ -8,8 +8,7 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
     key::{Alg, AlgInfo},
-    session::session_from_uri,
-    uri::Uri,
+    policy::{session_from_uri, Uri},
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{
@@ -148,7 +147,7 @@ impl DeviceCommand for CreatePrimary {
             creation_pcr: TpmlPcrSelection::default(),
         };
         let sessions = session_from_uri(&cmd, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&cmd, &sessions)?;
+        let (resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
             .map_err(|_| TpmDeviceError::MismatchedResponse {

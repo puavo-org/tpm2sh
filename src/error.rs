@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025 Opinsys Oy
 
-use crate::{command::CommandError, device::TpmDeviceError};
+use crate::{command::CommandError, device::TpmDeviceError, policy::PolicyError};
 use std::io::Error as IoError;
 use thiserror::Error;
 use tpm2_protocol::{data::TpmRc, TpmErrorKind};
@@ -53,8 +53,17 @@ pub enum CliError {
     #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),
 
+    #[error("Policy engine error: {0}")]
+    Policy(#[from] PolicyError),
+
     #[error("TPM returned an error code: {0}")]
     Tpm(TpmRc),
+}
+
+impl From<TpmErrorKind> for CliError {
+    fn from(err: TpmErrorKind) -> Self {
+        Self::Parse(ParseError::TpmProtocol(err))
+    }
 }
 
 impl From<TpmRc> for CliError {

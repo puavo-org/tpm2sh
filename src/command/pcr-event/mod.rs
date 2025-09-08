@@ -7,9 +7,9 @@ use crate::{
     command::{context::Context, CommandError},
     device::{TpmDevice, TpmDeviceError},
     error::CliError,
-    pcr::pcr_get_count,
-    session::session_from_uri,
-    uri::{pcr_selection_to_list, Uri},
+    policy::pcr_get_count,
+    policy::session_from_uri,
+    policy::{pcr_selection_to_list, Uri},
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
@@ -17,7 +17,7 @@ use tpm2_protocol::{data::Tpm2bEvent, data::TpmCc, message::TpmPcrEventCommand};
 #[derive(Debug, Default)]
 pub struct PcrEvent {
     pub pcr_selection: String,
-    pub data: crate::uri::Uri,
+    pub data: crate::policy::Uri,
     pub session: Option<Uri>,
 }
 
@@ -107,7 +107,7 @@ impl DeviceCommand for PcrEvent {
             event_data,
         };
         let sessions = session_from_uri(&command, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&command, &sessions)?;
+        let (resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
                 command: TpmCc::PcrEvent,

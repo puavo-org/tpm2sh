@@ -14,8 +14,7 @@ use crate::{
     device::{TpmDevice, TpmDeviceError},
     error::{CliError, ParseError},
     key::{private_key_from_der_bytes, Tpm2shAlgId, TpmKey},
-    session::session_from_uri,
-    uri::Uri,
+    policy::{session_from_uri, Uri},
     util::build_to_vec,
 };
 use aes::Aes128;
@@ -25,8 +24,8 @@ use lexopt::{Arg, Parser, ValueExt};
 use rand::{thread_rng, RngCore};
 use tpm2_protocol::{
     data::{
-        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmCc, TpmtPublic,
-        TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
+        Tpm2bData, Tpm2bEncryptedSecret, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, TpmAlgId, TpmCc,
+        TpmtPublic, TpmtSymDef, TpmuSymKeyBits, TpmuSymMode,
     },
     message::{TpmImportCommand, TpmLoadCommand, TpmReadPublicCommand, TpmUnsealCommand},
     tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
@@ -197,6 +196,22 @@ fn is_printable_utf8(data: &[u8]) -> bool {
     }
 }
 
+fn read_public(
+    device: &mut TpmDevice,
+    handle: TpmTransient,
+) -> Result<(TpmtPublic, Tpm2bName), TpmDeviceError> {
+    let cmd = TpmReadPublicCommand {
+        object_handle: handle.0.into(),
+    };
+    let (resp, _) = device.execute(&cmd, &[])?;
+    let read_public_resp = resp
+        .ReadPublic()
+        .map_err(|_| TpmDeviceError::MismatchedResponse {
+            command: TpmCc::ReadPublic,
+        })?;
+    Ok((read_public_resp.out_public.inner, read_public_resp.name))
+}
+
 impl Load {
     /// Finishes the command by loading the object and optionally unsealing.
     #[allow(clippy::too_many_lines, clippy::large_types_passed_by_value)]
@@ -215,7 +230,7 @@ impl Load {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_uri(&load_cmd, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&load_cmd, &sessions)?;
+        let (resp, _) = device.execute(&load_cmd, &sessions)?;
         let resp = resp
             .Load()
             .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -225,25 +240,16 @@ impl Load {
         context.track(resp.object_handle)?;
 
         if self.unseal {
-            let read_public_cmd = TpmReadPublicCommand {
-                object_handle: resp.object_handle.0.into(),
-            };
-            let (_rc, read_public_resp, _) = device.execute(&read_public_cmd, &[])?;
-            let public_area = read_public_resp
-                .ReadPublic()
-                .map_err(|_| TpmDeviceError::MismatchedResponse {
-                    command: TpmCc::ReadPublic,
-                })?
-                .out_public;
+            let (public_area, _) = read_public(device, parent_handle)?;
 
-            if public_area.inner.object_type == TpmAlgId::KeyedHash {
+            if public_area.object_type == TpmAlgId::KeyedHash {
                 let unseal_cmd = TpmUnsealCommand {
                     item_handle: resp.object_handle.0.into(),
                 };
                 let handles = [unseal_cmd.item_handle.into()];
                 let unseal_sessions =
                     session_from_uri(&unseal_cmd, &handles, self.session.as_ref())?;
-                let (_rc, unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
+                let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
                 let unseal_resp = unseal_resp
                     .Unseal()
                     .map_err(|_| TpmDeviceError::MismatchedResponse {
@@ -259,7 +265,7 @@ impl Load {
                 }
             } else {
                 return Err(CommandError::InvalidAlgorithm {
-                    alg: Tpm2shAlgId(public_area.inner.object_type),
+                    alg: Tpm2shAlgId(public_area.object_type),
                 }
                 .into());
             }
@@ -283,7 +289,7 @@ impl Load {
         parent_handle: TpmTransient,
         private_key: &PrivateKey,
     ) -> Result<(), CliError> {
-        let (_rc, parent_public, parent_name) = device.read_public(parent_handle)?;
+        let (parent_public, parent_name) = read_public(device, parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
         let public = private_key
@@ -315,7 +321,7 @@ impl Load {
         };
         let handles = [parent_handle.into()];
         let sessions = session_from_uri(&import_cmd, &handles, self.session.as_ref())?;
-        let (_rc, resp, _) = device.execute(&import_cmd, &sessions)?;
+        let (resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp
             .Import()
             .map_err(|_| TpmDeviceError::MismatchedResponse {

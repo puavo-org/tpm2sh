@@ -7,8 +7,8 @@ use crate::{
     command::context::Context,
     device::TpmDevice,
     error::CliError,
+    policy::SessionType,
     policy::{self, fill_pcr_digests, PolicyExecutor},
-    session::SessionType,
 };
 use lexopt::{Arg, Parser, ValueExt};
 use tpm2_protocol::data::TpmAlgId;
@@ -55,7 +55,7 @@ impl DeviceCommand for Policy {
         fill_pcr_digests(&mut ast, device)?;
 
         if self.compose {
-            let pcr_count = crate::pcr::pcr_get_count(device)?;
+            let pcr_count = crate::policy::pcr_get_count(device)?;
             let session_hash_alg = TpmAlgId::Sha256;
             let session_handle =
                 policy::start_trial_session(device, SessionType::Trial, session_hash_alg)?;

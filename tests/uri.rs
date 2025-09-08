@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use cli::uri::Uri;
+use cli::policy::Uri;
 use rstest::rstest;
 use std::str::FromStr;
 
