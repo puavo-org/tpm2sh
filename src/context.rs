@@ -26,6 +26,7 @@ pub enum ContextError {
     InvalidHandle(u32),
     InvalidUri(Uri),
     Io(std::io::Error),
+    LockPoisoned,
     NotTracked(TpmTransient),
     Policy(PolicyError),
     Tpm(TpmErrorKind),
@@ -43,6 +44,7 @@ impl std::fmt::Display for ContextError {
             Self::InvalidHandle(h) => write!(f, "invalid handle: {h}"),
             Self::InvalidUri(u) => write!(f, "invalid URI: {u}"),
             Self::Io(s) => write!(f, "I/O: {s}"),
+            Self::LockPoisoned => write!(f, "lock poisoned"),
             Self::NotTracked(h) => write!(f, "not tracked: {h}"),
             Self::Policy(p) => write!(f, "policy: {p}"),
             Self::Tpm(err) => write!(f, "TPM: {err}"),
@@ -141,9 +143,7 @@ impl<'a> Context<'a> {
                 let (resp, _) = device.execute(&cmd, &[])?;
                 let resp = resp
                     .ContextLoad()
-                    .map_err(|_| TpmDeviceError::MismatchedResponse {
-                        command: TpmCc::ContextLoad,
-                    })?;
+                    .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::ContextLoad))?;
                 self.track(resp.loaded_handle)?;
                 Ok(resp.loaded_handle)
             }
@@ -170,9 +170,7 @@ impl<'a> Context<'a> {
         let (resp, _) = device.execute(&save_cmd, &[])?;
         let save_resp = resp
             .ContextSave()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::ContextSave,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::ContextSave))?;
         let context_bytes = build_to_vec(&save_resp.context)?;
 
         self.handle_data_output(output_uri, &context_bytes)
@@ -231,9 +229,7 @@ impl<'a> Context<'a> {
         let sessions = session_from_uri(&cmd, &handles, session)?;
         let (resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::EvictControl,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::EvictControl))?;
         Ok(())
     }
 
@@ -284,9 +280,7 @@ impl<'a> Context<'a> {
         let sessions = session_from_uri(&cmd, &handles, session)?;
         let (resp, _) = device.execute(&cmd, &sessions)?;
         resp.EvictControl()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::EvictControl,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::EvictControl))?;
         if let Some(slot) = self
             .handles
             .iter_mut()
@@ -323,7 +317,7 @@ impl<'a> Context<'a> {
     pub fn flush(self, device: Option<Arc<Mutex<TpmDevice>>>) -> Result<(), ContextError> {
         if let Some(device) = device {
             if self.handles_len() > 0 {
-                let mut guard = device.lock().map_err(|_| TpmDeviceError::LockPoisoned)?;
+                let mut guard = device.lock().map_err(|_| ContextError::LockPoisoned)?;
                 let mut first_err = None;
 
                 for handle in self.handles.into_iter().flatten() {

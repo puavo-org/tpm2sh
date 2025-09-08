@@ -46,8 +46,8 @@ use tpm2_protocol::{
 
 #[derive(Debug, Error)]
 pub enum CommandError {
-    #[error("same conversion format")]
-    SameConversionFormat,
+    #[error("lock poisoned")]
+    LockPoisoned,
 
     #[error("invalid parent key")]
     InvalidParentKey,
@@ -60,6 +60,12 @@ pub enum CommandError {
 
     #[error("invalid PCR selection")]
     InvalidPcrSelection,
+
+    #[error("lock poisoned")]
+    NotProvided,
+
+    #[error("same conversion format")]
+    SameConversionFormat,
 
     #[error("TPM: {0}")]
     Tpm(TpmErrorKind),
@@ -242,9 +248,7 @@ impl DeviceCommand for CreatePrimary {
         let (resp, _) = device.execute(&cmd, &sessions)?;
         let resp = resp
             .CreatePrimary()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::CreatePrimary,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::CreatePrimary))?;
         let object_handle = resp.object_handle;
 
         context.track(object_handle)?;
@@ -491,9 +495,7 @@ fn read_public(
     let (resp, _) = device.execute(&cmd, &[])?;
     let read_public_resp = resp
         .ReadPublic()
-        .map_err(|_| TpmDeviceError::MismatchedResponse {
-            command: TpmCc::ReadPublic,
-        })?;
+        .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::ReadPublic))?;
     Ok((read_public_resp.out_public.inner, read_public_resp.name))
 }
 
@@ -518,9 +520,7 @@ impl Load {
         let (resp, _) = device.execute(&load_cmd, &sessions)?;
         let resp = resp
             .Load()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::Load,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::Load))?;
 
         context.track(resp.object_handle)?;
 
@@ -537,9 +537,7 @@ impl Load {
                 let (unseal_resp, _) = device.execute(&unseal_cmd, &unseal_sessions)?;
                 let unseal_resp = unseal_resp
                     .Unseal()
-                    .map_err(|_| TpmDeviceError::MismatchedResponse {
-                        command: TpmCc::Unseal,
-                    })?
+                    .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::Unseal))?
                     .out_data;
 
                 if is_printable_utf8(&unseal_resp) {
@@ -608,9 +606,7 @@ impl Load {
         let (resp, _) = device.execute(&import_cmd, &sessions)?;
         let import_resp = resp
             .Import()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::Import,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::Import))?;
 
         self.run_load(
             device,
@@ -734,9 +730,7 @@ impl DeviceCommand for PcrEvent {
         let sessions = session_from_uri(&command, &handles, self.session.as_ref())?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.PcrEvent()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::PcrEvent,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::PcrEvent))?;
         Ok(())
     }
 }
@@ -827,9 +821,7 @@ impl DeviceCommand for ResetLock {
         let sessions = session_from_uri(&command, &handles, self.session.as_ref())?;
         let (resp, _) = device.execute(&command, &sessions)?;
         resp.DictionaryAttackLockReset()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::DictionaryAttackLockReset,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::DictionaryAttackLockReset))?;
         Ok(())
     }
 }
@@ -918,9 +910,7 @@ impl DeviceCommand for Seal {
 
         let create_resp = resp
             .Create()
-            .map_err(|_| TpmDeviceError::MismatchedResponse {
-                command: TpmCc::Create,
-            })?;
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::Create))?;
 
         let tpm_key = TpmKey {
             oid: ID_SEALED_DATA,
@@ -972,12 +962,9 @@ impl DeviceCommand for StartSession {
             auth_hash,
         };
         let (response, _) = device.execute(&cmd, &[])?;
-        let start_auth_session_resp =
-            response
-                .StartAuthSession()
-                .map_err(|_| TpmDeviceError::MismatchedResponse {
-                    command: TpmCc::StartAuthSession,
-                })?;
+        let start_auth_session_resp = response
+            .StartAuthSession()
+            .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::StartAuthSession))?;
         let session = AuthSession {
             handle: start_auth_session_resp.session_handle,
             nonce_tpm: start_auth_session_resp.nonce_tpm,

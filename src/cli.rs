@@ -4,11 +4,11 @@
 
 use crate::{
     command::{
-        Convert, CreatePrimary, Delete, List, Load, PcrEvent, Policy, PrintError, ResetLock, Seal,
-        StartSession,
+        CommandError, Convert, CreatePrimary, Delete, List, Load, PcrEvent, Policy, PrintError,
+        ResetLock, Seal, StartSession,
     },
     context::Context,
-    device::{TpmDevice, TpmDeviceError},
+    device::TpmDevice,
     error::CliError,
     Command,
 };
@@ -106,10 +106,8 @@ impl Command for Commands {
             };
         }
 
-        let device_arc = device.ok_or(TpmDeviceError::NotProvided)?;
-        let mut guard = device_arc
-            .lock()
-            .map_err(|_| TpmDeviceError::LockPoisoned)?;
+        let device_arc = device.ok_or(CommandError::NotProvided)?;
+        let mut guard = device_arc.lock().map_err(|_| CommandError::LockPoisoned)?;
 
         match self {
             Self::CreatePrimary(args) => args.run(&mut guard, context),

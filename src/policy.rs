@@ -41,6 +41,7 @@ pub enum PolicyError {
     Device(TpmDeviceError),
     InvalidAlgorithm(TpmAlgId),
     InvalidAlgorithmName(String),
+    InvalidCapability,
     InvalidPcrSelection(String),
     InvalidExpression(String),
     InvalidValue(String),
@@ -56,6 +57,7 @@ impl fmt::Display for PolicyError {
             Self::InvalidAlgorithm(alg) => write!(f, "invalid algorithm: {alg:?}"),
             Self::InvalidAlgorithmName(name) => write!(f, "invalid algorithm name: '{name}'"),
             Self::InvalidPcrSelection(s) => write!(f, "invalid PCR selection: {s}"),
+            Self::InvalidCapability => write!(f, "invalid capability"),
             Self::InvalidExpression(s) => write!(f, "invalid expression: {s}"),
             Self::InvalidValue(s) => write!(f, "invalid value: {s}"),
             Self::Io(s) => write!(f, "I/O: {s}"),
@@ -747,9 +749,7 @@ pub(crate) fn start_trial_session(
     let (resp, _) = device.execute(&cmd, &[])?;
     let start_resp = resp
         .StartAuthSession()
-        .map_err(|_| TpmDeviceError::MismatchedResponse {
-            command: TpmCc::StartAuthSession,
-        })?;
+        .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::StartAuthSession))?;
     Ok(start_resp.session_handle)
 }
 
@@ -771,9 +771,7 @@ pub(crate) fn get_policy_digest(
     let (resp, _) = device.execute(&cmd, &[])?;
     let digest_resp = resp
         .PolicyGetDigest()
-        .map_err(|_| TpmDeviceError::MismatchedResponse {
-            command: TpmCc::PcrRead,
-        })?;
+        .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::PcrRead))?;
     Ok(digest_resp.policy_digest)
 }
 
@@ -836,9 +834,7 @@ pub fn read(
     let (resp, _) = device.execute(&cmd, &[])?;
     let pcr_read_resp = resp
         .PcrRead()
-        .map_err(|_| TpmDeviceError::MismatchedResponse {
-            command: TpmCc::PcrRead,
-        })?;
+        .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::PcrRead))?;
 
     let mut pcrs = Vec::new();
     let mut digest_iter = pcr_read_resp.pcr_values.iter();
@@ -887,9 +883,7 @@ pub(crate) fn pcr_get_count(device: &mut TpmDevice) -> Result<usize, PolicyError
             ))
         }
     } else {
-        Err(PolicyError::Device(TpmDeviceError::InvalidResponse(
-            "Unexpected capability data type when querying for PCRs.".to_string(),
-        )))
+        Err(PolicyError::InvalidCapability)
     }
 }
 

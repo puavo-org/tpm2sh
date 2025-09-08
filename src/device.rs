@@ -4,7 +4,6 @@
 
 use crate::{
     cli::LogFormat,
-    error::ParseError,
     key::{tpm_ecc_curve_to_str, Tpm2shAlgId},
     print::TpmPrint,
     TEARDOWN,
@@ -21,7 +20,6 @@ use std::{
     thread,
     time::Duration,
 };
-use thiserror::Error;
 
 use log::trace;
 use tpm2_protocol::{
@@ -39,42 +37,45 @@ use tpm2_protocol::{
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum TpmDeviceError {
-    #[error("TPM device lock poisoned")]
-    LockPoisoned,
+    Io(std::io::Error),
+    ResponseMismatch(TpmCc),
+    ResponseOverflow,
+    ResponseUnderflow,
+    Tpm(TpmErrorKind),
+    TpmRc(TpmRc),
+}
 
-    #[error("TPM device not provided for a device command")]
-    NotProvided,
+impl std::error::Error for TpmDeviceError {}
 
-    #[error("I/O error with TPM device")]
-    Io(#[from] io::Error),
-
-    #[error("TPM protocol error")]
-    Protocol(TpmErrorKind),
-
-    #[error("TPM returned an error code: {0}")]
-    Tpm(TpmRc),
-
-    #[error("Mismatched response type for command '{command}'")]
-    MismatchedResponse { command: TpmCc },
-
-    #[error("Invalid response from TPM: {0}")]
-    InvalidResponse(String),
-
-    #[error("Failed to parse TPM response")]
-    Parse(#[from] ParseError),
+impl std::fmt::Display for TpmDeviceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(s) => write!(f, "I/O: {s}"),
+            Self::ResponseMismatch(cc) => write!(f, "response mismatch: {cc}"),
+            Self::ResponseOverflow => write!(f, "response overflow"),
+            Self::ResponseUnderflow => write!(f, "response underflow"),
+            Self::Tpm(err) => write!(f, "TPM: {err}"),
+            Self::TpmRc(rc) => write!(f, "TPM RC: {rc}"),
+        }
+    }
+}
+impl From<std::io::Error> for TpmDeviceError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err)
+    }
 }
 
 impl From<TpmErrorKind> for TpmDeviceError {
     fn from(err: TpmErrorKind) -> Self {
-        Self::Protocol(err)
+        Self::Tpm(err)
     }
 }
 
 impl From<TpmRc> for TpmDeviceError {
     fn from(rc: TpmRc) -> Self {
-        Self::Tpm(rc)
+        Self::TpmRc(rc)
     }
 }
 
@@ -186,17 +187,16 @@ impl TpmDevice {
         self.transport.read_exact(&mut header)?;
 
         let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            return Err(TpmDeviceError::InvalidResponse(
-                "input data underflow".to_string(),
-            ));
+            return Err(TpmDeviceError::ResponseUnderflow);
         };
-        let size = u32::from_be_bytes(size_bytes) as usize;
 
+        let size = u32::from_be_bytes(size_bytes) as usize;
         if size < header.len() || size > TPM_MAX_COMMAND_SIZE {
             drop(tx);
-            return Err(TpmDeviceError::InvalidResponse(format!(
-                "Invalid response size in header: {size}"
-            )));
+            if size < header.len() {
+                return Err(TpmDeviceError::ResponseUnderflow);
+            }
+            return Err(TpmDeviceError::ResponseOverflow);
         }
 
         let mut resp_buf = header.to_vec();
@@ -233,7 +233,7 @@ impl TpmDevice {
 
         match result {
             Ok((response, auth)) => Ok((response, auth)),
-            Err(rc) => Err(TpmDeviceError::Tpm(rc)),
+            Err(rc) => Err(TpmDeviceError::TpmRc(rc)),
         }
     }
 
@@ -364,9 +364,7 @@ impl TpmDevice {
                 capability_data,
             } = resp
                 .GetCapability()
-                .map_err(|_| TpmDeviceError::MismatchedResponse {
-                    command: TpmCc::GetCapability,
-                })?;
+                .map_err(|_| TpmDeviceError::ResponseMismatch(TpmCc::GetCapability))?;
 
             let next_prop = if more_data.into() {
                 match &capability_data.data {
