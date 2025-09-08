@@ -2,7 +2,8 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::error::ParseError;
+use crate::error::ProtocolError;
+use anyhow::{Context, Result};
 use tpm2_protocol::{
     data::TpmRc, TpmBuild, TpmErrorKind, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
@@ -12,9 +13,9 @@ use tpm2_protocol::{
 /// # Errors
 ///
 /// Returns a `ParseError` if the string is not a valid hex integer.
-pub fn parse_hex_u32(s: &str) -> Result<u32, ParseError> {
+pub fn parse_hex_u32(s: &str) -> Result<u32> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    u32::from_str_radix(s, 16).map_err(ParseError::from)
+    u32::from_str_radix(s, 16).context("Failed to parse hex u32")
 }
 
 /// Parses a PCR index string (decimal or hex with "0x" prefix) into a u32.
@@ -22,11 +23,12 @@ pub fn parse_hex_u32(s: &str) -> Result<u32, ParseError> {
 /// # Errors
 ///
 /// Returns a `ParseError` if the string is not a valid integer.
-pub fn parse_pcr_index(s: &str) -> Result<u32, ParseError> {
+pub fn parse_pcr_index(s: &str) -> Result<u32> {
     if let Some(hex_val) = s.strip_prefix("0x") {
-        u32::from_str_radix(hex_val, 16).map_err(ParseError::from)
+        u32::from_str_radix(hex_val, 16).context("Failed to parse hex pcr index")
     } else {
-        s.parse::<u32>().map_err(ParseError::from)
+        s.parse::<u32>()
+            .context("Failed to parse decimal pcr index")
     }
 }
 
@@ -35,7 +37,7 @@ pub fn parse_pcr_index(s: &str) -> Result<u32, ParseError> {
 /// # Errors
 ///
 /// Returns a `ParseError` if the string is not a valid hex integer.
-pub fn parse_persistent_handle(s: &str) -> Result<TpmPersistent, ParseError> {
+pub fn parse_persistent_handle(s: &str) -> Result<TpmPersistent> {
     parse_hex_u32(s).map(TpmPersistent)
 }
 
@@ -45,9 +47,9 @@ pub fn parse_persistent_handle(s: &str) -> Result<TpmPersistent, ParseError> {
 ///
 /// Returns a `ParseError` if the string is not a valid hex integer
 /// or the value is not a valid `TpmRc`.
-pub fn parse_tpm_rc(s: &str) -> Result<TpmRc, ParseError> {
+pub fn parse_tpm_rc(s: &str) -> Result<TpmRc> {
     let raw_rc: u32 = parse_hex_u32(s)?;
-    Ok(TpmRc::try_from(raw_rc)?)
+    Ok(TpmRc::try_from(raw_rc).map_err(ProtocolError)?)
 }
 
 /// A helper to build a `TpmBuild` type into a `Vec<u8>`.

@@ -2,12 +2,12 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
+use anyhow::{bail, Result};
 use cli::{
     cli::{Commands, LogFormat},
     command::{CreatePrimary, List, Load, PcrEvent, Policy, Seal, StartSession},
     context::Context,
     device::TpmDevice,
-    error::{CliError, ParseError},
     mocktpm,
     policy::session_from_uri,
     policy::Expression,
@@ -261,7 +261,7 @@ fn test_subcommand_policy_default_is_pcr_read(test_context: TestFixture) {
 }
 
 #[rstest]
-fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError> {
+fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<()> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
@@ -317,7 +317,7 @@ fn test_subcommand_seal_unseal(test_context: TestFixture) -> Result<(), CliError
 }
 
 #[rstest]
-fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), CliError> {
+fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<()> {
     let create_cmd = Commands::CreatePrimary(CreatePrimary {
         algorithm: "keyedhash:sha256".parse().unwrap(),
         ..Default::default()
@@ -363,13 +363,13 @@ fn test_subcommand_seal_unseal_policy(test_context: TestFixture) -> Result<(), C
         .trim()
         .parse()
         .unwrap();
-    let session = if let Expression::Session { handle, .. } = session_uri.ast() {
-        Ok(TpmSession(*handle))
+
+    let session_handle = if let Expression::Session { handle, .. } = session_uri.ast() {
+        *handle
     } else {
-        Err(CliError::Parse(ParseError::Custom(
-            "Failed to parse session URI".to_string(),
-        )))
-    }?;
+        bail!("Failed to parse session URI");
+    };
+    let session = TpmSession(session_handle);
 
     let policy_pcr_cmd = TpmPolicyPcrCommand {
         policy_session: session.0.into(),

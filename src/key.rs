@@ -2,11 +2,8 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::{
-    crypto::PrivateKey,
-    error::{CliError, ParseError},
-    policy::alg_from_str,
-};
+use crate::{crypto::PrivateKey, policy::alg_from_str};
+use anyhow::{bail, Context, Result};
 use std::{fmt, str::FromStr};
 
 use p256::SecretKey;
@@ -242,7 +239,7 @@ impl TpmKey {
     /// # Errors
     ///
     /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
-    pub fn to_pem(&self) -> Result<String, CliError> {
+    pub fn to_pem(&self) -> Result<String> {
         let der = self.to_der()?;
         Ok(pem::encode(&pem::Pem::new("TSS2 PRIVATE KEY", der)))
     }
@@ -252,9 +249,8 @@ impl TpmKey {
     /// # Errors
     ///
     /// Returns `CliError` if the key's OID or other fields cannot be encoded to DER.
-    pub fn to_der(&self) -> Result<Vec<u8>, CliError> {
-        Encode::to_der(self)
-            .map_err(|e| ParseError::Custom(format!("DER encode error: {e}")).into())
+    pub fn to_der(&self) -> Result<Vec<u8>> {
+        Encode::to_der(self).with_context(|| "DER encode error")
     }
 
     /// Parse TPM key from PEM bytes.
@@ -262,10 +258,10 @@ impl TpmKey {
     /// # Errors
     ///
     /// Returns `CliError` if the PEM bytes cannot be parsed.
-    pub fn from_pem(pem_bytes: &[u8]) -> Result<Self, CliError> {
-        let pem = pem::parse(pem_bytes).map_err(ParseError::from)?;
+    pub fn from_pem(pem_bytes: &[u8]) -> Result<Self> {
+        let pem = pem::parse(pem_bytes)?;
         if pem.tag() != "TSS2 PRIVATE KEY" {
-            return Err(ParseError::Custom("invalid PEM tag".to_string()).into());
+            bail!("invalid PEM tag");
         }
         Self::from_der(pem.contents())
     }
@@ -275,8 +271,8 @@ impl TpmKey {
     /// # Errors
     ///
     /// Returns `CliError` if the DER bytes cannot be parsed into a valid `TpmKeyAsn1` data.
-    pub fn from_der(der_bytes: &[u8]) -> Result<Self, CliError> {
-        Ok(Decode::from_der(der_bytes).map_err(ParseError::from)?)
+    pub fn from_der(der_bytes: &[u8]) -> Result<Self> {
+        Ok(Decode::from_der(der_bytes)?)
     }
 }
 
@@ -285,14 +281,10 @@ impl TpmKey {
 /// # Errors
 ///
 /// Returns `CliError` on parsing failure.
-pub fn private_key_from_bytes(bytes: &[u8]) -> Result<PrivateKey, CliError> {
+pub fn private_key_from_bytes(bytes: &[u8]) -> Result<PrivateKey> {
     private_key_from_der_bytes(bytes)
         .or_else(|_| private_key_from_pem_bytes(bytes))
-        .map_err(|_| {
-            CliError::Parse(ParseError::Custom(
-                "failed to parse key: not a valid PKCS#8 DER or PEM encoded key".to_string(),
-            ))
-        })
+        .with_context(|| "failed to parse key: not a valid PKCS#8 DER or PEM encoded key")
 }
 
 /// Load and parse a DER-encoded PKCS#8 private key from a byte slice.
@@ -300,22 +292,18 @@ pub fn private_key_from_bytes(bytes: &[u8]) -> Result<PrivateKey, CliError> {
 /// # Errors
 ///
 /// Returns `CliError` on parsing failure.
-pub fn private_key_from_der_bytes(der_bytes: &[u8]) -> Result<PrivateKey, CliError> {
-    let private_key_info = PrivateKeyInfo::from_der(der_bytes).map_err(ParseError::from)?;
+pub fn private_key_from_der_bytes(der_bytes: &[u8]) -> Result<PrivateKey> {
+    let private_key_info = PrivateKeyInfo::from_der(der_bytes)?;
     let oid = private_key_info.algorithm.oid;
 
     let key = match oid {
-        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => PrivateKey::Rsa(
-            Box::new(RsaPrivateKey::from_pkcs8_der(der_bytes).map_err(ParseError::from)?),
-        ),
+        oid if oid == ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1") => {
+            PrivateKey::Rsa(Box::new(RsaPrivateKey::from_pkcs8_der(der_bytes)?))
+        }
         oid if oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1") => {
-            PrivateKey::Ecc(SecretKey::from_pkcs8_der(der_bytes).map_err(ParseError::from)?)
+            PrivateKey::Ecc(SecretKey::from_pkcs8_der(der_bytes)?)
         }
-        _ => {
-            return Err(
-                ParseError::Custom("unsupported key algorithm in DER data".to_string()).into(),
-            )
-        }
+        _ => bail!("unsupported key algorithm in DER data"),
     };
 
     Ok(key)
@@ -326,12 +314,12 @@ pub fn private_key_from_der_bytes(der_bytes: &[u8]) -> Result<PrivateKey, CliErr
 /// # Errors
 ///
 /// Returns `CliError` on parsing failure.
-pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey, CliError> {
-    let pem_str = std::str::from_utf8(pem_bytes).map_err(ParseError::from)?;
-    let pem_block = pem::parse(pem_str).map_err(ParseError::from)?;
+pub fn private_key_from_pem_bytes(pem_bytes: &[u8]) -> Result<PrivateKey> {
+    let pem_str = std::str::from_utf8(pem_bytes)?;
+    let pem_block = pem::parse(pem_str)?;
 
     if pem_block.tag() != "PRIVATE KEY" {
-        return Err(ParseError::Custom(format!("invalid PEM tag: {}", pem_block.tag())).into());
+        bail!("invalid PEM tag: {}", pem_block.tag());
     }
     private_key_from_der_bytes(pem_block.contents())
 }

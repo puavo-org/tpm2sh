@@ -6,6 +6,7 @@
 #![deny(clippy::pedantic)]
 
 use crate::cli::Cli;
+use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod cli;
@@ -45,7 +46,7 @@ pub trait Command {
         &self,
         device: Option<std::sync::Arc<std::sync::Mutex<crate::device::TpmDevice>>>,
         context: &mut crate::context::Context,
-    ) -> Result<(), crate::error::CliError>;
+    ) -> Result<()>;
 }
 
 /// Parses command-line arguments and executes the corresponding command.
@@ -53,7 +54,7 @@ pub trait Command {
 /// # Errors
 ///
 /// Returns a `crate::error::CliError` if opening the device, or executing the command fails.
-pub fn execute_cli() -> Result<(), crate::error::CliError> {
+pub fn execute_cli() -> Result<()> {
     let cli: Cli = argh::from_env();
 
     let command = &cli.command;
@@ -64,7 +65,7 @@ pub fn execute_cli() -> Result<(), crate::error::CliError> {
             .read(true)
             .write(true)
             .open(&cli.device)
-            .map_err(|e| crate::error::CliError::File(cli.device.to_string(), e))?;
+            .with_context(|| format!("Failed to open '{}'", &cli.device))?;
         let device = crate::device::TpmDevice::new(file, cli.log_format);
         Some(std::sync::Arc::new(std::sync::Mutex::new(device)))
     };

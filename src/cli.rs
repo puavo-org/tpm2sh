@@ -9,9 +9,9 @@ use crate::{
     },
     context::Context,
     device::TpmDevice,
-    error::CliError,
     Command,
 };
+use anyhow::Result;
 use argh::FromArgs;
 use std::{
     str::FromStr,
@@ -26,7 +26,7 @@ pub trait LocalCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, context: &mut Context) -> Result<(), CliError>;
+    fn run(&self, context: &mut Context) -> Result<()>;
 }
 
 /// Subcommand requiring TPM device access.
@@ -36,7 +36,7 @@ pub trait DeviceCommand {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError>;
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()>;
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -93,11 +93,7 @@ impl Command for Commands {
         matches!(self, Self::Convert(_) | Self::PrintError(_))
     }
 
-    fn run(
-        &self,
-        device: Option<Arc<Mutex<TpmDevice>>>,
-        context: &mut Context,
-    ) -> Result<(), CliError> {
+    fn run(&self, device: Option<Arc<Mutex<TpmDevice>>>, context: &mut Context) -> Result<()> {
         if self.is_local() {
             return match self {
                 Self::Convert(args) => args.run(context),
@@ -152,24 +148,6 @@ impl From<Hierarchy> for TpmRh {
             Hierarchy::Owner => TpmRh::Owner,
             Hierarchy::Platform => TpmRh::Platform,
             Hierarchy::Endorsement => TpmRh::Endorsement,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum KeyFormat {
-    #[default]
-    Pem,
-    Der,
-}
-
-impl FromStr for KeyFormat {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "pem" => Ok(Self::Pem),
-            "der" => Ok(Self::Der),
-            _ => Err("invalid key format: must be 'pem' or 'der'".to_string()),
         }
     }
 }

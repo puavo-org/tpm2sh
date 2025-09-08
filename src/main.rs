@@ -3,7 +3,6 @@
 // Copyright (c) 2025 Opinsys Oy
 
 use cli::execute_cli;
-use log::error;
 use std::{io::Write, process, sync::atomic::Ordering};
 
 /// CTRL-C exits with 130 as exit codes larger than 128 commonly refer to an
@@ -26,7 +25,7 @@ fn main() {
     }
 
     if let Err(err) = execute_cli() {
-        error!("{err}");
+        eprintln!("{:#}", err);
         process::exit(1);
     }
 }

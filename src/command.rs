@@ -10,7 +10,7 @@ use crate::{
         PrivateKey, ID_SEALED_DATA, KDF_LABEL_INTEGRITY, KDF_LABEL_STORAGE,
     },
     device::{TpmDevice, TpmDeviceError},
-    error::{CliError, ParseError},
+    error::{ProtocolError, ReturnCode},
     key::{private_key_from_der_bytes, Alg, AlgInfo, Tpm2shAlgId, TpmKey},
     policy::{
         fill_pcr_digests, flush_session, get_policy_digest, parse as policy_parse, pcr_get_count,
@@ -21,12 +21,14 @@ use crate::{
 };
 
 use aes::Aes128;
+use anyhow::{bail, Context as AnyhowContext, Result};
 use argh::FromArgs;
 use cfb_mode::Encryptor;
 use cipher::{AsyncStreamCipher, KeyIvInit};
 use pkcs8::der::asn1::OctetString;
 use rand::{thread_rng, RngCore};
-use thiserror::Error;
+use std::error::Error;
+use std::fmt;
 use tpm2_protocol::{
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bEvent, Tpm2bName, Tpm2bNonce,
@@ -41,39 +43,33 @@ use tpm2_protocol::{
         TpmImportCommand, TpmLoadCommand, TpmPcrEventCommand, TpmReadPublicCommand,
         TpmStartAuthSessionCommand, TpmUnsealCommand,
     },
-    tpm_hash_size, TpmBuild, TpmErrorKind, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
 };
 
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum CommandError {
-    #[error("lock poisoned")]
     LockPoisoned,
-
-    #[error("invalid parent key")]
     InvalidParentKey,
-
-    #[error("invalid algorithm: {0}")]
     InvalidAlgorithm(Tpm2shAlgId),
-
-    #[error("invalid key format")]
     InvalidKeyFormat,
-
-    #[error("invalid PCR selection")]
     InvalidPcrSelection,
-
-    #[error("lock poisoned")]
     NotProvided,
-
-    #[error("same conversion format")]
     SameConversionFormat,
-
-    #[error("TPM: {0}")]
-    Tpm(TpmErrorKind),
 }
 
-impl From<TpmErrorKind> for CommandError {
-    fn from(err: TpmErrorKind) -> Self {
-        Self::Tpm(err)
+impl Error for CommandError {}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LockPoisoned => write!(f, "lock poisoned"),
+            Self::InvalidParentKey => write!(f, "invalid parent key"),
+            Self::InvalidAlgorithm(alg) => write!(f, "invalid algorithm: {alg}"),
+            Self::InvalidKeyFormat => write!(f, "invalid key format"),
+            Self::InvalidPcrSelection => write!(f, "invalid PCR selection"),
+            Self::NotProvided => write!(f, "TPM device not provided for device command"),
+            Self::SameConversionFormat => write!(f, "same conversion format"),
+        }
     }
 }
 
@@ -97,7 +93,7 @@ impl LocalCommand for Convert {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, _context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, _context: &mut Context) -> Result<()> {
         let input_ext = self
             .input
             .extension()
@@ -111,11 +107,11 @@ impl LocalCommand for Convert {
             .unwrap_or_default();
 
         if !input_ext.is_empty() && input_ext == output_ext {
-            return Err(CommandError::SameConversionFormat.into());
+            bail!(CommandError::SameConversionFormat);
         }
 
         let input_bytes = std::fs::read(&self.input)
-            .map_err(|e| CliError::File(self.input.display().to_string(), e))?;
+            .with_context(|| format!("Failed to read '{}'", self.input.display()))?;
 
         let tpm_key = TpmKey::from_pem(&input_bytes)
             .or_else(|_| TpmKey::from_der(&input_bytes))
@@ -124,11 +120,11 @@ impl LocalCommand for Convert {
         let output_bytes = match output_ext {
             "pem" => tpm_key.to_pem()?.into_bytes(),
             "der" => tpm_key.to_der()?,
-            _ => return Err(CommandError::InvalidKeyFormat.into()),
+            _ => bail!(CommandError::InvalidKeyFormat),
         };
 
         std::fs::write(&self.output, output_bytes)
-            .map_err(|e| CliError::File(self.output.display().to_string(), e))?;
+            .with_context(|| format!("Failed to write to '{}'", self.output.display()))?;
 
         Ok(())
     }
@@ -226,7 +222,7 @@ impl DeviceCommand for CreatePrimary {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let primary_handle: TpmRh = self.hierarchy.into();
         let handles = [primary_handle as u32];
         let public_template = build_public_template(&self.algorithm);
@@ -284,7 +280,7 @@ impl DeviceCommand for Delete {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let handle = context.delete(device, &self.handle, self.session.as_ref())?;
         writeln!(context.writer, "tpm://{handle:#010x}")?;
         Ok(())
@@ -325,7 +321,7 @@ impl DeviceCommand for List {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         match self.list_type {
             ListType::Algorithm => {
                 let mut algorithms = device.get_all_algorithms()?;
@@ -395,18 +391,18 @@ fn create_import_blob(
     object_public: &TpmtPublic,
     private_bytes: &[u8],
     parent_name: &[u8],
-) -> Result<(Tpm2bPrivate, Tpm2bEncryptedSecret, Tpm2bData), CliError> {
+) -> Result<(Tpm2bPrivate, Tpm2bEncryptedSecret, Tpm2bData)> {
     let mut seed = [0u8; 32];
     thread_rng().fill_bytes(&mut seed);
     let parent_name_alg = parent_public.name_alg;
 
     let (in_sym_seed, encryption_key) = match parent_public.object_type {
-        TpmAlgId::Rsa => protect_seed_with_rsa(parent_public, &seed)?,
-        TpmAlgId::Ecc => protect_seed_with_ecc(parent_public, &seed)?,
-        _ => return Err(CommandError::InvalidParentKey.into()),
+        TpmAlgId::Rsa => protect_seed_with_rsa(parent_public, &seed).map_err(ReturnCode)?,
+        TpmAlgId::Ecc => protect_seed_with_ecc(parent_public, &seed).map_err(ReturnCode)?,
+        _ => bail!(CommandError::InvalidParentKey),
     };
 
-    let object_name = crypto_make_name(object_public).map_err(CliError::from)?;
+    let object_name = crypto_make_name(object_public).map_err(ReturnCode)?;
 
     let sym_key = crypto_kdfa(
         parent_name_alg,
@@ -416,7 +412,7 @@ fn create_import_blob(
         parent_name,
         128,
     )
-    .map_err(CliError::from)?;
+    .map_err(ReturnCode)?;
 
     let integrity_key_bits = u16::try_from(
         tpm_hash_size(&parent_name_alg)
@@ -433,14 +429,14 @@ fn create_import_blob(
         &[],
         integrity_key_bits,
     )
-    .map_err(CliError::from)?;
+    .map_err(ReturnCode)?;
 
     let sensitive = tpm2_protocol::data::TpmtSensitive::from_private_bytes(
         object_public.object_type,
         private_bytes,
     )
-    .map_err(CommandError::from)?;
-    let sensitive_data_vec = build_to_vec(&sensitive)?;
+    .map_err(ProtocolError)?;
+    let sensitive_data_vec = build_to_vec(&sensitive).map_err(ProtocolError)?;
 
     let mut enc_data = sensitive_data_vec;
     let iv = [0u8; 16];
@@ -448,25 +444,25 @@ fn create_import_blob(
     let cipher = Encryptor::<Aes128>::new(sym_key.as_slice().into(), &iv.into());
     cipher.encrypt(&mut enc_data);
 
-    let final_mac = crypto_hmac(parent_name_alg, &hmac_key, &[&enc_data, parent_name])
-        .map_err(CliError::from)?;
+    let final_mac =
+        crypto_hmac(parent_name_alg, &hmac_key, &[&enc_data, parent_name]).map_err(ReturnCode)?;
 
     let duplicate_blob = {
         let mut duplicate_blob_buf = [0u8; TPM_MAX_COMMAND_SIZE];
         let len = {
             let mut writer = TpmWriter::new(&mut duplicate_blob_buf);
             tpm2_protocol::data::Tpm2bDigest::try_from(final_mac.as_slice())
-                .map_err(CommandError::from)?
+                .map_err(ProtocolError)?
                 .build(&mut writer)
-                .map_err(CommandError::from)?;
-            writer.write_bytes(&enc_data).map_err(CommandError::from)?;
+                .map_err(ProtocolError)?;
+            writer.write_bytes(&enc_data).map_err(ProtocolError)?;
             writer.len()
         };
         duplicate_blob_buf[..len].to_vec()
     };
 
     Ok((
-        Tpm2bPrivate::try_from(duplicate_blob.as_slice()).map_err(CommandError::from)?,
+        Tpm2bPrivate::try_from(duplicate_blob.as_slice()).map_err(ProtocolError)?,
         in_sym_seed,
         encryption_key,
     ))
@@ -509,7 +505,7 @@ impl Load {
         parent_handle: TpmTransient,
         in_public: Tpm2bPublic,
         in_private: Tpm2bPrivate,
-    ) -> Result<(), CliError> {
+    ) -> Result<()> {
         let load_cmd = TpmLoadCommand {
             parent_handle: parent_handle.0.into(),
             in_private,
@@ -547,9 +543,9 @@ impl Load {
                     writeln!(context.writer, "data://hex,{}", hex::encode(unseal_resp))?;
                 }
             } else {
-                return Err(
-                    CommandError::InvalidAlgorithm(Tpm2shAlgId(public_area.object_type)).into(),
-                );
+                bail!(CommandError::InvalidAlgorithm(Tpm2shAlgId(
+                    public_area.object_type
+                )));
             }
         } else {
             context.finalize_object_output(
@@ -570,13 +566,11 @@ impl Load {
         context: &mut Context,
         parent_handle: TpmTransient,
         private_key: &PrivateKey,
-    ) -> Result<(), CliError> {
+    ) -> Result<()> {
         let (parent_public, parent_name) = read_public(device, parent_handle)?;
         let parent_name_alg = parent_public.name_alg;
 
-        let public = private_key
-            .to_public(parent_name_alg)
-            .map_err(CliError::from)?;
+        let public = private_key.to_public(parent_name_alg).map_err(ReturnCode)?;
         let sensitive_blob = private_key.sensitive_blob();
 
         let in_public = Tpm2bPublic {
@@ -624,7 +618,7 @@ impl DeviceCommand for Load {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let parent_handle = context.load(device, &self.parent)?;
         let input_bytes = self.input.to_bytes()?;
 
@@ -632,25 +626,22 @@ impl DeviceCommand for Load {
             if pem.tag() == "TSS2 PRIVATE KEY" {
                 let tpm_key = TpmKey::from_der(pem.contents())?;
                 let (in_public, _) =
-                    Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ParseError::from)?;
+                    Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ProtocolError)?;
                 let (in_private, _) =
-                    Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ParseError::from)?;
+                    Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ProtocolError)?;
                 return self.run_load(device, context, parent_handle, in_public, in_private);
             } else if pem.tag() == "PRIVATE KEY" {
                 let private_key = private_key_from_der_bytes(pem.contents())?;
                 return self.run_import(device, context, parent_handle, &private_key);
             }
-            return Err(CliError::Parse(ParseError::Custom(format!(
-                "unsupported PEM tag '{}', expected 'TSS2 PRIVATE KEY' or 'PRIVATE KEY'",
-                pem.tag()
-            ))));
+            bail!("unknown PEM tag '{}'", pem.tag());
         }
 
         if let Ok(tpm_key) = TpmKey::from_der(&input_bytes) {
             let (in_public, _) =
-                Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ParseError::from)?;
+                Tpm2bPublic::parse(tpm_key.pub_key.as_bytes()).map_err(ProtocolError)?;
             let (in_private, _) =
-                Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ParseError::from)?;
+                Tpm2bPrivate::parse(tpm_key.priv_key.as_bytes()).map_err(ProtocolError)?;
             return self.run_load(device, context, parent_handle, in_public, in_private);
         }
 
@@ -658,9 +649,7 @@ impl DeviceCommand for Load {
             return self.run_import(device, context, parent_handle, &private_key);
         }
 
-        Err(CliError::Parse(ParseError::Custom(
-            "failed to parse input key. Expected a PEM-encoded 'TSS2 PRIVATE KEY' or 'PRIVATE KEY', or a corresponding DER blob.".to_string(),
-        )))
+        bail!("key parsing failed");
     }
 }
 
@@ -687,12 +676,12 @@ impl DeviceCommand for PcrEvent {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<()> {
         let pcr_count = pcr_get_count(device)?;
         let selection = pcr_selection_to_list(&self.pcr_selection, pcr_count)?;
 
         if selection.len() != 1 {
-            return Err(CommandError::InvalidPcrSelection.into());
+            bail!(CommandError::InvalidPcrSelection);
         }
         let pcr_selection = &selection[0];
 
@@ -702,7 +691,7 @@ impl DeviceCommand for PcrEvent {
             .map(|b| b.count_ones())
             .sum();
         if set_bits_count != 1 {
-            return Err(CommandError::InvalidPcrSelection.into());
+            bail!(CommandError::InvalidPcrSelection);
         }
 
         let pcr_index = pcr_selection
@@ -722,7 +711,7 @@ impl DeviceCommand for PcrEvent {
 
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
-        let event_data = Tpm2bEvent::try_from(data_bytes.as_slice()).map_err(CommandError::from)?;
+        let event_data = Tpm2bEvent::try_from(data_bytes.as_slice()).map_err(ProtocolError)?;
         let command = TpmPcrEventCommand {
             pcr_handle: handles[0],
             event_data,
@@ -757,7 +746,7 @@ impl DeviceCommand for Policy {
     /// # Errors
     ///
     /// Returns a `CliError` on failure.
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let mut ast = policy_parse(&self.expression, Parsing::AuthorizationPolicy)?;
 
         fill_pcr_digests(&mut ast, device)?;
@@ -792,7 +781,7 @@ pub struct PrintError {
 }
 
 impl LocalCommand for PrintError {
-    fn run(&self, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, context: &mut Context) -> Result<()> {
         writeln!(context.writer, "{}", self.rc)?;
         Ok(())
     }
@@ -813,7 +802,7 @@ impl DeviceCommand for ResetLock {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, _context: &mut Context) -> Result<()> {
         let command = TpmDictionaryAttackLockResetCommand {
             lock_handle: (TpmRh::Lockout as u32).into(),
         };
@@ -861,7 +850,7 @@ impl DeviceCommand for Seal {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let parent_handle = context.load(device, &self.parent)?;
         let data_to_seal = self.data.to_bytes()?;
         let mut object_attributes = TpmaObject::FIXED_TPM | TpmaObject::FIXED_PARENT;
@@ -870,8 +859,8 @@ impl DeviceCommand for Seal {
         }
         let auth_policy = if let Some(policy_hex) = &self.policy {
             object_attributes |= TpmaObject::USER_WITH_AUTH;
-            let digest_bytes = hex::decode(policy_hex).map_err(ParseError::from)?;
-            Tpm2bDigest::try_from(digest_bytes.as_slice()).map_err(CommandError::from)?
+            let digest_bytes = hex::decode(policy_hex)?;
+            Tpm2bDigest::try_from(digest_bytes.as_slice()).map_err(ProtocolError)?
         } else {
             Tpm2bDigest::default()
         };
@@ -892,10 +881,9 @@ impl DeviceCommand for Seal {
             parent_handle: parent_handle.0.into(),
             in_sensitive: Tpm2bSensitiveCreate {
                 inner: TpmsSensitiveCreate {
-                    user_auth: Tpm2bAuth::try_from(sealed_obj_password)
-                        .map_err(CommandError::from)?,
+                    user_auth: Tpm2bAuth::try_from(sealed_obj_password).map_err(ProtocolError)?,
                     data: Tpm2bSensitiveData::try_from(data_to_seal.as_slice())
-                        .map_err(CommandError::from)?,
+                        .map_err(ProtocolError)?,
                 },
             },
             in_public: Tpm2bPublic {
@@ -915,10 +903,14 @@ impl DeviceCommand for Seal {
         let tpm_key = TpmKey {
             oid: ID_SEALED_DATA,
             parent: parent_handle.0,
-            pub_key: OctetString::new(build_to_vec(&create_resp.out_public)?)
-                .map_err(|e| ParseError::Custom(format!("DER encode error: {e}")))?,
-            priv_key: OctetString::new(build_to_vec(&create_resp.out_private)?)
-                .map_err(|e| ParseError::Custom(format!("DER encode error: {e}")))?,
+            pub_key: OctetString::new(
+                build_to_vec(&create_resp.out_public).map_err(ProtocolError)?,
+            )
+            .with_context(|| "DER encode error")?,
+            priv_key: OctetString::new(
+                build_to_vec(&create_resp.out_private).map_err(ProtocolError)?,
+            )
+            .with_context(|| "DER encode error")?,
         };
 
         let pem_output = tpm_key.to_pem()?;
@@ -941,7 +933,7 @@ impl DeviceCommand for StartSession {
     /// # Errors
     ///
     /// Returns a `CliError` if the execution fails
-    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<(), CliError> {
+    fn run(&self, device: &mut TpmDevice, context: &mut Context) -> Result<()> {
         let auth_hash = TpmAlgId::Sha256;
         let digest_len = tpm_hash_size(&auth_hash)
             .ok_or(CommandError::InvalidAlgorithm(Tpm2shAlgId(auth_hash)))?;
@@ -950,8 +942,7 @@ impl DeviceCommand for StartSession {
         let cmd = TpmStartAuthSessionCommand {
             tpm_key: (TpmRh::Null as u32).into(),
             bind: (TpmRh::Null as u32).into(),
-            nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice())
-                .map_err(CommandError::from)?,
+            nonce_caller: Tpm2bNonce::try_from(nonce_bytes.as_slice()).map_err(ProtocolError)?,
             encrypted_salt: Tpm2bEncryptedSecret::default(),
             session_type: self.session_type.into(),
             symmetric: TpmtSymDefObject {
