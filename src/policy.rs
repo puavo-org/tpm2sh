@@ -945,7 +945,7 @@ pub fn session_from_uri<C: TpmHeader>(
             Ok(vec![create_auth(
                 &session,
                 &nonce_caller,
-                C::COMMAND,
+                C::CC,
                 handles,
                 &params,
             )?])

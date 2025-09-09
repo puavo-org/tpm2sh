@@ -506,9 +506,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.11.0"
+version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
+checksum = "206a8042aec68fa4a62e8d3f7aa4ceb508177d9324faf261e1959e495b7a1921"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -1185,9 +1185,9 @@ dependencies = [
 
 [[package]]
 name = "tpm2-protocol"
-version = "0.10.35"
+version = "0.10.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0275e1788f7c3dd07727390aaa7a34609eb0582e8c502c4c019d67ff73e9b8"
+checksum = "6951a8d07d2c84da31ea76bf62dd7f5420f93743775931dc09e7f72a269b168a"
 
 [[package]]
 name = "tpm2sh"

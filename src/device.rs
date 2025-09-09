@@ -35,7 +35,7 @@ pub const TPM_CAP_PROPERTY_MAX: u32 = 128;
 
 /// A type-erased object safe TPM command object
 pub trait TpmCommandObject: TpmPrint {
-    fn tpm_cc(&self) -> TpmCc;
+    fn cc(&self) -> TpmCc;
 
     /// Build the command.
     ///
@@ -55,8 +55,8 @@ impl<T> TpmCommandObject for T
 where
     T: TpmHeader + TpmCommandBuild + TpmPrint,
 {
-    fn tpm_cc(&self) -> TpmCc {
-        TpmHeader::tpm_cc(self)
+    fn cc(&self) -> TpmCc {
+        TpmHeader::cc(self)
     }
 
     fn build(
@@ -157,7 +157,7 @@ impl TpmDevice {
         command: &dyn TpmCommandObject,
         sessions: &[TpmsAuthCommand],
     ) -> Result<(TpmResponseBody, TpmAuthResponses), TpmDeviceError> {
-        let cc = command.tpm_cc();
+        let cc = command.cc();
         if let LogFormat::Pretty = self.log_format {
             trace!(target: "cli::device", "{cc}");
             command.print("", 1);

@@ -76,16 +76,10 @@ pub trait TpmErrorKindExt {
 impl TpmErrorKindExt for TpmErrorKind {
     fn to_tpm_rc(self) -> TpmRc {
         let base = match self {
-            TpmErrorKind::AuthMissing => TpmRcBase::AuthMissing,
-            TpmErrorKind::InvalidMagic { .. } | TpmErrorKind::InvalidTag { .. } => {
-                TpmRcBase::BadTag
-            }
-            TpmErrorKind::BuildCapacity
-            | TpmErrorKind::ParseCapacity
+            TpmErrorKind::Capacity(..)
             | TpmErrorKind::InvalidValue
             | TpmErrorKind::NotDiscriminant(..) => TpmRcBase::Value,
-            TpmErrorKind::BuildOverflow
-            | TpmErrorKind::ParseUnderflow
+            TpmErrorKind::Underflow
             | TpmErrorKind::TrailingData => TpmRcBase::Size,
             TpmErrorKind::Unreachable => TpmRcBase::Failure,
         };
