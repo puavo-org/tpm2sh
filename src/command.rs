@@ -564,11 +564,10 @@ impl Load {
             .map_err(CommandError::Tpm)?;
         let sensitive_blob = private_key.sensitive_blob();
 
-        let in_public = Tpm2bPublic {
-            inner: public.clone(),
-        };
         let (duplicate, in_sym_seed, encryption_key) =
             create_import_blob(&parent_public, &public, &sensitive_blob, &parent_name)?;
+
+        let in_public = Tpm2bPublic { inner: public };
         let symmetric_alg = if parent_public.object_type == TpmAlgId::Rsa {
             TpmtSymDef::default()
         } else {
