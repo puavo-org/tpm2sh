@@ -643,18 +643,12 @@ pub struct PcrEvent {
 impl SubCommand for PcrEvent {
     fn run(&self, device: Option<&mut TpmDevice>, _context: &mut Context) -> Result<()> {
         let device = device.ok_or(CommandError::NotProvided)?;
-        let selections =
-            pcr::pcr_selection_vec_from_str(&self.pcr_selection).map_err(anyhow::Error::from)?;
+        let selections = pcr::pcr_selection_vec_from_str(&self.pcr_selection)?;
 
-        let total_indices: usize = selections.iter().map(|s| s.indices.len()).sum();
-        if total_indices != 1 {
-            bail!(CommandError::InvalidPcrSelection);
-        }
-
-        let pcr_index = selections
-            .iter()
-            .find_map(|s| s.indices.first().copied())
-            .ok_or(CommandError::InvalidPcrSelection)?;
+        let pcr_index = match selections.as_slice() {
+            [selection] if selection.indices.len() == 1 => selection.indices[0],
+            _ => bail!(CommandError::InvalidPcrSelection),
+        };
 
         let handles = [pcr_index];
         let data_bytes = self.data.to_bytes()?;
