@@ -36,6 +36,29 @@ pub trait Transport: Send + std::fmt::Debug {
 #[derive(Debug)]
 pub struct FileTransport(pub File);
 
+/// Reads a complete TPM response from any stream that implements `Read`.
+fn receive_from_stream<R: Read>(stream: &mut R) -> Result<Vec<u8>, TpmDeviceError> {
+    let mut header = [0u8; 10];
+    stream.read_exact(&mut header)?;
+
+    let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
+        return Err(TpmDeviceError::ResponseUnderflow);
+    };
+
+    let size = u32::from_be_bytes(size_bytes) as usize;
+    if size < header.len() {
+        return Err(TpmDeviceError::ResponseUnderflow);
+    }
+    if size > TPM_MAX_COMMAND_SIZE {
+        return Err(TpmDeviceError::ResponseOverflow);
+    }
+
+    let mut resp_buf = header.to_vec();
+    resp_buf.resize(size, 0);
+    stream.read_exact(&mut resp_buf[header.len()..])?;
+    Ok(resp_buf)
+}
+
 impl Transport for FileTransport {
     fn send(&mut self, command_bytes: &[u8]) -> Result<(), TpmDeviceError> {
         self.0.write_all(command_bytes)?;
@@ -44,26 +67,7 @@ impl Transport for FileTransport {
     }
 
     fn receive(&mut self) -> Result<Vec<u8>, TpmDeviceError> {
-        let mut header = [0u8; 10];
-        self.0.read_exact(&mut header)?;
-
-        let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            // This is unreachable with a 10-byte read, but good for safety.
-            return Err(TpmDeviceError::ResponseUnderflow);
-        };
-
-        let size = u32::from_be_bytes(size_bytes) as usize;
-        if size < header.len() {
-            return Err(TpmDeviceError::ResponseUnderflow);
-        }
-        if size > TPM_MAX_COMMAND_SIZE {
-            return Err(TpmDeviceError::ResponseOverflow);
-        }
-
-        let mut resp_buf = header.to_vec();
-        resp_buf.resize(size, 0);
-        self.0.read_exact(&mut resp_buf[header.len()..])?;
-        Ok(resp_buf)
+        receive_from_stream(&mut self.0)
     }
 }
 
@@ -187,24 +191,6 @@ impl Transport for PipeTransport {
     }
 
     fn receive(&mut self) -> Result<Vec<u8>, TpmDeviceError> {
-        let mut header = [0u8; 10];
-        self.read_exact(&mut header)?;
-
-        let Ok(size_bytes): Result<[u8; 4], _> = header[2..6].try_into() else {
-            return Err(TpmDeviceError::ResponseUnderflow);
-        };
-
-        let size = u32::from_be_bytes(size_bytes) as usize;
-        if size < header.len() {
-            return Err(TpmDeviceError::ResponseUnderflow);
-        }
-        if size > TPM_MAX_COMMAND_SIZE {
-            return Err(TpmDeviceError::ResponseOverflow);
-        }
-
-        let mut resp_buf = header.to_vec();
-        resp_buf.resize(size, 0);
-        self.read_exact(&mut resp_buf[header.len()..])?;
-        Ok(resp_buf)
+        receive_from_stream(self)
     }
 }
