@@ -31,20 +31,20 @@ use rand::{thread_rng, RngCore};
 use std::error::Error;
 use std::fmt;
 use tpm2_protocol::{
+    constant::{TPM_MAX_COMMAND_SIZE, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     data::{
         Tpm2bAuth, Tpm2bData, Tpm2bDigest, Tpm2bEncryptedSecret, Tpm2bEvent, Tpm2bName, Tpm2bNonce,
         Tpm2bPrivate, Tpm2bPublic, Tpm2bSensitiveCreate, Tpm2bSensitiveData, TpmAlgId, TpmCc,
         TpmRc, TpmRh, TpmaObject, TpmlPcrSelection, TpmsEccParms, TpmsEccPoint, TpmsKeyedhashParms,
         TpmsRsaParms, TpmsSensitiveCreate, TpmtKdfScheme, TpmtPublic, TpmtScheme, TpmtSymDef,
         TpmtSymDefObject, TpmuPublicId, TpmuPublicParms, TpmuSymKeyBits, TpmuSymMode,
-        TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST,
     },
     message::{
         TpmCreateCommand, TpmCreatePrimaryCommand, TpmDictionaryAttackLockResetCommand,
         TpmImportCommand, TpmLoadCommand, TpmPcrEventCommand, TpmReadPublicCommand,
         TpmStartAuthSessionCommand, TpmUnsealCommand,
     },
-    tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    tpm_hash_size, TpmBuild, TpmParse, TpmTransient, TpmWriter,
 };
 
 #[derive(Debug)]

@@ -11,10 +11,8 @@ use crate::{
 use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::fmt;
 use tpm2_protocol::{
-    data::{
-        TpmAlgId, TpmCap, TpmCc, TpmlPcrSelection, TpmsPcrSelection, TpmuCapabilities,
-        TPM_PCR_SELECT_MAX,
-    },
+    constant::TPM_PCR_SELECT_MAX,
+    data::{TpmAlgId, TpmCap, TpmCc, TpmlPcrSelection, TpmsPcrSelection, TpmuCapabilities},
     message::TpmPcrReadCommand,
     TpmBuffer, TpmErrorKind,
 };

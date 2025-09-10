@@ -5,8 +5,9 @@
 use crate::error::ProtocolError;
 use anyhow::{Context, Result};
 use tpm2_protocol::{
+    constant::TPM_MAX_COMMAND_SIZE,
     data::{TpmRc, TpmRcBase},
-    TpmBuild, TpmErrorKind, TpmPersistent, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuild, TpmErrorKind, TpmPersistent, TpmWriter,
 };
 
 /// Parses a hex string (with or without a "0x" prefix) into a u32.
@@ -79,8 +80,7 @@ impl TpmErrorKindExt for TpmErrorKind {
             TpmErrorKind::Capacity(..)
             | TpmErrorKind::InvalidValue
             | TpmErrorKind::NotDiscriminant(..) => TpmRcBase::Value,
-            TpmErrorKind::Underflow
-            | TpmErrorKind::TrailingData => TpmRcBase::Size,
+            TpmErrorKind::Underflow | TpmErrorKind::TrailingData => TpmRcBase::Size,
             TpmErrorKind::Unreachable => TpmRcBase::Failure,
         };
         TpmRc::from(base)

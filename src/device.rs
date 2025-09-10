@@ -19,6 +19,7 @@ use std::{
 
 use log::trace;
 use tpm2_protocol::{
+    constant::TPM_MAX_COMMAND_SIZE,
     data::{
         TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmSt, TpmaCc, TpmsAuthCommand,
         TpmsCapabilityData, TpmsRsaParms, TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
@@ -28,7 +29,7 @@ use tpm2_protocol::{
         TpmFlushContextResponse, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
         TpmResponseBody, TpmTestParmsCommand,
     },
-    TpmErrorKind, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmErrorKind, TpmWriter,
 };
 
 pub const TPM_CAP_PROPERTY_MAX: u32 = 128;

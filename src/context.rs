@@ -10,10 +10,11 @@ use crate::{
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
 use std::sync::{Arc, Mutex};
 use tpm2_protocol::{
-    data::{TpmCc, TpmRc, TpmRh, TpmsContext, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
+    constant::{MAX_HANDLES, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
+    data::{TpmCc, TpmRc, TpmRh, TpmsContext},
     message::{
         TpmContextLoadCommand, TpmContextSaveCommand, TpmEvictControlCommand,
-        TpmFlushContextCommand, MAX_HANDLES,
+        TpmFlushContextCommand,
     },
     TpmErrorKind, TpmParse, TpmPersistent, TpmTransient,
 };

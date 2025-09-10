@@ -9,7 +9,7 @@ use std::{
     io::{self, Read, Write},
     sync::{Arc, Condvar, Mutex},
 };
-use tpm2_protocol::TPM_MAX_COMMAND_SIZE;
+use tpm2_protocol::constant::TPM_MAX_COMMAND_SIZE;
 
 /// A trait for a transport layer capable of sending and receiving full TPM commands.
 pub trait Transport: Send + std::fmt::Debug {

@@ -30,6 +30,7 @@ use std::{
 };
 use tpm2_protocol::{
     self,
+    constant::{TPM_MAX_COMMAND_SIZE, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST},
     data::{
         Tpm2bCreationData, Tpm2bDigest, Tpm2bName, Tpm2bPrivate, Tpm2bPublic, Tpm2bPublicKeyRsa,
         Tpm2bSensitiveData, TpmAlgId, TpmCap, TpmCc, TpmEccCurve, TpmRc, TpmRcBase, TpmRh,
@@ -37,7 +38,7 @@ use tpm2_protocol::{
         TpmlPcrSelection, TpmlTaggedTpmProperty, TpmsAlgProperty, TpmsAlgorithmDetailEcc,
         TpmsAuthCommand, TpmsCapabilityData, TpmsContext, TpmsPcrSelection, TpmtPublic,
         TpmtPublicParms, TpmtSensitive, TpmtTkCreation, TpmuCapabilities, TpmuPublicId,
-        TpmuPublicParms, TPM_RH_PERSISTENT_FIRST, TPM_RH_TRANSIENT_FIRST,
+        TpmuPublicParms,
     },
     message::{
         tpm_build_response, tpm_parse_command, TpmAuthResponses, TpmCommandBody,
@@ -53,7 +54,7 @@ use tpm2_protocol::{
         TpmResponseBody, TpmStartAuthSessionCommand, TpmStartAuthSessionResponse,
         TpmTestParmsCommand, TpmTestParmsResponse, TpmUnsealCommand, TpmUnsealResponse,
     },
-    TpmBuffer, TpmErrorKind, TpmParse, TpmSession, TpmTransient, TpmWriter, TPM_MAX_COMMAND_SIZE,
+    TpmBuffer, TpmErrorKind, TpmParse, TpmSession, TpmTransient, TpmWriter,
 };
 
 const TPM_HEADER_SIZE: usize = 10;
