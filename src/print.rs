@@ -226,11 +226,7 @@ impl TpmPrint for TpmuHa {
         let prefix = " ".repeat(indent * INDENT);
         let (variant, bytes): (&str, &[u8]) = match self {
             Self::Null => ("Null", &[]),
-            Self::Sha1(d) => ("Sha1", d),
-            Self::Sha256(d) => ("Sha256", d),
-            Self::Sha384(d) => ("Sha384", d),
-            Self::Sha512(d) => ("Sha512", d),
-            Self::Sm3_256(d) => ("Sm3_256", d),
+            Self::Digest(d) => ("Digest", d),
         };
         trace!(
             target: "cli::device",

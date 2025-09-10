@@ -25,7 +25,7 @@ use tpm2_protocol::{
         TpmsCapabilityData, TpmsRsaParms, TpmtPublicParms, TpmuCapabilities, TpmuPublicParms,
     },
     message::{
-        tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmCommandBuild,
+        tpm_build_command, tpm_parse_response, TpmAuthResponses, TpmBodyBuild,
         TpmFlushContextResponse, TpmGetCapabilityCommand, TpmGetCapabilityResponse, TpmHeader,
         TpmResponseBody, TpmTestParmsCommand,
     },
@@ -54,7 +54,7 @@ pub trait TpmCommandObject: TpmPrint {
 
 impl<T> TpmCommandObject for T
 where
-    T: TpmHeader + TpmCommandBuild + TpmPrint,
+    T: TpmHeader + TpmBodyBuild + TpmPrint,
 {
     fn cc(&self) -> TpmCc {
         TpmHeader::cc(self)

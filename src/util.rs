@@ -81,7 +81,7 @@ impl TpmErrorKindExt for TpmErrorKind {
             | TpmErrorKind::InvalidValue
             | TpmErrorKind::NotDiscriminant(..) => TpmRcBase::Value,
             TpmErrorKind::Underflow | TpmErrorKind::TrailingData => TpmRcBase::Size,
-            TpmErrorKind::Unreachable => TpmRcBase::Failure,
+            TpmErrorKind::Failure => TpmRcBase::Failure,
         };
         TpmRc::from(base)
     }

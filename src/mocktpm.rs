@@ -189,7 +189,7 @@ macro_rules! mocktpm_response {
                             result.map_err(TpmErrorKindExt::to_tpm_rc)
                         }
                     )*
-                    _ => Err(TpmErrorKind::Unreachable.to_tpm_rc()),
+                    _ => Err(TpmErrorKind::Failure.to_tpm_rc()),
                 }
             }
         }
