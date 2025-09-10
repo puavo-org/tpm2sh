@@ -2,8 +2,7 @@
 // Copyright (c) 2025 Opinsys Oy
 // Copyright (c) 2024-2025 Jarkko Sakkinen
 
-use crate::error::ProtocolError;
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use tpm2_protocol::{
     constant::TPM_MAX_COMMAND_SIZE,
     data::{TpmRc, TpmRcBase},
@@ -51,7 +50,7 @@ pub fn parse_persistent_handle(s: &str) -> Result<TpmPersistent> {
 /// or the value is not a valid `TpmRc`.
 pub fn parse_tpm_rc(s: &str) -> Result<TpmRc> {
     let raw_rc: u32 = parse_hex_u32(s)?;
-    Ok(TpmRc::try_from(raw_rc).map_err(ProtocolError)?)
+    TpmRc::try_from(raw_rc).map_err(|e| anyhow!("TPM RC {s}: {e}"))
 }
 
 /// A helper to build a `TpmBuild` type into a `Vec<u8>`.

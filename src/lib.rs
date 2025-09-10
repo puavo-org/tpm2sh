@@ -14,7 +14,6 @@ pub mod command;
 pub mod context;
 pub mod crypto;
 pub mod device;
-pub mod error;
 pub mod key;
 pub mod mocktpm;
 pub mod pcr;
