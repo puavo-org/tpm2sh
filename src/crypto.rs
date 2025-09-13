@@ -402,18 +402,10 @@ pub fn crypto_make_name(public: &TpmtPublic) -> Result<Vec<u8>, TpmRc> {
 }
 
 /// RSA or ECC private key
+#[derive(Clone)]
 pub enum PrivateKey {
     Rsa(Box<RsaPrivateKey>),
     Ecc(SecretKey),
-}
-
-impl Clone for PrivateKey {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Rsa(key) => Self::Rsa(key.clone()),
-            Self::Ecc(key) => Self::Ecc(key.clone()),
-        }
-    }
 }
 
 impl fmt::Debug for PrivateKey {
